@@ -27,8 +27,8 @@ type line_webhook_body = {
   events?: line_webhook_event[]
 }
 
-const processed_line_webhook_keys = new Set<string>()
-const debugged_duplicate_line_webhook_keys = new Set<string>()
+const processed_line_event_keys = new Set<string>()
+const debugged_duplicate_line_event_keys = new Set<string>()
 
 function verify_line_signature(body: string, signature: string | null) {
   const channel_secret = process.env.LINE_MESSAGING_CHANNEL_SECRET
@@ -65,17 +65,16 @@ function is_allowed_line_user(line_user_id?: string) {
   return get_allowed_user_ids().includes(line_user_id)
 }
 
-function get_line_webhook_key(event: line_webhook_event) {
+function get_line_event_key(event: line_webhook_event) {
   if (event.message?.id) {
-    return `message:${event.message.id}`
+    return event.message.id
   }
 
   if (event.replyToken) {
-    return `reply:${event.replyToken}`
+    return event.replyToken
   }
 
   return [
-    'fallback',
     event.timestamp ?? 'no_timestamp',
     event.source?.userId ?? 'no_user',
     event.type ?? 'no_type',
@@ -108,6 +107,32 @@ export async function POST(request: Request) {
 
   for (const event of events) {
     const line_user_id = event.source?.userId
+    const event_key = get_line_event_key(event)
+
+    if (processed_line_event_keys.has(event_key)) {
+      if (
+        control.debug.line_auth &&
+        !debugged_duplicate_line_event_keys.has(event_key)
+      ) {
+        debugged_duplicate_line_event_keys.add(event_key)
+
+        await debug({
+          category: 'line',
+          event: 'line_webhook_duplicate_skipped',
+          data: {
+            event_key,
+            line_user_id,
+            message_id: event.message?.id,
+            reply_token: event.replyToken,
+            timestamp: event.timestamp,
+          },
+        })
+      }
+
+      continue
+    }
+
+    processed_line_event_keys.add(event_key)
 
     if (!is_allowed_line_user(line_user_id)) {
       if (control.debug.line_auth) {
@@ -143,36 +168,6 @@ export async function POST(request: Request) {
 
       continue
     }
-
-    const webhook_key = get_line_webhook_key(event)
-
-    if (processed_line_webhook_keys.has(webhook_key)) {
-      if (
-        control.debug.line_auth &&
-        !debugged_duplicate_line_webhook_keys.has(webhook_key)
-      ) {
-        debugged_duplicate_line_webhook_keys.add(webhook_key)
-
-        await debug({
-          category: 'line',
-          event: 'line_webhook_duplicate_skipped',
-          data: {
-            webhook_key,
-            line_user_id,
-            event_type: event.type,
-            source_type: event.source?.type,
-            message_id: event.message?.id,
-            reply_token_exists: Boolean(event.replyToken),
-            timestamp: event.timestamp,
-            destination: body.destination,
-          },
-        })
-      }
-
-      continue
-    }
-
-    processed_line_webhook_keys.add(webhook_key)
 
     const access = await resolve_auth_access({
       provider: 'line',
