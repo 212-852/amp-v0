@@ -17,6 +17,15 @@ type guest_access_input = {
   locale?: string | null
 }
 
+type session_access_input = {
+  visitor_uuid: string
+  session_uuid: string
+  access_channel: 'web'
+  access_platform: 'ios' | 'android' | 'mac' | 'windows' | 'unknown'
+  locale?: string | null
+  user_agent?: string | null
+}
+
 export type access_result = {
   user_uuid: string
   visitor_uuid: string
@@ -27,6 +36,11 @@ export type access_result = {
 export type guest_access_result = {
   visitor_uuid: string
   is_new_visitor: boolean
+}
+
+export type session_access_result = {
+  session_uuid: string
+  is_new_session: boolean
 }
 
 export async function resolve_guest_access(
@@ -76,6 +90,70 @@ export async function resolve_guest_access(
   return {
     visitor_uuid: created_visitor.data.visitor_uuid,
     is_new_visitor: true,
+  }
+}
+
+export async function resolve_session_access(
+  input: session_access_input,
+): Promise<session_access_result> {
+  const existing_session = await supabase
+    .from('sessions')
+    .select('session_uuid')
+    .eq('session_uuid', input.session_uuid)
+    .maybeSingle()
+
+  if (existing_session.error) {
+    throw existing_session.error
+  }
+
+  const current_time = new Date().toISOString()
+
+  if (existing_session.data?.session_uuid) {
+    const updated_session = await supabase
+      .from('sessions')
+      .update({
+        visitor_uuid: input.visitor_uuid,
+        access_channel: input.access_channel,
+        access_platform: input.access_platform,
+        locale: input.locale ?? null,
+        user_agent: input.user_agent ?? null,
+        last_seen_at: current_time,
+        updated_at: current_time,
+      })
+      .eq('session_uuid', input.session_uuid)
+
+    if (updated_session.error) {
+      throw updated_session.error
+    }
+
+    return {
+      session_uuid: input.session_uuid,
+      is_new_session: false,
+    }
+  }
+
+  const created_session = await supabase
+    .from('sessions')
+    .insert({
+      session_uuid: input.session_uuid,
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: null,
+      access_channel: input.access_channel,
+      access_platform: input.access_platform,
+      locale: input.locale ?? null,
+      user_agent: input.user_agent ?? null,
+      last_seen_at: current_time,
+    })
+    .select('session_uuid')
+    .single()
+
+  if (created_session.error) {
+    throw created_session.error
+  }
+
+  return {
+    session_uuid: created_session.data.session_uuid,
+    is_new_session: true,
   }
 }
 
