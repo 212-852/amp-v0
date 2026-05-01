@@ -15,6 +15,10 @@ type connect_props = {
 export default function ConnectModal(
   props: connect_props,
 ) {
+  function open_line_login() {
+    window.location.href = '/api/auth/line'
+  }
+
   return (
     <div
       className="
@@ -64,6 +68,7 @@ export default function ConnectModal(
         {/* line */}
         <button
           type="button"
+          onClick={open_line_login}
           className="
             flex min-h-[80px] w-full
             items-center justify-between

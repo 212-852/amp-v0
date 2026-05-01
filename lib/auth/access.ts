@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
+import { notify } from '@/lib/notify'
 
 export type auth_provider = 'line' | 'google' | 'email'
 
@@ -254,6 +255,17 @@ export async function resolve_auth_access(
   if (created_identity.error) {
     throw created_identity.error
   }
+
+  await notify({
+    event: 'new_user_created',
+    provider: input.provider,
+    user_uuid,
+    visitor_uuid: created_visitor.data.visitor_uuid,
+    display_name: input.display_name ?? null,
+    locale: input.locale ?? null,
+    is_new_user: true,
+    is_new_visitor: true,
+  })
 
   return {
     user_uuid,

@@ -32,6 +32,7 @@ const content = {
 
 type session_response = {
   requires_line_auth?: boolean
+  line_auth_method?: string | null
 }
 
 export default function UserHeader() {
@@ -51,6 +52,7 @@ export default function UserHeader() {
 
         if (
           session.requires_line_auth &&
+          session.line_auth_method === 'line_login' &&
           !already_redirected
         ) {
           sessionStorage.setItem(

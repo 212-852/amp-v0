@@ -1,5 +1,53 @@
+import { randomUUID } from 'crypto'
+
+import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-export function GET() {
-  return NextResponse.json({ error: 'Not implemented' }, { status: 501 })
+import { control } from '@/lib/config/control'
+import { debug } from '@/lib/debug'
+
+export const line_login_state_cookie_name = 'line_login_state'
+
+export async function GET() {
+  const channel_id = process.env.LINE_LOGIN_CHANNEL_ID
+  const callback_url = process.env.LINE_LOGIN_CALLBACK_URL
+
+  if (!callback_url || !channel_id) {
+    if (control.debug.line_auth) {
+      await debug({
+        category: 'line',
+        event: 'line_login_redirect_failed',
+        data: {
+          has_callback_url: Boolean(callback_url),
+          has_channel_id: Boolean(channel_id),
+        },
+      })
+    }
+
+    return NextResponse.json(
+      { error: 'LINE login is not configured' },
+      { status: 500 },
+    )
+  }
+
+  const state = randomUUID()
+  const cookie_store = await cookies()
+
+  cookie_store.set(line_login_state_cookie_name, state, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 60 * 10,
+  })
+
+  const login_url = new URL('https://access.line.me/oauth2/v2.1/authorize')
+
+  login_url.searchParams.set('response_type', 'code')
+  login_url.searchParams.set('client_id', channel_id)
+  login_url.searchParams.set('redirect_uri', callback_url)
+  login_url.searchParams.set('state', state)
+  login_url.searchParams.set('scope', 'profile')
+
+  return NextResponse.redirect(login_url)
 }
