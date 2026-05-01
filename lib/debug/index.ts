@@ -8,16 +8,7 @@ type debug_payload = {
 }
 
 function get_dev_mentions() {
-  const raw = process.env.DISCORD_DEV_USER_IDS
-
-  if (!raw) {
-    return ''
-  }
-
-  return raw
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean)
+  return get_allowed_users()
     .map((id) => `<@${id}>`)
     .join(' ')
 }
