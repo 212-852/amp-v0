@@ -1,26 +1,148 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* -----------------------------
+   base
+----------------------------- */
+html,
+body {
+  min-height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* -----------------------------
+   global
+----------------------------- */
+body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background: #ffffff;
+  color: #333333;
+  font-family:
+    var(--font-rounded),
+    sans-serif;
+  line-height: 1.65;
+}
+
+/* -----------------------------
+   reset
+----------------------------- */
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+@keyframes overlay_fade_in {
+  0% {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+
+  100% {
+    opacity: 1;
+    backdrop-filter: blur(5px);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.overlay_backdrop_in {
+  animation: overlay_fade_in 240ms ease-out both;
+}
+
+@keyframes center_modal_pop_in {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+    filter: blur(14px);
+  }
+
+  55% {
+    opacity: 1;
+    transform: scale(1.04);
+    filter: blur(2px);
+  }
+
+  72% {
+    transform: scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+.center_modal_pop_in {
+  transform-origin: center center;
+  animation: center_modal_pop_in 560ms cubic-bezier(0.16, 1, 0.3, 1) 120ms both;
+  will-change: transform, opacity, filter;
+}
+
+@keyframes modal_in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+/* -----------------------------
+   safe area (PWA / iPhone)
+----------------------------- */
+.safe-screen {
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* -----------------------------
+   mobile first container
+----------------------------- */
+.mobile-shell {
+  width: 100%;
+  min-height: 100dvh;
+}
+
+/* -----------------------------
+   PC only constraint
+----------------------------- */
+@media (min-width: 1024px) {
+  .mobile-shell {
+    max-width: 480px;
+    margin: 0 auto;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04);
+  }
 }
