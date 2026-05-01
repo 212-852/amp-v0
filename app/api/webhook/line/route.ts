@@ -61,6 +61,14 @@ function is_allowed_line_user(line_user_id?: string) {
   return get_allowed_user_ids().includes(line_user_id)
 }
 
+function get_line_visitor_uuid(line_user_id?: string) {
+  if (!line_user_id) {
+    return undefined
+  }
+
+  return `line:${line_user_id}`
+}
+
 export async function POST(request: Request) {
   const body_text = await request.text()
   const signature = request.headers.get('x-line-signature')
@@ -87,6 +95,7 @@ export async function POST(request: Request) {
 
   for (const event of events) {
     const line_user_id = event.source?.userId
+    const visitor_uuid = get_line_visitor_uuid(line_user_id)
 
     if (!is_allowed_line_user(line_user_id)) {
       if (control.debug.line_auth) {
@@ -94,6 +103,8 @@ export async function POST(request: Request) {
           category: 'line',
           event: 'line_webhook_test_blocked',
           data: {
+            visitor_uuid,
+            is_new_visitor: false,
             line_user_id,
             event_type: event.type,
             source_type: event.source?.type,
@@ -109,6 +120,8 @@ export async function POST(request: Request) {
         category: 'line',
         event: 'line_webhook_passed',
         data: {
+          visitor_uuid,
+          is_new_visitor: false,
           line_user_id,
           event_type: event.type,
           source_type: event.source?.type,
