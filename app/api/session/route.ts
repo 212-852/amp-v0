@@ -1,6 +1,7 @@
 import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
+import { resolve_guest_access } from '@/lib/auth/access'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
 import { resolve_visitor_context } from '@/lib/visitor/context'
@@ -38,16 +39,20 @@ export async function GET() {
   const locale = get_browser_locale(accept_language)
 
   const visitor = await resolve_visitor_context()
+  const guest_access = await resolve_guest_access({
+    visitor_uuid: visitor.visitor_uuid,
+    locale,
+  })
 
   if (control.debug.session_route) {
     await debug({
       category: 'visitor',
-      event: visitor.is_new_visitor
+      event: guest_access.is_new_visitor
         ? 'visitor_created'
         : 'visitor_restored',
       data: {
-        visitor_uuid: visitor.visitor_uuid,
-        is_new_visitor: visitor.is_new_visitor,
+        visitor_uuid: guest_access.visitor_uuid,
+        is_new_visitor: guest_access.is_new_visitor,
         locale,
         accept_language,
         user_agent,
@@ -57,8 +62,8 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
-    visitor_uuid: visitor.visitor_uuid,
-    is_new_visitor: visitor.is_new_visitor,
+    visitor_uuid: guest_access.visitor_uuid,
+    is_new_visitor: guest_access.is_new_visitor,
     locale,
   })
 }

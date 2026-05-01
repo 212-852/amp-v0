@@ -12,11 +12,71 @@ type access_input = {
   locale?: string | null
 }
 
+type guest_access_input = {
+  visitor_uuid: string
+  locale?: string | null
+}
+
 export type access_result = {
   user_uuid: string
   visitor_uuid: string
   is_new_user: boolean
   is_new_visitor: boolean
+}
+
+export type guest_access_result = {
+  visitor_uuid: string
+  is_new_visitor: boolean
+}
+
+export async function resolve_guest_access(
+  input: guest_access_input,
+): Promise<guest_access_result> {
+  const existing_visitor = await supabase
+    .from('visitors')
+    .select('visitor_uuid')
+    .eq('visitor_uuid', input.visitor_uuid)
+    .maybeSingle()
+
+  if (existing_visitor.error) {
+    throw existing_visitor.error
+  }
+
+  if (existing_visitor.data?.visitor_uuid) {
+    const updated_visitor = await supabase
+      .from('visitors')
+      .update({
+        updated_at: new Date().toISOString(),
+      })
+      .eq('visitor_uuid', input.visitor_uuid)
+
+    if (updated_visitor.error) {
+      throw updated_visitor.error
+    }
+
+    return {
+      visitor_uuid: input.visitor_uuid,
+      is_new_visitor: false,
+    }
+  }
+
+  const created_visitor = await supabase
+    .from('visitors')
+    .insert({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: null,
+    })
+    .select('visitor_uuid')
+    .single()
+
+  if (created_visitor.error) {
+    throw created_visitor.error
+  }
+
+  return {
+    visitor_uuid: created_visitor.data.visitor_uuid,
+    is_new_visitor: true,
+  }
 }
 
 export async function resolve_auth_access(
