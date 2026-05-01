@@ -30,6 +30,10 @@ const content = {
   },
 }
 
+type session_response = {
+  requires_line_auth?: boolean
+}
+
 export default function UserHeader() {
   const locale = 'ja'
   const [connect_open, set_connect_open] = useState(false)
@@ -38,7 +42,25 @@ export default function UserHeader() {
     fetch('/api/session', {
       method: 'GET',
       credentials: 'include',
-    }).catch(() => {})
+    })
+      .then((response) => response.json() as Promise<session_response>)
+      .then((session) => {
+        const already_redirected = sessionStorage.getItem(
+          'amp_line_auth_redirected',
+        )
+
+        if (
+          session.requires_line_auth &&
+          !already_redirected
+        ) {
+          sessionStorage.setItem(
+            'amp_line_auth_redirected',
+            'true',
+          )
+          window.location.href = '/api/auth/line'
+        }
+      })
+      .catch(() => {})
   }, [])
 
   return (

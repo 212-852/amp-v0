@@ -66,6 +66,10 @@ export async function GET() {
   const user_agent = header_store.get('user-agent')
   const accept_language = header_store.get('accept-language')
   const locale = get_browser_locale(accept_language)
+  const is_line_webview =
+    user_agent?.toLowerCase().includes('line/') ?? false
+  const requires_line_auth = is_line_webview
+  const line_auth_method = is_line_webview ? 'line_login' : null
 
   const visitor = await resolve_visitor_context()
   const guest_access = await resolve_guest_access({
@@ -95,6 +99,9 @@ export async function GET() {
         locale,
         accept_language,
         user_agent,
+        is_line_webview,
+        requires_line_auth,
+        line_auth_method,
       },
     })
   }
@@ -106,5 +113,8 @@ export async function GET() {
     is_new_visitor: guest_access.is_new_visitor,
     is_new_session: session_access.is_new_session,
     locale,
+    is_line_webview,
+    requires_line_auth,
+    line_auth_method,
   })
 }
