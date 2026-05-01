@@ -118,6 +118,9 @@ export async function POST(request: Request) {
             line_user_id,
             event_type: event.type,
             source_type: event.source?.type,
+            message_id: event.message?.id,
+            reply_token: event.replyToken,
+            timestamp: event.timestamp,
           },
         })
       }
@@ -190,11 +193,14 @@ export async function POST(request: Request) {
           event_type: event.type,
           source_type: event.source?.type,
           message_type: event.message?.type,
+          message_id: event.message?.id,
           message_text:
             event.message?.type === 'text'
               ? event.message.text
               : undefined,
+          reply_token: event.replyToken,
           reply_token_exists: Boolean(event.replyToken),
+          timestamp: event.timestamp,
           destination: body.destination,
         },
       })
