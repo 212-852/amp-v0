@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { debug } from '@/lib/debug'
+
 import type { notify_event } from './rules'
 
 function build_discord_content(event: notify_event) {
@@ -24,7 +26,20 @@ export async function send_discord_notify(event: notify_event) {
   const webhook_url = process.env.DISCORD_NOTIFY_WEBHOOK_URL
   const content = build_discord_content(event)
 
-  if (!webhook_url || !content) {
+  if (!content) {
+    return
+  }
+
+  if (!webhook_url) {
+    await debug({
+      category: 'notify',
+      event: 'discord_notify_skipped',
+      data: {
+        reason: 'missing_webhook_url',
+        notify_event: event.event,
+      },
+    })
+
     return
   }
 
