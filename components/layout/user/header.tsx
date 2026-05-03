@@ -89,11 +89,17 @@ export default function UserHeader() {
   }
 
   useEffect(() => {
+    let cancelled = false
     const unsubscribe_locale = subscribe_locale(set_locale)
     const mounted_timer = window.setTimeout(() => {
       set_mounted(true)
       set_locale(get_locale())
     }, 0)
+    const session_timeout = window.setTimeout(() => {
+      if (!cancelled) {
+        set_session_ready(true)
+      }
+    }, 3000)
 
     fetch('/api/session', {
       method: 'GET',
@@ -101,6 +107,10 @@ export default function UserHeader() {
     })
       .then((response) => response.json() as Promise<session_response>)
       .then((session) => {
+        if (cancelled) {
+          return
+        }
+
         set_session(session)
 
         if (session.locale) {
@@ -123,15 +133,18 @@ export default function UserHeader() {
           window.location.href = '/api/auth/line'
           return
         }
-
-        set_session_ready(true)
       })
-      .catch(() => {
-        set_session_ready(true)
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          set_session_ready(true)
+        }
       })
 
     return () => {
+      cancelled = true
       window.clearTimeout(mounted_timer)
+      window.clearTimeout(session_timeout)
       unsubscribe_locale()
     }
   }, [])
