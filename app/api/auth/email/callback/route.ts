@@ -24,6 +24,22 @@ function redirect_home() {
   return NextResponse.redirect(`${get_app_url() ?? ''}/`)
 }
 
+function format_error(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(error)) as unknown
+  } catch {
+    return String(error)
+  }
+}
+
 async function debug_email_login_failed(
   reason: string,
   data?: Record<string, unknown>,
@@ -119,8 +135,7 @@ export async function GET(request: Request) {
     })
   } catch (error) {
     await debug_email_login_failed('unexpected_error', {
-      error_message:
-        error instanceof Error ? error.message : String(error),
+      error: format_error(error),
     })
 
     return redirect_home()
