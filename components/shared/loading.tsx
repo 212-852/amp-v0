@@ -8,7 +8,7 @@ export default function Loading({
   full_screen = false,
 }: LoadingProps) {
   const root_class_name = full_screen
-    ? 'fixed inset-0 z-[9999] flex items-center justify-center bg-black px-6 text-white'
+    ? 'fixed inset-0 z-[2147483647] flex items-center justify-center bg-black px-6 text-white'
     : 'flex items-center justify-center px-6 py-10 text-current'
 
   return (

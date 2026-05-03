@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Bell, Globe2 } from 'lucide-react'
 import Link from 'next/link'
+import { createPortal } from 'react-dom'
 
 import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
@@ -150,7 +151,13 @@ export default function UserHeader() {
   }, [])
 
   if (!session_ready) {
-    return <Loading full_screen text="LOADING..." />
+    const loading = <Loading full_screen text="LOADING..." />
+
+    if (typeof document === 'undefined') {
+      return loading
+    }
+
+    return createPortal(loading, document.body)
   }
 
   return (
