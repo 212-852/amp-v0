@@ -1,5 +1,6 @@
 'use client'
 
+import Loading from '@/components/shared/loading'
 import { useEffect, useState } from 'react'
 
 type liff_profile = {
@@ -47,16 +48,20 @@ function load_liff_sdk() {
 }
 
 export default function LiffPage() {
+  const [is_loading, set_is_loading] = useState(true)
   const [status, set_status] = useState('loading')
 
   useEffect(() => {
     let cancelled = false
 
     async function run_liff_login() {
+      set_is_loading(true)
+
       const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
 
       if (!liff_id) {
         set_status('missing_liff_id')
+        set_is_loading(false)
         return
       }
 
@@ -89,15 +94,18 @@ export default function LiffPage() {
 
         if (!response.ok) {
           set_status('failed')
+          set_is_loading(false)
           return
         }
 
         if (!cancelled) {
+          set_is_loading(false)
           window.location.href = '/'
         }
       } catch {
         if (!cancelled) {
           set_status('failed')
+          set_is_loading(false)
         }
       }
     }
@@ -108,6 +116,10 @@ export default function LiffPage() {
       cancelled = true
     }
   }, [])
+
+  if (is_loading) {
+    return <Loading full_screen text="LOADING..." />
+  }
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-[#f6e5cf] px-6 text-center text-[#2a1d18]">

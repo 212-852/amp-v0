@@ -19,6 +19,10 @@ export default function ConnectModal(
     window.location.href = '/api/auth/line'
   }
 
+  function open_google_login() {
+    window.location.href = '/api/auth/google'
+  }
+
   return (
     <div
       className="
@@ -108,6 +112,7 @@ export default function ConnectModal(
         {/* google */}
         <button
           type="button"
+          onClick={open_google_login}
           className="
             flex min-h-[80px] w-full
             items-center justify-between
