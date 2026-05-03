@@ -21,6 +21,7 @@ export default function ConnectModal(
   const [email_status, set_email_status] = useState<
     'idle' | 'sending' | 'sent' | 'failed'
   >('idle')
+  const is_email_loading = email_status === 'sending'
 
   function open_line_login() {
     window.location.href = '/api/auth/line'
@@ -31,7 +32,7 @@ export default function ConnectModal(
   }
 
   async function send_email_login() {
-    if (!email || email_status === 'sending') {
+    if (!email || is_email_loading) {
       return
     }
 
@@ -259,7 +260,7 @@ export default function ConnectModal(
 
             <button
               type="submit"
-              disabled={email_status === 'sending'}
+              disabled={is_email_loading}
               className="
                 mt-3
                 flex h-[48px] w-full
@@ -274,20 +275,18 @@ export default function ConnectModal(
                 disabled:opacity-60
               "
             >
-              {email_status === 'sending'
-                ? '送信中'
-                : 'マジックリンクを送信'}
+              {is_email_loading ? '送信中' : 'マジックリンクを送信'}
             </button>
 
             {email_status === 'sent' ? (
               <p className="mt-3 text-[12px] leading-[1.6] text-[#6d5c52]">
-                メールを送信しました。メール内のリンクから連携を完了してください。
+                メールを送信しました
               </p>
             ) : null}
 
             {email_status === 'failed' ? (
               <p className="mt-3 text-[12px] leading-[1.6] text-[#b42318]">
-                送信できませんでした。時間をおいて再度お試しください。
+                送信に失敗しました
               </p>
             ) : null}
           </form>
