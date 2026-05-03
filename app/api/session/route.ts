@@ -41,12 +41,14 @@ function normalize_connected_providers(
   const connected_providers: connected_provider[] = []
 
   providers.forEach((identity) => {
+    const provider = identity.provider?.toLowerCase()
+
     if (
-      identity.provider === 'line' ||
-      identity.provider === 'google' ||
-      identity.provider === 'email'
+      provider === 'line' ||
+      provider === 'google' ||
+      provider === 'email'
     ) {
-      connected_providers.push(identity.provider)
+      connected_providers.push(provider)
     }
   })
 
@@ -142,8 +144,6 @@ export async function GET() {
   const locale = get_browser_locale(accept_language)
   const is_line_webview =
     user_agent?.toLowerCase().includes('line/') ?? false
-  const requires_line_auth = is_line_webview
-  const line_auth_method = is_line_webview ? 'line_login' : null
 
   const visitor = await resolve_visitor_context()
   const guest_access = await resolve_guest_access({
@@ -164,6 +164,8 @@ export async function GET() {
   const tier = session_state.tier
   const line_connected = session_state.line_connected
   const connected_providers = session_state.connected_providers
+  const requires_line_auth = is_line_webview && !line_connected
+  const line_auth_method = requires_line_auth ? 'line_login' : null
 
   if (control.debug.session_route) {
     await debug({
