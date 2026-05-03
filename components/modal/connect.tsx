@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import {
+  ArrowLeft,
   ChevronDown,
   Link2,
   Mail,
@@ -16,7 +17,7 @@ type connect_props = {
 export default function ConnectModal(
   props: connect_props,
 ) {
-  const [is_email_open, set_is_email_open] = useState(false)
+  const [view, set_view] = useState<'list' | 'email'>('list')
   const [email, set_email] = useState('')
   const [email_status, set_email_status] = useState<
     'idle' | 'sending' | 'sent' | 'failed'
@@ -29,6 +30,15 @@ export default function ConnectModal(
 
   function open_google_login() {
     window.location.href = '/api/auth/google'
+  }
+
+  function open_email_view() {
+    set_view('email')
+  }
+
+  function back_to_list_view() {
+    set_view('list')
+    set_email_status('idle')
   }
 
   async function send_email_login() {
@@ -66,6 +76,117 @@ export default function ConnectModal(
         shadow-[0_12px_40px_rgba(42,29,24,0.08)]
       "
     >
+      {view === 'email' ? (
+        <div className="animate-[modal_in_220ms_ease-out_both]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <button
+                type="button"
+                onClick={back_to_list_view}
+                aria-label="back"
+                className="
+                  flex h-[38px] w-[38px]
+                  shrink-0
+                  items-center justify-center
+                  rounded-full
+                  transition-transform
+                  active:scale-[0.94]
+                "
+              >
+                <ArrowLeft className="h-[23px] w-[23px] stroke-[2.1] text-[#2a1d18]" />
+              </button>
+
+              <h2 className="text-[21px] font-semibold leading-[1.45] text-[#2a1d18]">
+                メールで連携
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              onClick={props.on_close}
+              aria-label="close"
+              className="
+                flex h-[38px] w-[38px]
+                shrink-0
+                items-center justify-center
+                rounded-full
+                transition-transform
+                active:scale-[0.94]
+              "
+            >
+              <X className="h-[24px] w-[24px] stroke-[2.1] text-[#2a1d18]" />
+            </button>
+          </div>
+
+          <p className="mt-4 text-[14px] font-normal leading-[1.75] text-[#6d5c52]">
+            入力したメールアドレス宛にログイン用リンクを送信します
+          </p>
+
+          <form
+            className="mt-6"
+            onSubmit={(event) => {
+              event.preventDefault()
+              send_email_login()
+            }}
+          >
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => {
+                set_email(event.target.value)
+                set_email_status('idle')
+              }}
+              placeholder="メールアドレス"
+              autoComplete="email"
+              className="
+                h-[56px] w-full
+                rounded-[22px]
+                border border-[#ddd2c8]
+                bg-white
+                px-5
+                text-[15px]
+                text-[#2a1d18]
+                outline-none
+                placeholder:text-[#9b8b82]
+                focus:border-[#2a1d18]
+              "
+            />
+
+            <button
+              type="submit"
+              disabled={is_email_loading}
+              className="
+                mt-4
+                flex h-[56px] w-full
+                items-center justify-center
+                rounded-[22px]
+                bg-[#2a1d18]
+                px-5
+                text-[14px] font-semibold
+                text-white
+                transition-transform
+                active:scale-[0.98]
+                disabled:opacity-60
+              "
+            >
+              {is_email_loading ? '送信中' : 'マジックリンクを送信'}
+            </button>
+
+            {email_status === 'sent' ? (
+              <p className="mt-4 text-[12px] leading-[1.6] text-[#6d5c52]">
+                メールを送信しました
+              </p>
+            ) : null}
+
+            {email_status === 'failed' ? (
+              <p className="mt-4 text-[12px] leading-[1.6] text-[#b42318]">
+                送信に失敗しました
+              </p>
+            ) : null}
+          </form>
+        </div>
+      ) : (
+        <div className="animate-[modal_in_220ms_ease-out_both]">
       {/* header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 pr-1">
@@ -185,7 +306,7 @@ export default function ConnectModal(
         {/* email */}
         <button
           type="button"
-          onClick={() => set_is_email_open((current) => !current)}
+          onClick={open_email_view}
           className="
             flex min-h-[80px] w-full
             items-center justify-between
@@ -221,76 +342,6 @@ export default function ConnectModal(
             メールで利用
           </span>
         </button>
-
-        {is_email_open ? (
-          <form
-            className="
-              rounded-[26px]
-              border border-[#e2d5ca]
-              bg-white
-              p-4
-            "
-            onSubmit={(event) => {
-              event.preventDefault()
-              send_email_login()
-            }}
-          >
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => {
-                set_email(event.target.value)
-                set_email_status('idle')
-              }}
-              placeholder="メールアドレス"
-              autoComplete="email"
-              className="
-                h-[48px] w-full
-                rounded-[18px]
-                border border-[#ddd2c8]
-                bg-[#fffaf6]
-                px-4
-                text-[15px]
-                text-[#2a1d18]
-                outline-none
-                placeholder:text-[#9b8b82]
-                focus:border-[#2a1d18]
-              "
-            />
-
-            <button
-              type="submit"
-              disabled={is_email_loading}
-              className="
-                mt-3
-                flex h-[48px] w-full
-                items-center justify-center
-                rounded-[18px]
-                bg-[#2a1d18]
-                px-4
-                text-[14px] font-semibold
-                text-white
-                transition-transform
-                active:scale-[0.98]
-                disabled:opacity-60
-              "
-            >
-              {is_email_loading ? '送信中' : 'マジックリンクを送信'}
-            </button>
-
-            {email_status === 'sent' ? (
-              <p className="mt-3 text-[12px] leading-[1.6] text-[#6d5c52]">
-                メールを送信しました
-              </p>
-            ) : null}
-
-            {email_status === 'failed' ? (
-              <p className="mt-3 text-[12px] leading-[1.6] text-[#b42318]">
-                送信に失敗しました
-              </p>
-            ) : null}
-          </form>
-        ) : null}
       </div>
 
       {/* accordion */}
@@ -316,6 +367,8 @@ export default function ConnectModal(
 
         <ChevronDown className="h-[22px] w-[22px] shrink-0 stroke-[2.1] text-[#6d5c52]" />
       </button>
+        </div>
+      )}
     </div>
   )
 }
