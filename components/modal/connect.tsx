@@ -17,7 +17,7 @@ import {
 } from '@/lib/locale/state'
 
 type connect_props = {
-  connected_providers?: connected_provider[]
+  connected_providers: connected_provider[]
   on_close: () => void
 }
 
@@ -124,7 +124,7 @@ export default function ConnectModal(
   >('idle')
   const is_email_loading = email_status === 'sending'
   const render_locale = mounted ? locale : 'ja'
-  const connected_providers = props.connected_providers ?? []
+  const connected_providers = props.connected_providers
 
   useEffect(() => {
     const mounted_timer = window.setTimeout(() => {
@@ -304,7 +304,6 @@ export default function ConnectModal(
         </div>
       ) : (
         <div className="animate-[modal_in_220ms_ease-out_both]">
-      {/* header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 pr-1">
           <h2 className="text-[21px] font-semibold tracking-[-0.01em] leading-[1.45] text-[#2a1d18]">
@@ -314,25 +313,6 @@ export default function ConnectModal(
           <p className="mt-4 text-[14px] font-normal leading-[1.75] text-[#6d5c52]">
             {content.description[render_locale]}
           </p>
-
-          {connected_providers.length > 0 ? (
-            <div className="mt-5 border-t border-[#ead8c8] pt-4">
-              <p className="text-[12px] font-medium leading-[1.5] text-[#8a7568]">
-                {content.connected_accounts[render_locale]}
-              </p>
-
-              <div className="mt-2 space-y-1.5">
-                {connected_providers.map((provider) => (
-                  <p
-                    key={provider}
-                    className="text-[15px] font-medium leading-[1.5] text-[#2a1d18]"
-                  >
-                    {provider_labels[provider]}
-                  </p>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <button
@@ -352,8 +332,26 @@ export default function ConnectModal(
         </button>
       </div>
 
-      {/* buttons */}
-      <div className="mt-6 space-y-3.5">
+      {connected_providers.length > 0 ? (
+        <div className="mt-6 border-t border-[#ead8c8] pt-5">
+          <p className="text-[12px] font-medium leading-[1.5] text-[#8a7568]">
+            {content.connected_accounts[render_locale]}
+          </p>
+
+          <div className="mt-2 space-y-1.5">
+            {connected_providers.map((provider) => (
+              <p
+                key={provider}
+                className="text-[15px] font-medium leading-[1.5] text-[#2a1d18]"
+              >
+                {provider_labels[provider]}
+              </p>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 space-y-3.5">
         {/* line */}
         <button
           type="button"
@@ -499,6 +497,8 @@ export default function ConnectModal(
 
         <ChevronDown className="h-[22px] w-[22px] shrink-0 stroke-[2.1] text-[#6d5c52]" />
       </button>
+        </>
+      )}
         </div>
       )}
     </div>
