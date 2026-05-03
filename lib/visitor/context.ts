@@ -13,6 +13,26 @@ export type visitor_context = {
   is_new_session: boolean
 }
 
+function get_cookie_options(maxAge: number) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge,
+  }
+}
+
+export async function bind_visitor_session(visitor_uuid: string) {
+  const cookie_store = await cookies()
+
+  cookie_store.set(
+    visitor_cookie_name,
+    visitor_uuid,
+    get_cookie_options(60 * 60 * 24 * 365),
+  )
+}
+
 export async function resolve_visitor_context(): Promise<visitor_context> {
   const cookie_store = await cookies()
   const current_visitor_uuid =
@@ -26,23 +46,19 @@ export async function resolve_visitor_context(): Promise<visitor_context> {
   const is_new_session = !current_session_uuid
 
   if (is_new_visitor) {
-    cookie_store.set(visitor_cookie_name, visitor_uuid, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 365,
-    })
+    cookie_store.set(
+      visitor_cookie_name,
+      visitor_uuid,
+      get_cookie_options(60 * 60 * 24 * 365),
+    )
   }
 
   if (is_new_session) {
-    cookie_store.set(session_cookie_name, session_uuid, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 60 * 60 * 24,
-    })
+    cookie_store.set(
+      session_cookie_name,
+      session_uuid,
+      get_cookie_options(60 * 60 * 24),
+    )
   }
 
   return {

@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
+import { bind_visitor_session } from '@/lib/visitor/context'
 import { line_login_state_cookie_name } from '../route'
 
 type line_token_response = {
@@ -168,6 +169,8 @@ export async function GET(request: Request) {
       image_url: profile?.pictureUrl ?? null,
       locale: profile?.language ?? null,
     })
+
+    await bind_visitor_session(access.visitor_uuid)
 
     if (control.debug.line_auth) {
       await debug({

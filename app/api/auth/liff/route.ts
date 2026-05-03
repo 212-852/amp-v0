@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
+import { bind_visitor_session } from '@/lib/visitor/context'
 
 type liff_auth_body = {
   line_user_id?: string
@@ -78,6 +79,8 @@ export async function POST(request: Request) {
       image_url: body.image_url ?? null,
       locale: body.locale ?? null,
     })
+
+    await bind_visitor_session(access.visitor_uuid)
 
     if (control.debug.liff_auth) {
       await debug({

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { debug } from '@/lib/debug'
+import { bind_visitor_session } from '@/lib/visitor/context'
 import { google_login_state_cookie_name } from '../route'
 
 type google_token_response = {
@@ -162,6 +163,8 @@ export async function GET(request: Request) {
       image_url: userinfo?.picture ?? null,
       locale: null,
     })
+
+    await bind_visitor_session(access.visitor_uuid)
 
     await debug({
       category: 'auth',

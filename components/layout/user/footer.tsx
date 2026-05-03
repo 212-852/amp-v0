@@ -84,7 +84,7 @@ export default function UserFooter() {
   }
 
   return (
-    <footer className="fixed bottom-0 left-0 right-0 z-50">
+    <footer className="fixed bottom-0 left-0 right-0 z-50 bg-[#EBD5C0]">
       <div className="relative bg-transparent pb-[calc(env(safe-area-inset-bottom)+4px)] pt-6">
 
         {/* top curve */}

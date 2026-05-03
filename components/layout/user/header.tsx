@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Bell, Globe2 } from 'lucide-react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
+import { usePathname } from 'next/navigation'
 
 import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
@@ -62,6 +63,7 @@ type session_response = {
 }
 
 export default function UserHeader() {
+  const pathname = usePathname()
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [session, set_session] = useState<session_response>({
@@ -75,8 +77,7 @@ export default function UserHeader() {
   const [locale_open, set_locale_open] = useState(false)
   const [session_ready, set_session_ready] = useState(false)
   const render_locale = mounted ? locale : 'ja'
-  const is_member =
-    session.tier === 'member' || session.line_connected === true
+  const is_member = session.tier === 'member'
   const status_label = is_member
     ? content.member[render_locale]
     : content.guest[render_locale]
@@ -150,7 +151,7 @@ export default function UserHeader() {
     }
   }, [])
 
-  if (!session_ready) {
+  if (!session_ready && pathname !== '/liff') {
     const loading = <Loading full_screen text="LOADING..." />
 
     if (typeof document === 'undefined') {
