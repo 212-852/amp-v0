@@ -1,8 +1,8 @@
+import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { debug } from '@/lib/debug'
-import { supabase } from '@/lib/db/supabase'
 
 type email_otp_type = 'email' | 'magiclink'
 
@@ -22,6 +22,22 @@ function get_app_url() {
 
 function redirect_home() {
   return NextResponse.redirect(`${get_app_url() ?? ''}/`)
+}
+
+function create_email_auth_client() {
+  const supabase_url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabase_anon_key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabase_url || !supabase_anon_key) {
+    return null
+  }
+
+  return createClient(supabase_url, supabase_anon_key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  })
 }
 
 function format_error(error: unknown) {
@@ -58,9 +74,19 @@ async function get_email_from_callback(url: URL) {
   const code = url.searchParams.get('code')
   const token_hash = url.searchParams.get('token_hash')
   const type = url.searchParams.get('type') as email_otp_type | null
+  const email_auth = create_email_auth_client()
+
+  if (!email_auth) {
+    await debug_email_login_failed('missing_supabase_auth_env', {
+      has_supabase_url: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
+      has_supabase_anon_key: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    })
+
+    return null
+  }
 
   if (code) {
-    const result = await supabase.auth.exchangeCodeForSession(code)
+    const result = await email_auth.auth.exchangeCodeForSession(code)
 
     if (result.error) {
       await debug_email_login_failed('code_exchange_failed', {
@@ -74,7 +100,7 @@ async function get_email_from_callback(url: URL) {
   }
 
   if (token_hash) {
-    const result = await supabase.auth.verifyOtp({
+    const result = await email_auth.auth.verifyOtp({
       token_hash,
       type: type === 'magiclink' ? 'magiclink' : 'email',
     })
@@ -120,6 +146,9 @@ export async function GET(request: Request) {
     const access = await resolve_auth_access({
       provider: 'email',
       provider_id: email.trim().toLowerCase(),
+      display_name: null,
+      image_url: null,
+      locale: null,
     })
 
     await debug({
