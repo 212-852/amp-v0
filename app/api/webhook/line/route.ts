@@ -32,7 +32,6 @@ type line_webhook_body = {
 }
 
 const processed_line_event_keys = new Set<string>()
-const debugged_duplicate_line_event_keys = new Set<string>()
 
 function fire_line_auth_debug(
   payload: Parameters<typeof debug>[0],
@@ -147,27 +146,11 @@ export async function POST(request: Request) {
     const line_user_id = event.source?.userId
     const event_key = get_line_event_key(event)
 
+    if (event.deliveryContext?.isRedelivery === true) {
+      continue
+    }
+
     if (processed_line_event_keys.has(event_key)) {
-      if (!debugged_duplicate_line_event_keys.has(event_key)) {
-        debugged_duplicate_line_event_keys.add(event_key)
-
-        const duplicate_data: Record<string, unknown> = {
-          event_key,
-          line_user_id,
-          message_id: event.message?.id,
-          reply_token: event.replyToken,
-          timestamp: event.timestamp,
-        }
-
-        append_line_webhook_meta(duplicate_data, event)
-
-        fire_line_auth_debug({
-          category: 'line',
-          event: 'line_webhook_duplicate_retry',
-          data: duplicate_data,
-        })
-      }
-
       continue
     }
 
