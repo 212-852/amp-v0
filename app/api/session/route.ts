@@ -60,6 +60,7 @@ function normalize_client_session_shape(
     role: normalized_role
     tier: normalized_tier
     locale: locale_key | null
+    display_name: string | null
     line_connected: boolean
     connected_providers: connected_provider[]
   },
@@ -136,6 +137,7 @@ async function resolve_session_state(visitor_uuid: string) {
       role: 'guest' as normalized_role,
       tier: 'guest' as normalized_tier,
       locale: null as locale_key | null,
+      display_name: null as string | null,
       line_connected: false,
       connected_providers: [] as connected_provider[],
     }
@@ -143,7 +145,7 @@ async function resolve_session_state(visitor_uuid: string) {
 
   const user_result = await supabase
     .from('users')
-    .select('role, tier, locale')
+    .select('role, tier, locale, display_name')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -168,6 +170,7 @@ async function resolve_session_state(visitor_uuid: string) {
     role: normalize_role(user_result.data?.role),
     tier: normalize_tier(user_result.data?.tier),
     locale: user_result.data?.locale ?? null,
+    display_name: user_result.data?.display_name ?? null,
     line_connected: connected_providers.includes('line'),
     connected_providers,
   }
@@ -205,6 +208,7 @@ export async function GET() {
   const tier = normalized_session.tier
   const line_connected = normalized_session.line_connected
   const connected_providers = normalized_session.connected_providers
+  const display_name = normalized_session.display_name
   const requires_line_auth = is_line_webview && !line_connected
   const line_auth_method = requires_line_auth ? 'line_login' : null
 
@@ -224,6 +228,7 @@ export async function GET() {
         user_agent,
         role,
         tier,
+        display_name,
         line_connected,
         connected_providers,
         is_line_webview,
@@ -242,6 +247,7 @@ export async function GET() {
     locale: resolved_locale,
     role,
     tier,
+    display_name,
     line_connected,
     connected_providers,
     is_line_webview,

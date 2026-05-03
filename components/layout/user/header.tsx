@@ -10,7 +10,9 @@ import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
 import OverlayRoot from '@/components/overlay/root'
 import Loading from '@/components/shared/loading'
-import { type locale_key } from '@/lib/locale/action'
+import {
+  type locale_key,
+} from '@/lib/locale/action'
 import {
   get_locale,
   set_locale as set_locale_state,
@@ -50,15 +52,13 @@ const content = {
   },
 }
 
-type connected_provider = 'line' | 'google' | 'email'
-
 type session_response = {
   locale?: locale_key
   role?: 'user' | 'driver' | 'admin' | 'guest'
   tier?: 'guest' | 'member' | 'vip'
   display_name?: string | null
   line_connected?: boolean
-  connected_providers?: connected_provider[]
+  connected_providers?: Array<'line' | 'google' | 'email'>
   requires_line_auth?: boolean
   line_auth_method?: string | null
 }
@@ -78,28 +78,22 @@ export default function UserHeader() {
   const [connect_open, set_connect_open] = useState(false)
   const [locale_open, set_locale_open] = useState(false)
   const [session_ready, set_session_ready] = useState(false)
-
   const render_locale = mounted ? locale : 'ja'
-
+  const is_member = session.tier === 'member'
+  const status_label = is_member
+    ? content.member[render_locale]
+    : content.guest[render_locale]
   const connected_for_modal =
     (session.connected_providers?.length ?? 0) > 0
       ? (session.connected_providers ?? [])
       : session.line_connected
-        ? (['line'] as connected_provider[])
+        ? (['line'] as Array<'line' | 'google' | 'email'>)
         : []
-
-  const has_linked_provider = connected_for_modal.length > 0
-  const is_member = session.tier === 'member' || has_linked_provider
-
-  const status_label = is_member
-    ? content.member[render_locale]
-    : content.guest[render_locale]
-
+  const has_linked_provider =
+    connected_for_modal.length > 0
   const connect_label = has_linked_provider
     ? content.connected[render_locale]
     : content.connect[render_locale]
-
-  const display_name = session.display_name?.trim() ?? ''
 
   function handle_locale_select(next_locale: locale_key) {
     set_locale_state(next_locale)
@@ -108,28 +102,25 @@ export default function UserHeader() {
 
   useEffect(() => {
     let cancelled = false
-
     const unsubscribe_locale = subscribe_locale(set_locale)
-
     const mounted_timer = window.setTimeout(() => {
       set_mounted(true)
       set_locale(get_locale())
     }, 0)
-
     fetch('/api/session', {
       method: 'GET',
       credentials: 'include',
     })
       .then((response) => response.json() as Promise<session_response>)
-      .then((session_data) => {
+      .then((session) => {
         if (cancelled) {
           return
         }
 
-        set_session(session_data)
+        set_session(session)
 
-        if (session_data.locale) {
-          set_locale_state(session_data.locale)
+        if (session.locale) {
+          set_locale_state(session.locale)
         }
 
         const already_redirected = sessionStorage.getItem(
@@ -137,12 +128,16 @@ export default function UserHeader() {
         )
 
         if (
-          session_data.requires_line_auth &&
-          session_data.line_auth_method === 'line_login' &&
+          session.requires_line_auth &&
+          session.line_auth_method === 'line_login' &&
           !already_redirected
         ) {
-          sessionStorage.setItem('amp_line_auth_redirected', 'true')
+          sessionStorage.setItem(
+            'amp_line_auth_redirected',
+            'true',
+          )
           window.location.href = '/api/auth/line'
+          return
         }
       })
       .catch(() => {})
@@ -172,11 +167,11 @@ export default function UserHeader() {
   return (
     <>
       <header className="border-b border-[#e0cbb7] bg-[#efd7c3] px-4 pt-[calc(env(safe-area-inset-top)+8px)] pb-2.5">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <Link
               href="/user"
-              className="block shrink-0 text-[17px] font-semibold tracking-[0.02em] leading-[1.35] text-[#2a1d18]"
+              className="inline-block shrink-0 text-[17px] font-semibold tracking-[0.02em] leading-[1.35] text-[#2a1d18]"
             >
               PET TAXI
             </Link>
@@ -186,7 +181,7 @@ export default function UserHeader() {
             </div>
           </div>
 
-          <div className="flex min-w-0 flex-col items-end">
+          <div className="flex shrink-0 flex-col items-end">
             <div className="flex min-w-0 translate-y-[1px] items-center gap-1.5">
               <span className="rounded-full bg-white/55 px-[11px] py-1 text-[11px] font-medium leading-[1.35] text-[#6d5c52]">
                 {status_label}
@@ -221,9 +216,9 @@ export default function UserHeader() {
               </button>
             </div>
 
-            {display_name ? (
-              <div className="mt-1 max-w-[190px] truncate text-right text-[11px] font-medium leading-[1.35] tracking-[0.01em] text-[#8a7568]">
-                {display_name}
+            {session.display_name ? (
+              <div className="mt-1 max-w-[180px] truncate text-right text-[11px] font-medium tracking-[0.01em] text-[#8a7568]">
+                {session.display_name}
               </div>
             ) : null}
           </div>
