@@ -6,32 +6,51 @@ import {
   resolve_session_access,
 } from '@/lib/auth/access'
 import { control } from '@/lib/config/control'
+import { supabase } from '@/lib/db/supabase'
 import { debug } from '@/lib/debug'
+import { normalize_locale, type locale_key } from '@/lib/locale/action'
 import { resolve_visitor_context } from '@/lib/visitor/context'
 
+type normalized_role = 'user' | 'driver' | 'admin' | 'guest'
+type normalized_tier = 'guest' | 'member' | 'vip'
+type connected_provider = 'line' | 'google' | 'email'
+
 function get_browser_locale(accept_language: string | null) {
-  if (!accept_language) {
-    return 'ja'
+  return normalize_locale(accept_language?.split(',')[0])
+}
+
+function normalize_role(role: string | null | undefined): normalized_role {
+  if (role === 'user' || role === 'driver' || role === 'admin') {
+    return role
   }
 
-  const first_locale = accept_language
-    .split(',')[0]
-    ?.trim()
-    .toLowerCase()
+  return 'guest'
+}
 
-  if (!first_locale) {
-    return 'ja'
+function normalize_tier(tier: string | null | undefined): normalized_tier {
+  if (tier === 'member' || tier === 'vip') {
+    return tier
   }
 
-  if (first_locale.startsWith('ja')) {
-    return 'ja'
-  }
+  return 'guest'
+}
 
-  if (first_locale.startsWith('es')) {
-    return 'es'
-  }
+function normalize_connected_providers(
+  providers: Array<{ provider: string | null }>,
+) {
+  const connected_providers: connected_provider[] = []
 
-  return 'en'
+  providers.forEach((identity) => {
+    if (
+      identity.provider === 'line' ||
+      identity.provider === 'google' ||
+      identity.provider === 'email'
+    ) {
+      connected_providers.push(identity.provider)
+    }
+  })
+
+  return Array.from(new Set(connected_providers))
 }
 
 function get_access_platform(user_agent: string | null) {
@@ -60,6 +79,61 @@ function get_access_platform(user_agent: string | null) {
   return 'unknown'
 }
 
+async function resolve_session_state(visitor_uuid: string) {
+  const visitor_result = await supabase
+    .from('visitors')
+    .select('user_uuid')
+    .eq('visitor_uuid', visitor_uuid)
+    .maybeSingle()
+
+  if (visitor_result.error) {
+    throw visitor_result.error
+  }
+
+  const user_uuid = visitor_result.data?.user_uuid
+
+  if (!user_uuid) {
+    return {
+      role: 'guest' as normalized_role,
+      tier: 'guest' as normalized_tier,
+      locale: null as locale_key | null,
+      line_connected: false,
+      connected_providers: [] as connected_provider[],
+    }
+  }
+
+  const user_result = await supabase
+    .from('users')
+    .select('role, tier, locale')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  if (user_result.error) {
+    throw user_result.error
+  }
+
+  const identity_result = await supabase
+    .from('identities')
+    .select('provider')
+    .eq('user_uuid', user_uuid)
+
+  if (identity_result.error) {
+    throw identity_result.error
+  }
+
+  const connected_providers = normalize_connected_providers(
+    identity_result.data ?? [],
+  )
+
+  return {
+    role: normalize_role(user_result.data?.role),
+    tier: normalize_tier(user_result.data?.tier),
+    locale: user_result.data?.locale ?? null,
+    line_connected: connected_providers.includes('line'),
+    connected_providers,
+  }
+}
+
 export async function GET() {
   const header_store = await headers()
 
@@ -84,6 +158,12 @@ export async function GET() {
     locale,
     user_agent,
   })
+  const session_state = await resolve_session_state(guest_access.visitor_uuid)
+  const resolved_locale = normalize_locale(session_state.locale ?? locale)
+  const role = session_state.role
+  const tier = session_state.tier
+  const line_connected = session_state.line_connected
+  const connected_providers = session_state.connected_providers
 
   if (control.debug.session_route) {
     await debug({
@@ -96,9 +176,13 @@ export async function GET() {
         session_uuid: session_access.session_uuid,
         is_new_visitor: guest_access.is_new_visitor,
         is_new_session: session_access.is_new_session,
-        locale,
+        locale: resolved_locale,
         accept_language,
         user_agent,
+        role,
+        tier,
+        line_connected,
+        connected_providers,
         is_line_webview,
         requires_line_auth,
         line_auth_method,
@@ -112,7 +196,11 @@ export async function GET() {
     session_uuid: session_access.session_uuid,
     is_new_visitor: guest_access.is_new_visitor,
     is_new_session: session_access.is_new_session,
-    locale,
+    locale: resolved_locale,
+    role,
+    tier,
+    line_connected,
+    connected_providers,
     is_line_webview,
     requires_line_auth,
     line_auth_method,

@@ -223,7 +223,7 @@ export async function resolve_auth_access(
       image_url: input.image_url ?? null,
       locale: input.locale ?? null,
     })
-    .select('user_uuid')
+    .select('user_uuid, locale')
     .single()
 
   if (created_user.error) {
@@ -262,7 +262,7 @@ export async function resolve_auth_access(
     user_uuid,
     visitor_uuid: created_visitor.data.visitor_uuid,
     display_name: input.display_name ?? null,
-    locale: input.locale ?? null,
+    locale: created_user.data.locale ?? null,
     is_new_user: true,
     is_new_visitor: true,
   })

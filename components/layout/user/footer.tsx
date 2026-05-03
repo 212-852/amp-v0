@@ -6,19 +6,68 @@ import {
   Menu,
 } from 'lucide-react'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FaPaw } from 'react-icons/fa'
 
 import PawIcon from '@/components/icons/paw'
 import { get_copyright_text } from '@/lib/config/site'
+import type { locale_key } from '@/lib/locale/action'
+import {
+  get_locale,
+  subscribe_locale,
+} from '@/lib/locale/state'
 
 type footer_mode = 'nav' | 'input'
 
+const content = {
+  mypage: {
+    ja: 'マイページ',
+    en: 'My Page',
+    es: 'Mi página',
+  },
+  bot: {
+    ja: 'BOT',
+    en: 'BOT',
+    es: 'BOT',
+  },
+  concierge: {
+    ja: 'コンシェルジュ',
+    en: 'Concierge',
+    es: 'Concierge',
+  },
+  menu: {
+    ja: 'メニュー',
+    en: 'Menu',
+    es: 'Menú',
+  },
+  message: {
+    ja: 'メッセージを入力',
+    en: 'Type a message',
+    es: 'Escribe un mensaje',
+  },
+}
+
 export default function UserFooter() {
+  const [mounted, set_mounted] = useState(false)
+  const [locale, set_locale] = useState<locale_key>('ja')
   const [mode, set_mode] = useState<footer_mode>('nav')
   const [flip_rotation, set_flip_rotation] = useState(0)
   const [card_scale, set_card_scale] = useState(1)
   const is_input_mode = mode === 'input'
+  const render_locale = mounted ? locale : 'ja'
+
+  useEffect(() => {
+    const mounted_timer = window.setTimeout(() => {
+      set_mounted(true)
+      set_locale(get_locale())
+    }, 0)
+    const unsubscribe_locale = subscribe_locale(set_locale)
+
+    return () => {
+      window.clearTimeout(mounted_timer)
+      unsubscribe_locale()
+    }
+  }, [])
 
   function open_input() {
     set_mode('input')
@@ -143,7 +192,7 @@ export default function UserFooter() {
                   />
 
                   <span className="mt-1 whitespace-nowrap text-[10px] font-medium leading-[1.35] text-[#5c4f47]">
-                    マイページ
+                    {content.mypage[render_locale]}
                   </span>
                 </button>
 
@@ -171,7 +220,7 @@ export default function UserFooter() {
                       shadow-[0_1px_4px_rgba(42,29,24,0.07)]
                     "
                   >
-                    BOT
+                    {content.bot[render_locale]}
                   </button>
 
                   <button
@@ -183,7 +232,7 @@ export default function UserFooter() {
                       text-[#8a7467]
                     "
                   >
-                    コンシェルジュ
+                    {content.concierge[render_locale]}
                   </button>
                 </div>
 
@@ -198,7 +247,7 @@ export default function UserFooter() {
                   />
 
                   <span className="mt-1 whitespace-nowrap text-[10px] font-medium leading-[1.35] text-[#5c4f47]">
-                    メニュー
+                    {content.menu[render_locale]}
                   </span>
                 </button>
               </div>
@@ -246,7 +295,7 @@ export default function UserFooter() {
                   id="user_footer_message"
                   name="user_footer_message"
                   type="text"
-                  placeholder="メッセージを入力"
+                  placeholder={content.message[render_locale]}
                   className="
                     h-[48px] min-w-0 flex-1
                     rounded-full

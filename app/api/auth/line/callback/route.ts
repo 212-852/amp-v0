@@ -14,6 +14,7 @@ type line_profile_response = {
   userId?: string
   displayName?: string
   pictureUrl?: string
+  language?: string
 }
 
 function get_app_url() {
@@ -165,6 +166,7 @@ export async function GET(request: Request) {
       provider_id: line_user_id,
       display_name: profile?.displayName ?? null,
       image_url: profile?.pictureUrl ?? null,
+      locale: profile?.language ?? null,
     })
 
     if (control.debug.line_auth) {
