@@ -122,12 +122,12 @@ export default function LiffPage() {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-[#f6e5cf] px-6 text-center text-[#2a1d18]">
+    <div className="flex min-h-full items-center justify-center bg-[#f6e5cf] px-6 text-center text-[#2a1d18]">
       <p className="text-[15px] font-medium leading-[1.7]">
         {status === 'loading'
           ? 'LINEで確認しています'
           : 'LINE連携を完了できませんでした'}
       </p>
-    </main>
+    </div>
   )
 }

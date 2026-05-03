@@ -22,7 +22,7 @@ html {
 body {
   min-height: 100dvh;
   overflow-x: hidden;
-  background: #ffffff;
+  background: #f6e5cf;
   color: #333333;
   font-family:
     var(--font-rounded),

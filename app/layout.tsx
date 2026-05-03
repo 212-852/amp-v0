@@ -23,13 +23,13 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className={rounded.variable}>
-        <div className="min-h-dvh overflow-hidden bg-[#f6e5cf]">
-          <div className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-[#f6e5cf]">
+        <div className="min-h-[100dvh] overflow-hidden bg-[#f6e5cf]">
+          <div className="relative mx-auto h-[100dvh] w-full max-w-[430px] overflow-hidden bg-[#f6e5cf]">
             <div className="fixed inset-x-0 top-0 z-50 mx-auto w-full max-w-[430px]">
               <UserHeader />
             </div>
 
-            <main className="h-dvh overflow-y-auto px-0 pt-[calc(env(safe-area-inset-top)+78px)] pb-[calc(env(safe-area-inset-bottom)+126px)]">
+            <main className="h-full overflow-y-auto px-0 pt-[calc(env(safe-area-inset-top)+78px)] pb-[126px]">
               {children}
             </main>
 
