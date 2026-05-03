@@ -219,6 +219,7 @@ export default function UserHeader() {
         variant="center"
       >
         <ConnectModal
+          locale={render_locale}
           connected_providers={connected_for_modal}
           on_close={() => set_connect_open(false)}
         />
