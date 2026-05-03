@@ -9,7 +9,7 @@ export const google_login_state_cookie_name = 'google_login_state'
 
 export async function GET() {
   const client_id = process.env.GOOGLE_CLIENT_ID
-  const callback_url = process.env.GOOGLE_CALLBACK_URL
+  const callback_url = process.env.GOOGLE_LOGIN_CALLBACK_URL
 
   if (!client_id || !callback_url) {
     return NextResponse.json(

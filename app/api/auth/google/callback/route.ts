@@ -17,7 +17,7 @@ type google_userinfo_response = {
 }
 
 function get_app_url() {
-  const callback_url = process.env.GOOGLE_CALLBACK_URL
+  const callback_url = process.env.GOOGLE_LOGIN_CALLBACK_URL
 
   if (!callback_url) {
     return null
@@ -51,7 +51,7 @@ async function debug_google_login_failed(
 async function get_google_access_token(code: string) {
   const client_id = process.env.GOOGLE_CLIENT_ID
   const client_secret = process.env.GOOGLE_CLIENT_SECRET
-  const callback_url = process.env.GOOGLE_CALLBACK_URL
+  const callback_url = process.env.GOOGLE_LOGIN_CALLBACK_URL
 
   if (!client_id || !client_secret || !callback_url) {
     await debug_google_login_failed('missing_env', {
