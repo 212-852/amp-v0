@@ -117,8 +117,11 @@ export async function GET(request: Request) {
         email_exists: true,
       },
     })
-  } catch {
-    await debug_email_login_failed('unexpected_error')
+  } catch (error) {
+    await debug_email_login_failed('unexpected_error', {
+      error_message:
+        error instanceof Error ? error.message : String(error),
+    })
 
     return redirect_home()
   }
