@@ -35,6 +35,28 @@ function notify_locale(locale: locale_key) {
   )
 }
 
+export function resolve_locale_preference(
+  session_locale: locale_key | string | null | undefined,
+): locale_key {
+  if (typeof window === 'undefined') {
+    return normalize_locale(
+      typeof session_locale === 'string' ? session_locale : null,
+    )
+  }
+
+  const raw = window.localStorage.getItem(locale_storage_key)
+
+  if (raw === 'ja' || raw === 'en' || raw === 'es') {
+    return raw
+  }
+
+  if (session_locale) {
+    return normalize_locale(String(session_locale))
+  }
+
+  return 'ja'
+}
+
 export function set_locale(locale: locale_key) {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(locale_storage_key, locale)
@@ -42,6 +64,27 @@ export function set_locale(locale: locale_key) {
 
   notify_locale(locale)
   void save_locale(locale)
+}
+
+export function apply_locale_from_session(
+  session_locale: locale_key | string | null | undefined,
+) {
+  const resolved = resolve_locale_preference(session_locale)
+
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const raw = window.localStorage.getItem(locale_storage_key)
+  const has_saved_choice =
+    raw === 'ja' || raw === 'en' || raw === 'es'
+
+  if (has_saved_choice) {
+    notify_locale(resolved)
+    return
+  }
+
+  set_locale(resolved)
 }
 
 export function subscribe_locale(callback: (locale: locale_key) => void) {

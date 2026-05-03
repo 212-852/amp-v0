@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Bell, Globe2 } from 'lucide-react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
@@ -9,12 +9,14 @@ import { usePathname } from 'next/navigation'
 import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
 import OverlayRoot from '@/components/overlay/root'
+import Breadcrumb from '@/components/shared/breadcrumb'
 import Loading from '@/components/shared/loading'
+import { build_breadcrumb } from '@/lib/breadcrumb'
 import {
   type locale_key,
 } from '@/lib/locale/action'
 import {
-  get_locale,
+  apply_locale_from_session,
   set_locale as set_locale_state,
   subscribe_locale,
 } from '@/lib/locale/state'
@@ -39,11 +41,6 @@ const content = {
     ja: '連携済み',
     en: 'Connected',
     es: 'Conectado',
-  },
-  home: {
-    ja: 'ホーム',
-    en: 'Home',
-    es: 'Inicio',
   },
   locale: {
     ja: 'JA',
@@ -94,6 +91,10 @@ export default function UserHeader() {
   const connect_label = has_linked_provider
     ? content.connected[render_locale]
     : content.connect[render_locale]
+  const breadcrumb_items = useMemo(
+    () => build_breadcrumb(pathname ?? '/', render_locale),
+    [pathname, render_locale],
+  )
 
   function handle_locale_select(next_locale: locale_key) {
     set_locale_state(next_locale)
@@ -105,7 +106,7 @@ export default function UserHeader() {
     const unsubscribe_locale = subscribe_locale(set_locale)
     const mounted_timer = window.setTimeout(() => {
       set_mounted(true)
-      set_locale(get_locale())
+      apply_locale_from_session(undefined)
     }, 0)
     fetch('/api/session', {
       method: 'GET',
@@ -119,9 +120,7 @@ export default function UserHeader() {
 
         set_session(session)
 
-        if (session.locale) {
-          set_locale_state(session.locale)
-        }
+        apply_locale_from_session(session.locale)
 
         const already_redirected = sessionStorage.getItem(
           'amp_line_auth_redirected',
@@ -176,9 +175,7 @@ export default function UserHeader() {
               PET TAXI
             </Link>
 
-            <div className="mt-1.5 text-[14px] font-normal leading-[1.65] text-[#6d5c52]">
-              {content.home[render_locale]}
-            </div>
+            <Breadcrumb items={breadcrumb_items} />
           </div>
 
           <div className="flex shrink-0 flex-col items-end">
