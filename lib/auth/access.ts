@@ -218,7 +218,7 @@ export async function resolve_auth_access(
     .from('users')
     .insert({
       role: 'user',
-      tier: input.provider === 'line' ? 'member' : 'guest',
+      tier: 'member',
       display_name: input.display_name ?? null,
       image_url: input.image_url ?? null,
       locale: input.locale ?? null,
