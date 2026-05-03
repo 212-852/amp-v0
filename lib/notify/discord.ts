@@ -5,8 +5,8 @@ import type { notify_event } from './rules'
 function build_discord_content(event: notify_event) {
   if (event.event === 'new_user_created') {
     return [
-      'New user created',
-      '',
+      '[NEW USER]',
+      '新しいユーザーが登録されました',
       `provider: ${event.provider}`,
       `user_uuid: ${event.user_uuid}`,
       `visitor_uuid: ${event.visitor_uuid}`,

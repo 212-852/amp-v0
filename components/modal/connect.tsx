@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   ChevronDown,
   Link2,
@@ -15,12 +16,42 @@ type connect_props = {
 export default function ConnectModal(
   props: connect_props,
 ) {
+  const [is_email_open, set_is_email_open] = useState(false)
+  const [email, set_email] = useState('')
+  const [email_status, set_email_status] = useState<
+    'idle' | 'sending' | 'sent' | 'failed'
+  >('idle')
+
   function open_line_login() {
     window.location.href = '/api/auth/line'
   }
 
   function open_google_login() {
     window.location.href = '/api/auth/google'
+  }
+
+  async function send_email_login() {
+    if (!email || email_status === 'sending') {
+      return
+    }
+
+    set_email_status('sending')
+
+    try {
+      const response = await fetch('/api/auth/email', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+        }),
+      })
+
+      set_email_status(response.ok ? 'sent' : 'failed')
+    } catch {
+      set_email_status('failed')
+    }
   }
 
   return (
@@ -153,6 +184,7 @@ export default function ConnectModal(
         {/* email */}
         <button
           type="button"
+          onClick={() => set_is_email_open((current) => !current)}
           className="
             flex min-h-[80px] w-full
             items-center justify-between
@@ -188,6 +220,78 @@ export default function ConnectModal(
             メールで利用
           </span>
         </button>
+
+        {is_email_open ? (
+          <form
+            className="
+              rounded-[26px]
+              border border-[#e2d5ca]
+              bg-white
+              p-4
+            "
+            onSubmit={(event) => {
+              event.preventDefault()
+              send_email_login()
+            }}
+          >
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => {
+                set_email(event.target.value)
+                set_email_status('idle')
+              }}
+              placeholder="メールアドレス"
+              autoComplete="email"
+              className="
+                h-[48px] w-full
+                rounded-[18px]
+                border border-[#ddd2c8]
+                bg-[#fffaf6]
+                px-4
+                text-[15px]
+                text-[#2a1d18]
+                outline-none
+                placeholder:text-[#9b8b82]
+                focus:border-[#2a1d18]
+              "
+            />
+
+            <button
+              type="submit"
+              disabled={email_status === 'sending'}
+              className="
+                mt-3
+                flex h-[48px] w-full
+                items-center justify-center
+                rounded-[18px]
+                bg-[#2a1d18]
+                px-4
+                text-[14px] font-semibold
+                text-white
+                transition-transform
+                active:scale-[0.98]
+                disabled:opacity-60
+              "
+            >
+              {email_status === 'sending'
+                ? '送信中'
+                : 'マジックリンクを送信'}
+            </button>
+
+            {email_status === 'sent' ? (
+              <p className="mt-3 text-[12px] leading-[1.6] text-[#6d5c52]">
+                メールを送信しました。メール内のリンクから連携を完了してください。
+              </p>
+            ) : null}
+
+            {email_status === 'failed' ? (
+              <p className="mt-3 text-[12px] leading-[1.6] text-[#b42318]">
+                送信できませんでした。時間をおいて再度お試しください。
+              </p>
+            ) : null}
+          </form>
+        ) : null}
       </div>
 
       {/* accordion */}
