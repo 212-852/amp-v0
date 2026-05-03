@@ -7,6 +7,7 @@ import Link from 'next/link'
 import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
 import OverlayRoot from '@/components/overlay/root'
+import Loading from '@/components/shared/loading'
 import {
   type locale_key,
 } from '@/lib/locale/action'
@@ -71,6 +72,7 @@ export default function UserHeader() {
   })
   const [connect_open, set_connect_open] = useState(false)
   const [locale_open, set_locale_open] = useState(false)
+  const [session_ready, set_session_ready] = useState(false)
   const render_locale = mounted ? locale : 'ja'
   const is_member =
     session.tier === 'member' || session.line_connected === true
@@ -119,15 +121,24 @@ export default function UserHeader() {
             'true',
           )
           window.location.href = '/api/auth/line'
+          return
         }
+
+        set_session_ready(true)
       })
-      .catch(() => {})
+      .catch(() => {
+        set_session_ready(true)
+      })
 
     return () => {
       window.clearTimeout(mounted_timer)
       unsubscribe_locale()
     }
   }, [])
+
+  if (!session_ready) {
+    return <Loading full_screen text="LOADING..." />
+  }
 
   return (
     <>
