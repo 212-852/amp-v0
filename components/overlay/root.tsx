@@ -28,7 +28,7 @@ export default function OverlayRoot(props: overlay_props) {
   }
 
   const tree = (
-    <div className="fixed inset-0 z-[9999]">
+    <div className="fixed inset-0 z-[8000]">
       <button
         type="button"
         aria-label="close"

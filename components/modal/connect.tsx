@@ -99,10 +99,10 @@ const content = {
     en: 'What linking enables',
     es: 'Qué permite la conexión',
   },
-  connected_accounts: {
-    ja: '連携アカウント',
-    en: 'Connected Accounts',
-    es: 'Cuentas Conectadas',
+  connected: {
+    ja: '連携済み',
+    en: 'Connected',
+    es: 'Conectado',
   },
 }
 
@@ -333,21 +333,21 @@ export default function ConnectModal(
       </div>
 
       {connected_providers.length > 0 ? (
-        <div className="mt-6 border-t border-[#ead8c8] pt-5">
-          <p className="text-[12px] font-medium leading-[1.5] text-[#8a7568]">
-            {content.connected_accounts[render_locale]}
+        <div className="mt-5 border-t border-[#e8dfd6] pt-3.5">
+          <p className="text-[14px] font-normal leading-[1.65] text-[#6d5c52]">
+            {content.connected[render_locale]}
           </p>
 
-          <div className="mt-2 space-y-1.5">
+          <ul className="mt-1.5 list-none space-y-0.5 p-0">
             {connected_providers.map((provider) => (
-              <p
+              <li
                 key={provider}
-                className="text-[15px] font-medium leading-[1.5] text-[#2a1d18]"
+                className="text-[14px] font-normal leading-[1.65] text-[#2a1d18]"
               >
                 {provider_labels[provider]}
-              </p>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       ) : (
         <>

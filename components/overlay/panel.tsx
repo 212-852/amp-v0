@@ -58,7 +58,7 @@ export default function OverlayPanel(props: panel_props) {
     return (
       <div
         className="
-          fixed inset-0 z-[10000]
+          fixed inset-0 z-0
           flex items-center justify-center
           pointer-events-none
         "
@@ -79,7 +79,7 @@ export default function OverlayPanel(props: panel_props) {
   return (
     <div
       className={`
-        fixed inset-0 z-[10000]
+        fixed inset-0 z-0
         flex
         pointer-events-none
         ${variant_class[variant]}

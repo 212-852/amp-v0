@@ -55,6 +55,43 @@ function normalize_connected_providers(
   return Array.from(new Set(connected_providers))
 }
 
+function normalize_client_session_shape(
+  state: {
+    role: normalized_role
+    tier: normalized_tier
+    locale: locale_key | null
+    line_connected: boolean
+    connected_providers: connected_provider[]
+  },
+) {
+  const connected_providers = state.connected_providers
+  const line_connected =
+    state.line_connected || connected_providers.includes('line')
+  const linked =
+    connected_providers.length > 0 || line_connected
+
+  let role = state.role
+  let tier = state.tier
+
+  if (linked) {
+    if (role === 'guest') {
+      role = 'user'
+    }
+
+    if (tier === 'guest') {
+      tier = 'member'
+    }
+  }
+
+  return {
+    ...state,
+    role,
+    tier,
+    line_connected,
+    connected_providers,
+  }
+}
+
 function get_access_platform(user_agent: string | null) {
   const normalized_user_agent = user_agent?.toLowerCase() ?? ''
 
@@ -159,11 +196,15 @@ export async function GET() {
     user_agent,
   })
   const session_state = await resolve_session_state(guest_access.visitor_uuid)
-  const resolved_locale = normalize_locale(session_state.locale ?? locale)
-  const role = session_state.role
-  const tier = session_state.tier
-  const line_connected = session_state.line_connected
-  const connected_providers = session_state.connected_providers
+  const normalized_session =
+    normalize_client_session_shape(session_state)
+  const resolved_locale = normalize_locale(
+    normalized_session.locale ?? locale,
+  )
+  const role = normalized_session.role
+  const tier = normalized_session.tier
+  const line_connected = normalized_session.line_connected
+  const connected_providers = normalized_session.connected_providers
   const requires_line_auth = is_line_webview && !line_connected
   const line_auth_method = requires_line_auth ? 'line_login' : null
 

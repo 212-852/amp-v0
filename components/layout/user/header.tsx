@@ -81,7 +81,15 @@ export default function UserHeader() {
   const status_label = is_member
     ? content.member[render_locale]
     : content.guest[render_locale]
-  const connect_label = session.line_connected
+  const connected_for_modal =
+    (session.connected_providers?.length ?? 0) > 0
+      ? (session.connected_providers ?? [])
+      : session.line_connected
+        ? (['line'] as Array<'line' | 'google' | 'email'>)
+        : []
+  const has_linked_provider =
+    connected_for_modal.length > 0
+  const connect_label = has_linked_provider
     ? content.connected[render_locale]
     : content.connect[render_locale]
 
@@ -97,12 +105,6 @@ export default function UserHeader() {
       set_mounted(true)
       set_locale(get_locale())
     }, 0)
-    const session_timeout = window.setTimeout(() => {
-      if (!cancelled) {
-        set_session_ready(true)
-      }
-    }, 3000)
-
     fetch('/api/session', {
       method: 'GET',
       credentials: 'include',
@@ -146,7 +148,6 @@ export default function UserHeader() {
     return () => {
       cancelled = true
       window.clearTimeout(mounted_timer)
-      window.clearTimeout(session_timeout)
       unsubscribe_locale()
     }
   }, [])
@@ -218,7 +219,7 @@ export default function UserHeader() {
         variant="center"
       >
         <ConnectModal
-          connected_providers={session.connected_providers ?? []}
+          connected_providers={connected_for_modal}
           on_close={() => set_connect_open(false)}
         />
       </OverlayRoot>

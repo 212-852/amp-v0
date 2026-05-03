@@ -57,20 +57,22 @@ export default function LiffPage() {
     async function run_liff_login() {
       set_is_loading(true)
 
-      const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
-
-      if (!liff_id) {
-        set_status('missing_liff_id')
-        set_is_loading(false)
-        return
-      }
+      let deferred_line_login = false
 
       try {
+        const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
+
+        if (!liff_id) {
+          set_status('missing_liff_id')
+          return
+        }
+
         const liff = await load_liff_sdk()
 
         await liff.init({ liffId: liff_id })
 
         if (!liff.isLoggedIn()) {
+          deferred_line_login = true
           liff.login()
           return
         }
@@ -94,23 +96,24 @@ export default function LiffPage() {
 
         if (!response.ok) {
           set_status('failed')
-          set_is_loading(false)
           return
         }
 
         if (!cancelled) {
-          set_is_loading(false)
           window.location.href = '/user'
         }
       } catch {
         if (!cancelled) {
           set_status('failed')
+        }
+      } finally {
+        if (!cancelled && !deferred_line_login) {
           set_is_loading(false)
         }
       }
     }
 
-    run_liff_login()
+    void run_liff_login()
 
     return () => {
       cancelled = true
