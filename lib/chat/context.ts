@@ -7,7 +7,7 @@ import { resolve_guest_access } from '@/lib/auth/access'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
 import { locale_cookie_name } from '@/lib/locale/cookie'
-import { visitor_cookie_name } from '@/lib/visitor/cookie'
+import { resolve_visitor_context } from '@/lib/visitor/context'
 import type { chat_locale } from './message'
 import type { chat_channel } from './room'
 
@@ -74,14 +74,12 @@ export async function resolve_chat_context(
 ): Promise<chat_request_context> {
   const cookie_store = await cookies()
   const header_store = await headers()
-  const visitor_uuid = cookie_store.get(visitor_cookie_name)?.value
-
-  if (!visitor_uuid) {
-    throw new Error('Missing visitor context')
-  }
+  const browser_session = await resolve_visitor_context({
+    source_channel: input.channel === 'web' ? 'web' : 'liff',
+  })
 
   const guest_access = await resolve_guest_access({
-    visitor_uuid,
+    visitor_uuid: browser_session.visitor_uuid,
   })
   const user_state = await resolve_user_state(guest_access.visitor_uuid)
   const accept_language =

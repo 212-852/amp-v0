@@ -1,26 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { env } from '@/lib/config/env'
 import {
+  get_browser_session_cookie_options,
+  resolve_browser_session_from_cookies,
+  session_cookie_max_age,
   session_cookie_name,
+  visitor_cookie_max_age,
   visitor_cookie_name,
-} from '@/lib/visitor/cookie'
-
-const visitor_cookie_age = 60 * 60 * 24 * 365
-const session_cookie_age = 60 * 60 * 24
+} from '@/lib/auth/session'
+import { env } from '@/lib/config/env'
 
 const is_local_host = (host: string) => {
   return host.startsWith('localhost') || host.startsWith('127.0.0.1')
-}
-
-function get_cookie_options(maxAge: number) {
-  return {
-    httpOnly: true,
-    sameSite: 'lax' as const,
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge,
-  }
 }
 
 function append_request_cookie(
@@ -42,20 +33,18 @@ function create_response(
   response_builder: (headers: Headers) => NextResponse,
 ) {
   const request_headers = new Headers(request.headers)
-  const visitor_uuid =
-    request.cookies.get(visitor_cookie_name)?.value ?? crypto.randomUUID()
-  const session_uuid =
-    request.cookies.get(session_cookie_name)?.value ?? crypto.randomUUID()
-  const needs_visitor_cookie =
-    !request.cookies.get(visitor_cookie_name)?.value
-  const needs_session_cookie =
-    !request.cookies.get(session_cookie_name)?.value
+  const resolved = resolve_browser_session_from_cookies({
+    visitor_cookie: request.cookies.get(visitor_cookie_name)?.value,
+    session_cookie: request.cookies.get(session_cookie_name)?.value,
+  })
+  const needs_visitor_cookie = resolved.is_new_visitor
+  const needs_session_cookie = resolved.is_new_session
 
   if (needs_visitor_cookie) {
     append_request_cookie(
       request_headers,
       visitor_cookie_name,
-      visitor_uuid,
+      resolved.visitor_uuid,
     )
   }
 
@@ -63,7 +52,7 @@ function create_response(
     append_request_cookie(
       request_headers,
       session_cookie_name,
-      session_uuid,
+      resolved.session_uuid,
     )
   }
 
@@ -72,16 +61,16 @@ function create_response(
   if (needs_visitor_cookie) {
     response.cookies.set(
       visitor_cookie_name,
-      visitor_uuid,
-      get_cookie_options(visitor_cookie_age),
+      resolved.visitor_uuid,
+      get_browser_session_cookie_options(visitor_cookie_max_age),
     )
   }
 
   if (needs_session_cookie) {
     response.cookies.set(
       session_cookie_name,
-      session_uuid,
-      get_cookie_options(session_cookie_age),
+      resolved.session_uuid,
+      get_browser_session_cookie_options(session_cookie_max_age),
     )
   }
 
@@ -92,32 +81,36 @@ export function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? ''
   const pathname = request.nextUrl.pathname
   const is_local = is_local_host(host)
-
-  if (
-    pathname.startsWith('/api') ||
+  const is_api = pathname.startsWith('/api')
+  const skip_session_cookies =
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon.ico')
-  ) {
+    pathname.startsWith('/favicon.ico') ||
+    pathname.startsWith('/api/webhook')
+
+  if (skip_session_cookies) {
     return NextResponse.next()
   }
 
-  if (is_local) {
-    return create_response(request, (headers) =>
+  const next_with_session = () =>
+    create_response(request, (headers) =>
       NextResponse.next({
         request: { headers },
       }),
     )
+
+  if (is_local) {
+    return next_with_session()
   }
 
   if (host === env.domain.platform) {
-    return create_response(request, (headers) =>
-      NextResponse.next({
-        request: { headers },
-      }),
-    )
+    return next_with_session()
   }
 
   if (host === env.domain.corporate) {
+    if (is_api) {
+      return next_with_session()
+    }
+
     const url = request.nextUrl.clone()
     url.pathname = `/corporate${pathname}`
 
@@ -129,6 +122,10 @@ export function middleware(request: NextRequest) {
   }
 
   if (host === env.domain.airport) {
+    if (is_api) {
+      return next_with_session()
+    }
+
     const url = request.nextUrl.clone()
     url.pathname = `/airport${pathname}`
 
@@ -139,11 +136,7 @@ export function middleware(request: NextRequest) {
     )
   }
 
-  return create_response(request, (headers) =>
-    NextResponse.next({
-      request: { headers },
-    }),
-  )
+  return next_with_session()
 }
 
 export const config = {

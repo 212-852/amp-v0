@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { normalize_locale } from '@/lib/locale/action'
 import { locale_cookie_name } from '@/lib/locale/cookie'
 import { supabase } from '@/lib/db/supabase'
-import { visitor_cookie_name } from '@/lib/visitor/context'
+import { resolve_visitor_context } from '@/lib/visitor/context'
 
 type locale_body = {
   locale?: string
@@ -14,7 +14,10 @@ export async function PATCH(request: Request) {
   const body = (await request.json()) as locale_body
   const locale = normalize_locale(body.locale)
   const cookie_store = await cookies()
-  const visitor_uuid = cookie_store.get(visitor_cookie_name)?.value
+  const browser_session = await resolve_visitor_context({
+    source_channel: 'web',
+  })
+  const visitor_uuid = browser_session.visitor_uuid
 
   cookie_store.set(locale_cookie_name, locale, {
     httpOnly: true,

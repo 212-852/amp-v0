@@ -284,7 +284,9 @@ async function resolve_session_payload() {
   const is_line_webview =
     user_agent?.toLowerCase().includes('line/') ?? false
 
-  const visitor = await resolve_visitor_context()
+  const visitor = await resolve_visitor_context({
+    source_channel: is_line_webview ? 'liff' : 'web',
+  })
   const guest_access = await resolve_guest_access({
     visitor_uuid: visitor.visitor_uuid,
     locale,
