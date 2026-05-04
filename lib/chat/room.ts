@@ -40,6 +40,16 @@ type participant_row = {
   role: string
 }
 
+function is_unique_violation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const code = (error as { code?: string }).code
+
+  return code === '23505'
+}
+
 function normalize_room(
   row: room_row,
   participant: participant_row,
@@ -133,6 +143,10 @@ async function load_room(room_uuid: string) {
   return result.data as room_row | null
 }
 
+async function delete_orphan_direct_room(room_uuid: string) {
+  await supabase.from('rooms').delete().eq('room_uuid', room_uuid)
+}
+
 async function insert_direct_room_row(): Promise<room_row> {
   const room_result = await supabase
     .from('rooms')
@@ -188,8 +202,27 @@ async function create_bot_participant(room_uuid: string) {
 }
 
 async function resolve_bot_participant(room_uuid: string) {
-  return (await find_bot_participant(room_uuid)) ??
-    await create_bot_participant(room_uuid)
+  const existing = await find_bot_participant(room_uuid)
+
+  if (existing) {
+    return existing
+  }
+
+  try {
+    return await create_bot_participant(room_uuid)
+  } catch (error) {
+    if (!is_unique_violation(error)) {
+      throw error
+    }
+
+    const after_conflict = await find_bot_participant(room_uuid)
+
+    if (after_conflict) {
+      return after_conflict
+    }
+
+    throw error
+  }
 }
 
 async function update_existing_room(
@@ -248,8 +281,50 @@ async function update_existing_room(
   }
 }
 
-async function create_participant_and_direct_room(input: resolve_room_input) {
-  const room_row = await insert_direct_room_row()
+type create_participant_room_outcome =
+  | { outcome: 'inserted'; room: room_row; participant: participant_row }
+  | { outcome: 'unique_reuse'; participant: participant_row }
+
+async function try_insert_participant_and_direct_room(
+  input: resolve_room_input,
+): Promise<create_participant_room_outcome> {
+  let room_row: room_row
+
+  try {
+    room_row = await insert_direct_room_row()
+  } catch (error) {
+    if (!is_unique_violation(error)) {
+      throw error
+    }
+
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_create_conflict',
+      payload: debug_identity_payload(input),
+    })
+
+    const existing_after_room_conflict =
+      await find_canonical_user_participant(input)
+
+    if (existing_after_room_conflict) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'room_reused_after_conflict',
+        payload: {
+          ...debug_identity_payload(input),
+          participant_uuid: existing_after_room_conflict.participant_uuid,
+          room_uuid: existing_after_room_conflict.room_uuid,
+        },
+      })
+
+      return {
+        outcome: 'unique_reuse',
+        participant: existing_after_room_conflict,
+      }
+    }
+
+    room_row = await insert_direct_room_row()
+  }
 
   const participant_result = await supabase
     .from('participants')
@@ -264,13 +339,49 @@ async function create_participant_and_direct_room(input: resolve_room_input) {
     .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
     .single()
 
-  if (participant_result.error) {
+  if (!participant_result.error) {
+    return {
+      outcome: 'inserted',
+      room: room_row,
+      participant: participant_result.data as participant_row,
+    }
+  }
+
+  if (!is_unique_violation(participant_result.error)) {
+    await delete_orphan_direct_room(room_row.room_uuid)
     throw participant_result.error
   }
 
+  await debug_event({
+    category: 'chat_room',
+    event: 'participant_create_conflict',
+    payload: {
+      ...debug_identity_payload(input),
+      room_uuid: room_row.room_uuid,
+    },
+  })
+
+  await delete_orphan_direct_room(room_row.room_uuid)
+
+  const existing = await find_canonical_user_participant(input)
+
+  if (!existing) {
+    throw participant_result.error
+  }
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'participant_reused_after_conflict',
+    payload: {
+      ...debug_identity_payload(input),
+      participant_uuid: existing.participant_uuid,
+      room_uuid: existing.room_uuid,
+    },
+  })
+
   return {
-    room: room_row,
-    participant: participant_result.data as participant_row,
+    outcome: 'unique_reuse',
+    participant: existing,
   }
 }
 
@@ -307,12 +418,76 @@ async function move_participant_to_new_direct_room(
     .single()
 
   if (participant_result.error) {
+    await delete_orphan_direct_room(room_row.room_uuid)
     throw participant_result.error
   }
 
   return {
     room: room_row,
     participant: participant_result.data as participant_row,
+  }
+}
+
+async function resolve_room_for_user_participant(
+  participant: participant_row,
+  input: resolve_room_input,
+): Promise<{
+  room: chat_room
+  is_new_room: boolean
+}> {
+  const linked_room = await load_room(participant.room_uuid)
+
+  if (linked_room && linked_room.room_type === 'direct') {
+    const update_result = await update_existing_room(input, participant)
+    const bot_participant = await resolve_bot_participant(
+      update_result.room.room_uuid,
+    )
+
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_reused',
+      payload: debug_participant_room_payload({
+        participant_uuid: update_result.participant.participant_uuid,
+        room_uuid: update_result.room.room_uuid,
+        source_channel: input.channel,
+      }),
+    })
+
+    return {
+      room: normalize_room(
+        update_result.room,
+        update_result.participant,
+        bot_participant,
+        input,
+      ),
+      is_new_room: false,
+    }
+  }
+
+  const moved = await move_participant_to_new_direct_room(
+    input,
+    participant,
+  )
+  const bot_participant = await resolve_bot_participant(moved.room.room_uuid)
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'room_created',
+    payload: debug_participant_room_payload({
+      participant_uuid: moved.participant.participant_uuid,
+      room_uuid: moved.room.room_uuid,
+      source_channel: input.channel,
+    }),
+  })
+
+  return {
+    room: normalize_room(
+      moved.room,
+      moved.participant,
+      bot_participant,
+      input,
+    ),
+    is_new_room: true,
   }
 }
 
@@ -341,75 +516,29 @@ export async function resolve_chat_room(
       },
     })
 
-    const linked_room = await load_room(canonical_participant.room_uuid)
-
-    if (linked_room && linked_room.room_type === 'direct') {
-      const update_result = await update_existing_room(
-        input,
-        canonical_participant,
-      )
-      const bot_participant = await resolve_bot_participant(
-        update_result.room.room_uuid,
-      )
-
-      await debug_event({
-        category: 'chat_room',
-        event: 'room_reused',
-        payload: debug_participant_room_payload({
-          participant_uuid: update_result.participant.participant_uuid,
-          room_uuid: update_result.room.room_uuid,
-          source_channel: input.channel,
-        }),
-      })
-
-      return {
-        room: normalize_room(
-          update_result.room,
-          update_result.participant,
-          bot_participant,
-          input,
-        ),
-        is_new_room: false,
-      }
-    }
-
-    const moved = await move_participant_to_new_direct_room(
-      input,
-      canonical_participant,
-    )
-    const bot_participant = await resolve_bot_participant(moved.room.room_uuid)
-
-    await debug_event({
-      category: 'chat_room',
-      event: 'room_created',
-      payload: debug_participant_room_payload({
-        participant_uuid: moved.participant.participant_uuid,
-        room_uuid: moved.room.room_uuid,
-        source_channel: input.channel,
-      }),
-    })
-
-    return {
-      room: normalize_room(
-        moved.room,
-        moved.participant,
-        bot_participant,
-        input,
-      ),
-      is_new_room: true,
-    }
+    return resolve_room_for_user_participant(canonical_participant, input)
   }
 
-  const created = await create_participant_and_direct_room(input)
-  const bot_participant = await create_bot_participant(created.room.room_uuid)
+  const create_outcome = await try_insert_participant_and_direct_room(input)
+
+  if (create_outcome.outcome === 'unique_reuse') {
+    return resolve_room_for_user_participant(
+      create_outcome.participant,
+      input,
+    )
+  }
+
+  const bot_participant = await resolve_bot_participant(
+    create_outcome.room.room_uuid,
+  )
 
   await debug_event({
     category: 'chat_room',
     event: 'participant_created',
     payload: {
       ...debug_identity_payload(input),
-      participant_uuid: created.participant.participant_uuid,
-      room_uuid: created.room.room_uuid,
+      participant_uuid: create_outcome.participant.participant_uuid,
+      room_uuid: create_outcome.room.room_uuid,
     },
   })
 
@@ -417,16 +546,16 @@ export async function resolve_chat_room(
     category: 'chat_room',
     event: 'room_created',
     payload: debug_participant_room_payload({
-      participant_uuid: created.participant.participant_uuid,
-      room_uuid: created.room.room_uuid,
+      participant_uuid: create_outcome.participant.participant_uuid,
+      room_uuid: create_outcome.room.room_uuid,
       source_channel: input.channel,
     }),
   })
 
   return {
     room: normalize_room(
-      created.room,
-      created.participant,
+      create_outcome.room,
+      create_outcome.participant,
       bot_participant,
       input,
     ),
