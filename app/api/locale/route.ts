@@ -2,6 +2,7 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import { normalize_locale } from '@/lib/locale/action'
+import { locale_cookie_name } from '@/lib/locale/cookie'
 import { supabase } from '@/lib/db/supabase'
 import { visitor_cookie_name } from '@/lib/visitor/context'
 
@@ -14,6 +15,14 @@ export async function PATCH(request: Request) {
   const locale = normalize_locale(body.locale)
   const cookie_store = await cookies()
   const visitor_uuid = cookie_store.get(visitor_cookie_name)?.value
+
+  cookie_store.set(locale_cookie_name, locale, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 365,
+  })
 
   if (!visitor_uuid) {
     return NextResponse.json({ locale })

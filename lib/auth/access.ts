@@ -30,6 +30,7 @@ type session_access_input = {
 export type access_result = {
   user_uuid: string
   visitor_uuid: string
+  locale: string | null
   is_new_user: boolean
   is_new_visitor: boolean
 }
@@ -174,6 +175,15 @@ export async function resolve_auth_access(
 
   if (existing_identity.data?.user_uuid) {
     const user_uuid = existing_identity.data.user_uuid
+    const user_result = await supabase
+      .from('users')
+      .select('locale')
+      .eq('user_uuid', user_uuid)
+      .maybeSingle()
+
+    if (user_result.error) {
+      throw user_result.error
+    }
 
     const existing_visitor = await supabase
       .from('visitors')
@@ -189,6 +199,7 @@ export async function resolve_auth_access(
       return {
         user_uuid,
         visitor_uuid: existing_visitor.data.visitor_uuid,
+        locale: user_result.data?.locale ?? null,
         is_new_user: false,
         is_new_visitor: false,
       }
@@ -209,6 +220,7 @@ export async function resolve_auth_access(
     return {
       user_uuid,
       visitor_uuid: created_visitor.data.visitor_uuid,
+      locale: user_result.data?.locale ?? null,
       is_new_user: false,
       is_new_visitor: true,
     }
@@ -270,6 +282,7 @@ export async function resolve_auth_access(
   return {
     user_uuid,
     visitor_uuid: created_visitor.data.visitor_uuid,
+    locale: created_user.data.locale ?? null,
     is_new_user: true,
     is_new_visitor: true,
   }

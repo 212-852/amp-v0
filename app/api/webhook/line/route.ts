@@ -5,6 +5,7 @@ import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
 import { debug, debug_event } from '@/lib/debug'
+import { normalize_locale } from '@/lib/locale/action'
 
 type line_webhook_event = {
   type?: string
@@ -239,6 +240,7 @@ export async function POST(request: Request) {
         visitor_uuid: access.visitor_uuid,
         user_uuid: access.user_uuid,
         channel: 'line',
+        locale: normalize_locale(access.locale),
         external_room_id:
           event.source?.roomId ??
           event.source?.groupId ??

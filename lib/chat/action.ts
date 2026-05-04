@@ -7,6 +7,7 @@ import {
 } from './archive'
 import { resolve_chat_context } from '@/lib/dispatch/context'
 import { build_initial_chat_bundles } from './message'
+import type { chat_locale } from './message'
 import {
   resolve_chat_room,
   type chat_channel,
@@ -19,6 +20,7 @@ type resolve_initial_chat_input = {
   visitor_uuid: string
   user_uuid?: string | null
   channel: chat_channel
+  locale: chat_locale
   external_room_id?: string | null
   line_reply_token?: string | null
 }
@@ -52,7 +54,9 @@ export async function resolve_initial_chat(
     }
   }
 
-  const bundles = build_initial_chat_bundles()
+  const bundles = build_initial_chat_bundles({
+    locale: input.locale,
+  })
   const seeded_messages = await archive_message_bundles({
     room_uuid: room_result.room.room_uuid,
     participant_uuid: room_result.room.participant_uuid,

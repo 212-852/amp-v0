@@ -4,16 +4,17 @@ import type { archived_message } from '@/lib/chat/archive'
 import type {
   faq_bundle,
   how_to_use_bundle,
-  localized_text,
   message_bundle,
   quick_menu_bundle,
   welcome_bundle,
 } from '@/lib/chat/message'
 
-const locale = 'ja'
+function text_for(content: string | { ja?: string } | undefined) {
+  if (typeof content === 'string') {
+    return content
+  }
 
-function text_for(content: localized_text) {
-  return content[locale] ?? content.ja
+  return content?.ja ?? ''
 }
 
 function WelcomeBubble({ bundle }: { bundle: welcome_bundle }) {

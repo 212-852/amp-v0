@@ -4,10 +4,8 @@ import type { archived_message } from '@/lib/chat/archive'
 import { env } from '@/lib/config/env'
 import { debug_event } from '@/lib/debug'
 import type {
-  chat_locale,
   faq_bundle,
   how_to_use_bundle,
-  localized_text,
   message_bundle,
   quick_menu_bundle,
   welcome_bundle,
@@ -24,10 +22,12 @@ type deliver_line_chat_bundles_input = {
 
 type line_api_message = Record<string, unknown>
 
-const line_locale: chat_locale = 'ja'
+function pick_text(content: string | { ja?: string } | undefined) {
+  if (typeof content === 'string') {
+    return content
+  }
 
-function pick_text(loc: localized_text, locale: chat_locale) {
-  return loc[locale] ?? loc.ja
+  return content?.ja ?? ''
 }
 
 function truncate(s: string, max: number) {
@@ -103,8 +103,8 @@ function build_flex_bubble(input: {
 }
 
 function welcome_to_line_message(bundle: welcome_bundle): line_api_message {
-  const title = pick_text(bundle.payload.title, line_locale)
-  const text = pick_text(bundle.payload.text, line_locale)
+  const title = pick_text(bundle.payload.title)
+  const text = pick_text(bundle.payload.text)
 
   return {
     type: 'text',
@@ -114,7 +114,7 @@ function welcome_to_line_message(bundle: welcome_bundle): line_api_message {
 
 function quick_menu_to_line_message(bundle: quick_menu_bundle): line_api_message {
   const p = bundle.payload
-  const title = pick_text(p.title, line_locale)
+  const title = pick_text(p.title)
   const lines: Array<{
     text: string
     weight?: string
@@ -124,28 +124,28 @@ function quick_menu_to_line_message(bundle: quick_menu_bundle): line_api_message
 
   if (p.subtitle) {
     lines.push({
-      text: pick_text(p.subtitle, line_locale),
+      text: pick_text(p.subtitle),
       size: 'sm',
       color: '#a1887f',
     })
   }
 
   for (const item of p.items) {
-    lines.push({ text: pick_text(item.label, line_locale), weight: 'bold' })
+    lines.push({ text: pick_text(item.label), weight: 'bold' })
   }
 
   if (p.support_heading) {
-    lines.push({ text: pick_text(p.support_heading, line_locale), weight: 'bold' })
+    lines.push({ text: pick_text(p.support_heading), weight: 'bold' })
   }
 
   if (p.support_body) {
-    lines.push({ text: pick_text(p.support_body, line_locale), size: 'sm' })
+    lines.push({ text: pick_text(p.support_body), size: 'sm' })
   }
 
   if (p.links) {
     for (const link of p.links) {
       lines.push({
-        text: pick_text(link.label, line_locale),
+        text: pick_text(link.label),
         size: 'sm',
         color: '#c9a77d',
       })
@@ -173,7 +173,7 @@ function quick_menu_to_line_message(bundle: quick_menu_bundle): line_api_message
 
 function how_to_use_to_line_message(bundle: how_to_use_bundle): line_api_message {
   const p = bundle.payload
-  const title = pick_text(p.title, line_locale)
+  const title = pick_text(p.title)
   const lines: Array<{
     text: string
     weight?: string
@@ -182,24 +182,24 @@ function how_to_use_to_line_message(bundle: how_to_use_bundle): line_api_message
   }> = [{ text: title, weight: 'bold', size: 'lg' }]
 
   for (const step of p.steps) {
-    const line = pick_text(step.title, line_locale)
-    const desc = pick_text(step.description, line_locale).trim()
+    const line = pick_text(step.title)
+    const desc = pick_text(step.description).trim()
     lines.push({
       text: desc ? `${line}\n${desc}` : line,
     })
   }
 
   if (p.notice_heading) {
-    lines.push({ text: pick_text(p.notice_heading, line_locale), weight: 'bold' })
+    lines.push({ text: pick_text(p.notice_heading), weight: 'bold' })
   }
 
   if (p.notice_body) {
-    lines.push({ text: pick_text(p.notice_body, line_locale), size: 'sm' })
+    lines.push({ text: pick_text(p.notice_body), size: 'sm' })
   }
 
   if (p.footer_link_label) {
     lines.push({
-      text: pick_text(p.footer_link_label, line_locale),
+      text: pick_text(p.footer_link_label),
       size: 'sm',
       color: '#c9a77d',
     })
@@ -226,7 +226,7 @@ function how_to_use_to_line_message(bundle: how_to_use_bundle): line_api_message
 
 function faq_to_line_message(bundle: faq_bundle): line_api_message {
   const p = bundle.payload
-  const title = pick_text(p.title, line_locale)
+  const title = pick_text(p.title)
   const lines: Array<{
     text: string
     weight?: string
@@ -235,8 +235,8 @@ function faq_to_line_message(bundle: faq_bundle): line_api_message {
   }> = [{ text: title, weight: 'bold', size: 'lg' }]
 
   for (const item of p.items) {
-    lines.push({ text: pick_text(item.question, line_locale), weight: 'bold' })
-    const answer = pick_text(item.answer, line_locale).trim()
+    lines.push({ text: pick_text(item.question), weight: 'bold' })
+    const answer = pick_text(item.answer).trim()
     if (answer) {
       lines.push({ text: answer, size: 'sm' })
     }
@@ -244,7 +244,7 @@ function faq_to_line_message(bundle: faq_bundle): line_api_message {
 
   if (p.primary_cta_label) {
     lines.push({
-      text: pick_text(p.primary_cta_label, line_locale),
+      text: pick_text(p.primary_cta_label),
       weight: 'bold',
       color: '#c9a77d',
     })
@@ -270,11 +270,11 @@ function faq_to_line_message(bundle: faq_bundle): line_api_message {
 }
 
 function text_bundle_to_line_message(bundle: {
-  payload: { text: localized_text }
+  payload: { text: string | { ja?: string } }
 }): line_api_message {
   return {
     type: 'text',
-    text: truncate(pick_text(bundle.payload.text, line_locale), 5000),
+    text: truncate(pick_text(bundle.payload.text), 5000),
   }
 }
 

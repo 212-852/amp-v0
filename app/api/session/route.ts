@@ -196,6 +196,7 @@ async function resolve_session_chat(input: {
   visitor_uuid: string
   user_uuid: string | null
   channel: 'web' | 'liff'
+  locale: locale_key
 }): Promise<session_chat_state> {
   try {
     const initial_chat = await resolve_initial_chat(input)
@@ -297,17 +298,18 @@ async function resolve_session_payload() {
     user_agent,
   })
   const session_state = await resolve_session_state(guest_access.visitor_uuid)
-  const chat_channel = is_line_webview ? 'liff' : 'web'
-  const chat = await resolve_session_chat({
-    visitor_uuid: guest_access.visitor_uuid,
-    user_uuid: session_state.user_uuid,
-    channel: chat_channel,
-  })
   const normalized_session =
     normalize_client_session_shape(session_state)
   const resolved_locale = normalize_locale(
     normalized_session.locale ?? locale,
   )
+  const chat_channel = is_line_webview ? 'liff' : 'web'
+  const chat = await resolve_session_chat({
+    visitor_uuid: guest_access.visitor_uuid,
+    user_uuid: session_state.user_uuid,
+    channel: chat_channel,
+    locale: resolved_locale,
+  })
   const role = normalized_session.role
   const tier = normalized_session.tier
   const line_connected = normalized_session.line_connected

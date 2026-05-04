@@ -27,11 +27,7 @@ function parse_bundle(row: archive_row): message_bundle {
       sender: 'bot',
       version: 1,
       payload: {
-        text: {
-          ja: '',
-          en: '',
-          es: '',
-        },
+        text: '',
       },
     }
   }
@@ -59,11 +55,7 @@ function parse_bundle(row: archive_row): message_bundle {
     sender: 'bot',
     version: 1,
     payload: {
-      text: {
-        ja: row.body,
-        en: row.body,
-        es: row.body,
-      },
+      text: row.body,
     },
   }
 }
@@ -131,7 +123,11 @@ export async function archive_message_bundles(
     participant_uuid: resolve_participant_uuid(input, bundle.sender),
     channel: input.channel,
     body: JSON.stringify({
+      type: bundle.bundle_type,
+      locale: bundle.locale,
+      content_key: bundle.content_key,
       sequence: next_sequence + index,
+      payload: bundle.payload,
       bundle,
     }),
   }))
