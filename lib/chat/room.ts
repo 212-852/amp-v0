@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
+import { debug_event } from '@/lib/debug'
 
 export type chat_channel =
   | 'web'
@@ -55,20 +56,24 @@ function normalize_room(
   }
 }
 
-async function list_user_participants_for_identity(
-  input: resolve_room_input,
-): Promise<participant_row[]> {
+async function select_user_participants(filter: {
+  user_uuid?: string | null
+  visitor_uuid: string
+  guest_only?: boolean
+}): Promise<participant_row[]> {
   let query = supabase
     .from('participants')
     .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
     .eq('role', 'user')
 
-  if (input.user_uuid) {
-    query = query.or(
-      `user_uuid.eq.${input.user_uuid},visitor_uuid.eq.${input.visitor_uuid}`,
-    )
+  if (filter.user_uuid) {
+    query = query.eq('user_uuid', filter.user_uuid)
+  } else if (filter.guest_only) {
+    query = query
+      .eq('visitor_uuid', filter.visitor_uuid)
+      .is('user_uuid', null)
   } else {
-    query = query.eq('visitor_uuid', input.visitor_uuid)
+    query = query.eq('visitor_uuid', filter.visitor_uuid)
   }
 
   const result = await query
@@ -78,6 +83,34 @@ async function list_user_participants_for_identity(
   }
 
   return (result.data ?? []) as participant_row[]
+}
+
+async function list_user_participants_for_identity(
+  input: resolve_room_input,
+): Promise<participant_row[]> {
+  if (input.user_uuid) {
+    const by_user = await select_user_participants({
+      user_uuid: input.user_uuid,
+      visitor_uuid: input.visitor_uuid,
+    })
+
+    if (by_user.length > 0) {
+      return by_user
+    }
+
+    const guest_for_visitor = await select_user_participants({
+      visitor_uuid: input.visitor_uuid,
+      guest_only: true,
+    })
+
+    if (guest_for_visitor.length > 0) {
+      return guest_for_visitor
+    }
+  }
+
+  return select_user_participants({
+    visitor_uuid: input.visitor_uuid,
+  })
 }
 
 async function resolve_latest_direct_room_for_identity(
@@ -179,6 +212,15 @@ async function resolve_bot_participant(room_uuid: string) {
     await create_bot_participant(room_uuid)
 }
 
+function is_closed_room_status(status: string | null) {
+  if (!status) {
+    return false
+  }
+
+  const normalized = status.toLowerCase()
+  return normalized === 'closed' || normalized === 'inactive'
+}
+
 async function update_existing_room(
   input: resolve_room_input,
   participant: participant_row,
@@ -188,6 +230,8 @@ async function update_existing_room(
   if (!room) {
     throw new Error('Room not found for participant')
   }
+
+  const was_closed = is_closed_room_status(room.status)
 
   const participant_update: {
     user_uuid?: string | null
@@ -232,6 +276,7 @@ async function update_existing_room(
   return {
     room,
     participant: participant_result.data as participant_row,
+    was_closed,
   }
 }
 
@@ -272,27 +317,71 @@ async function create_room(input: resolve_room_input) {
   }
 }
 
+function room_debug_payload(input: {
+  participant_uuid: string
+  room_uuid: string
+  source_channel: chat_channel
+}) {
+  return {
+    participant_uuid: input.participant_uuid,
+    room_uuid: input.room_uuid,
+    room_type: 'direct' as const,
+    source_channel: input.source_channel,
+  }
+}
+
 export async function resolve_chat_room(
   input: resolve_room_input,
 ): Promise<{
   room: chat_room
   is_new_room: boolean
 }> {
+  await debug_event({
+    category: 'chat_room',
+    event: 'room_lookup_started',
+    payload: {
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid ?? null,
+      room_type: 'direct',
+      source_channel: input.channel,
+    },
+  })
+
   const existing_direct = await resolve_latest_direct_room_for_identity(input)
 
   if (existing_direct) {
-    const result = await update_existing_room(
+    const update_result = await update_existing_room(
       input,
       existing_direct.participant,
     )
     const bot_participant = await resolve_bot_participant(
-      result.room.room_uuid,
+      update_result.room.room_uuid,
     )
+
+    const payload = room_debug_payload({
+      participant_uuid: update_result.participant.participant_uuid,
+      room_uuid: update_result.room.room_uuid,
+      source_channel: input.channel,
+    })
+
+    if (update_result.was_closed) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'room_reopened',
+        payload,
+      })
+    } else {
+      await debug_event({
+        category: 'chat_room',
+        event: 'room_reused',
+        payload,
+      })
+    }
 
     return {
       room: normalize_room(
-        result.room,
-        result.participant,
+        update_result.room,
+        update_result.participant,
         bot_participant,
         input,
       ),
@@ -302,6 +391,16 @@ export async function resolve_chat_room(
 
   const result = await create_room(input)
   const bot_participant = await create_bot_participant(result.room.room_uuid)
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'room_created',
+    payload: room_debug_payload({
+      participant_uuid: result.participant.participant_uuid,
+      room_uuid: result.room.room_uuid,
+      source_channel: input.channel,
+    }),
+  })
 
   return {
     room: normalize_room(
