@@ -284,12 +284,12 @@ async function resolve_session_payload() {
   const is_line_webview =
     user_agent?.toLowerCase().includes('line/') ?? false
 
-  const visitor = await resolve_visitor_context({
-    source_channel: is_line_webview ? 'liff' : 'web',
-  })
+  const session_src = is_line_webview ? 'liff' : 'web'
+  const visitor = await resolve_visitor_context(session_src)
   const guest_access = await resolve_guest_access({
     visitor_uuid: visitor.visitor_uuid,
     locale,
+    source_channel: session_src,
   })
   const session_access = await resolve_session_access({
     visitor_uuid: guest_access.visitor_uuid,
@@ -298,6 +298,7 @@ async function resolve_session_payload() {
     access_platform: get_access_platform(user_agent),
     locale,
     user_agent,
+    source_channel: session_src,
   })
   const session_state = await resolve_session_state(guest_access.visitor_uuid)
   const normalized_session =

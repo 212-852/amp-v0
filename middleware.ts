@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import {
   get_browser_session_cookie_options,
-  resolve_browser_session_from_cookies,
+  read_browser_session_cookie_values,
   session_cookie_max_age,
   session_cookie_name,
   visitor_cookie_max_age,
@@ -28,48 +28,50 @@ function append_request_cookie(
   )
 }
 
+/**
+ * Forward existing httpOnly cookies into the request. Do not mint visitor/session
+ * (single path: server resolve_visitor_context + lib/auth/session.ts).
+ */
 function create_response(
   request: NextRequest,
   response_builder: (headers: Headers) => NextResponse,
 ) {
   const request_headers = new Headers(request.headers)
-  const resolved = resolve_browser_session_from_cookies({
-    visitor_cookie: request.cookies.get(visitor_cookie_name)?.value,
-    session_cookie: request.cookies.get(session_cookie_name)?.value,
-  })
-  const needs_visitor_cookie = resolved.is_new_visitor
-  const needs_session_cookie = resolved.is_new_session
+  const existing = read_browser_session_cookie_values(
+    request.cookies.get(visitor_cookie_name)?.value,
+    request.cookies.get(session_cookie_name)?.value,
+  )
 
-  if (needs_visitor_cookie) {
+  if (existing.visitor_uuid) {
     append_request_cookie(
       request_headers,
       visitor_cookie_name,
-      resolved.visitor_uuid,
+      existing.visitor_uuid,
     )
   }
 
-  if (needs_session_cookie) {
+  if (existing.session_uuid) {
     append_request_cookie(
       request_headers,
       session_cookie_name,
-      resolved.session_uuid,
+      existing.session_uuid,
     )
   }
 
   const response = response_builder(request_headers)
 
-  if (needs_visitor_cookie) {
+  if (existing.visitor_uuid) {
     response.cookies.set(
       visitor_cookie_name,
-      resolved.visitor_uuid,
+      existing.visitor_uuid,
       get_browser_session_cookie_options(visitor_cookie_max_age),
     )
   }
 
-  if (needs_session_cookie) {
+  if (existing.session_uuid) {
     response.cookies.set(
       session_cookie_name,
-      resolved.session_uuid,
+      existing.session_uuid,
       get_browser_session_cookie_options(session_cookie_max_age),
     )
   }
@@ -82,12 +84,12 @@ export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const is_local = is_local_host(host)
   const is_api = pathname.startsWith('/api')
-  const skip_session_cookies =
+  const skip_session_forward =
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon.ico') ||
     pathname.startsWith('/api/webhook')
 
-  if (skip_session_cookies) {
+  if (skip_session_forward) {
     return NextResponse.next()
   }
 

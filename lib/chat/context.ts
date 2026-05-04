@@ -7,7 +7,10 @@ import { resolve_guest_access } from '@/lib/auth/access'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
 import { locale_cookie_name } from '@/lib/locale/cookie'
-import { resolve_visitor_context } from '@/lib/visitor/context'
+import {
+  resolve_visitor_context,
+  type session_source_channel,
+} from '@/lib/visitor/context'
 import type { chat_locale } from './message'
 import type { chat_channel } from './room'
 
@@ -57,6 +60,20 @@ function normalize_optional_locale(value: string | null | undefined) {
   return locale
 }
 
+function session_source_from_channel(
+  channel: chat_channel,
+): session_source_channel {
+  if (channel === 'liff' || channel === 'pwa') {
+    return channel
+  }
+
+  if (channel === 'line') {
+    return 'liff'
+  }
+
+  return 'web'
+}
+
 function first_locale(...values: Array<string | null | undefined>) {
   for (const value of values) {
     const locale = normalize_optional_locale(value)
@@ -74,12 +91,12 @@ export async function resolve_chat_context(
 ): Promise<chat_request_context> {
   const cookie_store = await cookies()
   const header_store = await headers()
-  const browser_session = await resolve_visitor_context({
-    source_channel: input.channel === 'web' ? 'web' : 'liff',
-  })
+  const session_src = session_source_from_channel(input.channel)
+  const browser_session = await resolve_visitor_context(session_src)
 
   const guest_access = await resolve_guest_access({
     visitor_uuid: browser_session.visitor_uuid,
+    source_channel: session_src,
   })
   const user_state = await resolve_user_state(guest_access.visitor_uuid)
   const accept_language =

@@ -12,6 +12,20 @@ function new_uuid(): string {
   return globalThis.crypto.randomUUID()
 }
 
+/**
+ * Only the auth/session layer may mint browser visitor_uuid (server: visitor/context).
+ */
+export function mint_visitor_uuid(): string {
+  return new_uuid()
+}
+
+/**
+ * Only the auth/session layer may mint browser session_uuid (server: visitor/context).
+ */
+export function mint_session_uuid(): string {
+  return new_uuid()
+}
+
 export function get_browser_session_cookie_options(maxAge: number) {
   return {
     httpOnly: true,
@@ -22,33 +36,20 @@ export function get_browser_session_cookie_options(maxAge: number) {
   }
 }
 
-export type browser_session_cookie_input = {
-  visitor_cookie: string | null | undefined
-  session_cookie: string | null | undefined
-}
-
-export type resolved_browser_session = {
-  visitor_uuid: string
-  session_uuid: string
-  is_new_visitor: boolean
-  is_new_session: boolean
+export type existing_browser_session_cookies = {
+  visitor_uuid: string | null
+  session_uuid: string | null
 }
 
 /**
- * Single place that may mint browser visitor_uuid / session_uuid cookies.
+ * Read cookie values only (no mint). Middleware forwards these to the request.
  */
-export function resolve_browser_session_from_cookies(
-  input: browser_session_cookie_input,
-): resolved_browser_session {
-  const is_new_visitor = !input.visitor_cookie
-  const is_new_session = !input.session_cookie
-  const visitor_uuid = input.visitor_cookie ?? new_uuid()
-  const session_uuid = input.session_cookie ?? new_uuid()
-
+export function read_browser_session_cookie_values(
+  visitor_cookie: string | null | undefined,
+  session_cookie: string | null | undefined,
+): existing_browser_session_cookies {
   return {
-    visitor_uuid,
-    session_uuid,
-    is_new_visitor,
-    is_new_session,
+    visitor_uuid: visitor_cookie ?? null,
+    session_uuid: session_cookie ?? null,
   }
 }

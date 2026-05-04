@@ -14,9 +14,7 @@ export async function PATCH(request: Request) {
   const body = (await request.json()) as locale_body
   const locale = normalize_locale(body.locale)
   const cookie_store = await cookies()
-  const browser_session = await resolve_visitor_context({
-    source_channel: 'web',
-  })
+  const browser_session = await resolve_visitor_context('web')
   const visitor_uuid = browser_session.visitor_uuid
 
   cookie_store.set(locale_cookie_name, locale, {

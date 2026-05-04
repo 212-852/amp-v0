@@ -5,6 +5,7 @@ import {
   load_archived_messages,
   type archived_message,
 } from './archive'
+import { debug_event } from '@/lib/debug'
 import { resolve_chat_context } from '@/lib/dispatch/context'
 import { build_initial_chat_bundles } from './message'
 import type { chat_locale } from './message'
@@ -41,9 +42,45 @@ export async function resolve_initial_chat(
     channel: input.channel,
     external_room_id: input.external_room_id ?? null,
   })
-  const archived_messages = await load_archived_messages(
-    room_result.room.room_uuid,
-  )
+
+  if (!room_result.ok || !room_result.room.room_uuid) {
+    return {
+      room: room_result.room,
+      is_new_room: false,
+      is_seeded: false,
+      messages: [],
+    }
+  }
+
+  let archived_messages: archived_message[]
+
+  try {
+    archived_messages = await load_archived_messages(
+      room_result.room.room_uuid,
+    )
+  } catch (error) {
+    const e = error as { code?: string; message?: string }
+    console.error('[chat_room]', 'room_failed', error)
+
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_failed',
+      payload: {
+        phase: 'load_archived_messages',
+        error,
+        error_code: e.code,
+        error_message: e.message,
+        room_uuid: room_result.room.room_uuid,
+      },
+    })
+
+    return {
+      room: room_result.room,
+      is_new_room: room_result.is_new_room,
+      is_seeded: false,
+      messages: [],
+    }
+  }
 
   if (!should_seed_initial_messages(archived_messages)) {
     return {
@@ -54,29 +91,53 @@ export async function resolve_initial_chat(
     }
   }
 
-  const bundles = build_initial_chat_bundles({
-    locale: input.locale,
-  })
-  const seeded_messages = await archive_message_bundles({
-    room_uuid: room_result.room.room_uuid,
-    participant_uuid: room_result.room.participant_uuid,
-    bot_participant_uuid: room_result.room.bot_participant_uuid,
-    channel: input.channel,
-    bundles,
-  })
+  try {
+    const bundles = build_initial_chat_bundles({
+      locale: input.locale,
+    })
+    const seeded_messages = await archive_message_bundles({
+      room_uuid: room_result.room.room_uuid,
+      participant_uuid: room_result.room.participant_uuid,
+      bot_participant_uuid: room_result.room.bot_participant_uuid,
+      channel: input.channel,
+      bundles,
+    })
 
-  await output_chat_bundles({
-    room: room_result.room,
-    channel: input.channel,
-    messages: seeded_messages,
-    line_reply_token: input.line_reply_token ?? null,
-  })
+    await output_chat_bundles({
+      room: room_result.room,
+      channel: input.channel,
+      messages: seeded_messages,
+      line_reply_token: input.line_reply_token ?? null,
+    })
 
-  return {
-    room: room_result.room,
-    is_new_room: room_result.is_new_room,
-    is_seeded: true,
-    messages: seeded_messages,
+    return {
+      room: room_result.room,
+      is_new_room: room_result.is_new_room,
+      is_seeded: true,
+      messages: seeded_messages,
+    }
+  } catch (error) {
+    const e = error as { code?: string; message?: string }
+    console.error('[chat_room]', 'room_failed', error)
+
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_failed',
+      payload: {
+        phase: 'seed_initial_messages',
+        error,
+        error_code: e.code,
+        error_message: e.message,
+        room_uuid: room_result.room.room_uuid,
+      },
+    })
+
+    return {
+      room: room_result.room,
+      is_new_room: room_result.is_new_room,
+      is_seeded: false,
+      messages: archived_messages,
+    }
   }
 }
 

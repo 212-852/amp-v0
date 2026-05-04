@@ -2,6 +2,18 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { notify } from '@/lib/notify'
+import {
+  emit_visitor_access_debug,
+  type session_source_channel,
+} from '@/lib/visitor/context'
+
+function is_unique_violation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  return (error as { code?: string }).code === '23505'
+}
 
 export type auth_provider = 'line' | 'google' | 'email'
 
@@ -16,6 +28,7 @@ type access_input = {
 type guest_access_input = {
   visitor_uuid: string
   locale?: string | null
+  source_channel?: session_source_channel
 }
 
 type session_access_input = {
@@ -25,6 +38,7 @@ type session_access_input = {
   access_platform: 'ios' | 'android' | 'mac' | 'windows' | 'unknown'
   locale?: string | null
   user_agent?: string | null
+  source_channel?: session_source_channel
 }
 
 export type access_result = {
@@ -45,14 +59,27 @@ export type session_access_result = {
   is_new_session: boolean
 }
 
+async function find_visitor_row(visitor_uuid: string) {
+  return supabase
+    .from('visitors')
+    .select('visitor_uuid')
+    .eq('visitor_uuid', visitor_uuid)
+    .maybeSingle()
+}
+
+async function find_visitor_by_user(user_uuid: string) {
+  return supabase
+    .from('visitors')
+    .select('visitor_uuid')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+}
+
 export async function resolve_guest_access(
   input: guest_access_input,
 ): Promise<guest_access_result> {
-  const existing_visitor = await supabase
-    .from('visitors')
-    .select('visitor_uuid')
-    .eq('visitor_uuid', input.visitor_uuid)
-    .maybeSingle()
+  const source_channel = input.source_channel ?? 'web'
+  const existing_visitor = await find_visitor_row(input.visitor_uuid)
 
   if (existing_visitor.error) {
     throw existing_visitor.error
@@ -85,24 +112,73 @@ export async function resolve_guest_access(
     .select('visitor_uuid')
     .single()
 
-  if (created_visitor.error) {
+  if (!created_visitor.error) {
+    return {
+      visitor_uuid: created_visitor.data.visitor_uuid,
+      is_new_visitor: true,
+    }
+  }
+
+  if (!is_unique_violation(created_visitor.error)) {
     throw created_visitor.error
   }
 
-  return {
-    visitor_uuid: created_visitor.data.visitor_uuid,
-    is_new_visitor: true,
+  await emit_visitor_access_debug({
+    event: 'visitor_create_conflict',
+    visitor_uuid: input.visitor_uuid,
+    session_uuid: null,
+    user_uuid: null,
+    source_channel,
+  })
+
+  const after_conflict = await find_visitor_row(input.visitor_uuid)
+
+  if (after_conflict.error) {
+    throw after_conflict.error
   }
+
+  if (!after_conflict.data?.visitor_uuid) {
+    throw created_visitor.error
+  }
+
+  await emit_visitor_access_debug({
+    event: 'visitor_reused_after_conflict',
+    visitor_uuid: after_conflict.data.visitor_uuid,
+    session_uuid: null,
+    user_uuid: null,
+    source_channel,
+  })
+
+  const touch = await supabase
+    .from('visitors')
+    .update({
+      updated_at: new Date().toISOString(),
+    })
+    .eq('visitor_uuid', after_conflict.data.visitor_uuid)
+
+  if (touch.error) {
+    throw touch.error
+  }
+
+  return {
+    visitor_uuid: after_conflict.data.visitor_uuid,
+    is_new_visitor: false,
+  }
+}
+
+async function find_session_row(session_uuid: string) {
+  return supabase
+    .from('sessions')
+    .select('session_uuid')
+    .eq('session_uuid', session_uuid)
+    .maybeSingle()
 }
 
 export async function resolve_session_access(
   input: session_access_input,
 ): Promise<session_access_result> {
-  const existing_session = await supabase
-    .from('sessions')
-    .select('session_uuid')
-    .eq('session_uuid', input.session_uuid)
-    .maybeSingle()
+  const source_channel = input.source_channel ?? 'web'
+  const existing_session = await find_session_row(input.session_uuid)
 
   if (existing_session.error) {
     throw existing_session.error
@@ -149,13 +225,63 @@ export async function resolve_session_access(
     .select('session_uuid')
     .single()
 
-  if (created_session.error) {
+  if (!created_session.error) {
+    return {
+      session_uuid: created_session.data.session_uuid,
+      is_new_session: true,
+    }
+  }
+
+  if (!is_unique_violation(created_session.error)) {
     throw created_session.error
   }
 
+  await emit_visitor_access_debug({
+    event: 'session_create_conflict',
+    visitor_uuid: input.visitor_uuid,
+    session_uuid: input.session_uuid,
+    user_uuid: null,
+    source_channel,
+  })
+
+  const after_conflict = await find_session_row(input.session_uuid)
+
+  if (after_conflict.error) {
+    throw after_conflict.error
+  }
+
+  if (!after_conflict.data?.session_uuid) {
+    throw created_session.error
+  }
+
+  await emit_visitor_access_debug({
+    event: 'session_reused_after_conflict',
+    visitor_uuid: input.visitor_uuid,
+    session_uuid: input.session_uuid,
+    user_uuid: null,
+    source_channel,
+  })
+
+  const updated_session = await supabase
+    .from('sessions')
+    .update({
+      visitor_uuid: input.visitor_uuid,
+      access_channel: input.access_channel,
+      access_platform: input.access_platform,
+      locale: input.locale ?? null,
+      user_agent: input.user_agent ?? null,
+      last_seen_at: current_time,
+      updated_at: current_time,
+    })
+    .eq('session_uuid', input.session_uuid)
+
+  if (updated_session.error) {
+    throw updated_session.error
+  }
+
   return {
-    session_uuid: created_session.data.session_uuid,
-    is_new_session: true,
+    session_uuid: input.session_uuid,
+    is_new_session: false,
   }
 }
 
@@ -213,16 +339,52 @@ export async function resolve_auth_access(
       .select('visitor_uuid')
       .single()
 
-    if (created_visitor.error) {
+    if (!created_visitor.error) {
+      return {
+        user_uuid,
+        visitor_uuid: created_visitor.data.visitor_uuid,
+        locale: user_result.data?.locale ?? null,
+        is_new_user: false,
+        is_new_visitor: true,
+      }
+    }
+
+    if (!is_unique_violation(created_visitor.error)) {
       throw created_visitor.error
     }
 
+    await emit_visitor_access_debug({
+      event: 'visitor_create_conflict',
+      visitor_uuid: null,
+      session_uuid: null,
+      user_uuid,
+      source_channel: 'web',
+    })
+
+    const reused_visitor = await find_visitor_by_user(user_uuid)
+
+    if (reused_visitor.error) {
+      throw reused_visitor.error
+    }
+
+    if (!reused_visitor.data?.visitor_uuid) {
+      throw created_visitor.error
+    }
+
+    await emit_visitor_access_debug({
+      event: 'visitor_reused_after_conflict',
+      visitor_uuid: reused_visitor.data.visitor_uuid,
+      session_uuid: null,
+      user_uuid,
+      source_channel: 'web',
+    })
+
     return {
       user_uuid,
-      visitor_uuid: created_visitor.data.visitor_uuid,
+      visitor_uuid: reused_visitor.data.visitor_uuid,
       locale: user_result.data?.locale ?? null,
       is_new_user: false,
-      is_new_visitor: true,
+      is_new_visitor: false,
     }
   }
 
@@ -252,7 +414,42 @@ export async function resolve_auth_access(
     .select('visitor_uuid')
     .single()
 
-  if (created_visitor.error) {
+  let visitor_uuid_for_identity: string
+  let is_fresh_visitor_row = true
+
+  if (!created_visitor.error) {
+    visitor_uuid_for_identity = created_visitor.data.visitor_uuid
+  } else if (is_unique_violation(created_visitor.error)) {
+    is_fresh_visitor_row = false
+
+    await emit_visitor_access_debug({
+      event: 'visitor_create_conflict',
+      visitor_uuid: null,
+      session_uuid: null,
+      user_uuid,
+      source_channel: 'web',
+    })
+
+    const reused_visitor = await find_visitor_by_user(user_uuid)
+
+    if (reused_visitor.error) {
+      throw reused_visitor.error
+    }
+
+    if (!reused_visitor.data?.visitor_uuid) {
+      throw created_visitor.error
+    }
+
+    visitor_uuid_for_identity = reused_visitor.data.visitor_uuid
+
+    await emit_visitor_access_debug({
+      event: 'visitor_reused_after_conflict',
+      visitor_uuid: visitor_uuid_for_identity,
+      session_uuid: null,
+      user_uuid,
+      source_channel: 'web',
+    })
+  } else {
     throw created_visitor.error
   }
 
@@ -272,18 +469,18 @@ export async function resolve_auth_access(
     event: 'new_user_created',
     provider: input.provider,
     user_uuid,
-    visitor_uuid: created_visitor.data.visitor_uuid,
+    visitor_uuid: visitor_uuid_for_identity,
     display_name: input.display_name ?? null,
     locale: created_user.data.locale ?? null,
     is_new_user: true,
-    is_new_visitor: true,
+    is_new_visitor: is_fresh_visitor_row,
   })
 
   return {
     user_uuid,
-    visitor_uuid: created_visitor.data.visitor_uuid,
+    visitor_uuid: visitor_uuid_for_identity,
     locale: created_user.data.locale ?? null,
     is_new_user: true,
-    is_new_visitor: true,
+    is_new_visitor: is_fresh_visitor_row,
   }
 }
