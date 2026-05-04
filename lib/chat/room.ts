@@ -189,8 +189,57 @@ async function debug_chat_room(
   })
 }
 
-const participant_select_fields =
+/** participants table: never include room_type in select/insert/update lists. */
+const PARTICIPANT_DB_SELECT =
   'participant_uuid, room_uuid, user_uuid, visitor_uuid, role'
+
+function build_user_participant_insert_row(
+  input: resolve_room_input,
+  room_uuid: string,
+  updated_at_iso: string,
+) {
+  return {
+    room_uuid,
+    user_uuid: input.user_uuid ?? null,
+    visitor_uuid: input.visitor_uuid,
+    role: 'user' as const,
+    last_channel: input.channel,
+    updated_at: updated_at_iso,
+  }
+}
+
+function build_user_participant_touch_update(
+  input: resolve_room_input,
+  updated_at_iso: string,
+) {
+  return {
+    visitor_uuid: input.visitor_uuid,
+    user_uuid: input.user_uuid ?? null,
+    last_channel: input.channel,
+    updated_at: updated_at_iso,
+  }
+}
+
+function build_user_participant_move_update(
+  input: resolve_room_input,
+  new_room_uuid: string,
+  updated_at_iso: string,
+) {
+  return {
+    room_uuid: new_room_uuid,
+    visitor_uuid: input.visitor_uuid,
+    user_uuid: input.user_uuid ?? null,
+    last_channel: input.channel,
+    updated_at: updated_at_iso,
+  }
+}
+
+function build_bot_participant_insert_row(room_uuid: string) {
+  return {
+    room_uuid: room_uuid ?? null,
+    role: 'bot' as const,
+  }
+}
 
 async function find_canonical_user_participant(
   input: resolve_room_input,
@@ -198,7 +247,7 @@ async function find_canonical_user_participant(
   if (input.user_uuid) {
     const by_user = await supabase
       .from('participants')
-      .select(participant_select_fields)
+      .select(PARTICIPANT_DB_SELECT)
       .eq('role', 'user')
       .eq('user_uuid', input.user_uuid)
       .order('updated_at', { ascending: false })
@@ -216,7 +265,7 @@ async function find_canonical_user_participant(
 
   const by_visitor = await supabase
     .from('participants')
-    .select(participant_select_fields)
+    .select(PARTICIPANT_DB_SELECT)
     .eq('role', 'user')
     .eq('visitor_uuid', input.visitor_uuid)
     .order('updated_at', { ascending: false })
@@ -271,15 +320,11 @@ async function insert_direct_room_row(): Promise<room_row> {
   return room_result.data as room_row
 }
 
-async function link_room_participant(
-  room_uuid: string,
-  participant_uuid: string,
-) {
+async function touch_room_row(room_uuid: string) {
   const now = new Date().toISOString()
   const room_result = await supabase
     .from('rooms')
     .update({
-      participant_uuid,
       updated_at: now,
       status: 'active',
     })
@@ -303,24 +348,18 @@ async function try_insert_participant_and_direct_room(
   const now = new Date().toISOString()
   const participant_result = await supabase
     .from('participants')
-    .insert({
-      room_uuid: room_row.room_uuid,
-      user_uuid: input.user_uuid ?? null,
-      visitor_uuid: input.visitor_uuid,
-      role: 'user',
-      room_type: 'direct',
-      status: 'active',
-      last_channel: input.channel,
-      updated_at: now,
-    })
-    .select(participant_select_fields)
+    .insert(
+      build_user_participant_insert_row(
+        input,
+        room_row.room_uuid,
+        now,
+      ),
+    )
+    .select(PARTICIPANT_DB_SELECT)
     .maybeSingle()
 
   if (!participant_result.error && participant_result.data) {
-    await link_room_participant(
-      room_row.room_uuid,
-      participant_result.data.participant_uuid,
-    )
+    await touch_room_row(room_row.room_uuid)
 
     return {
       tag: 'fresh',
@@ -373,16 +412,9 @@ async function touch_direct_participant_and_room(
 
   const participant_result = await supabase
     .from('participants')
-    .update({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid ?? null,
-      last_channel: input.channel,
-      updated_at: now,
-      status: 'active',
-      room_type: 'direct',
-    })
+    .update(build_user_participant_touch_update(input, now))
     .eq('participant_uuid', participant.participant_uuid)
-    .select(participant_select_fields)
+    .select(PARTICIPANT_DB_SELECT)
     .maybeSingle()
 
   if (participant_result.error) {
@@ -398,7 +430,6 @@ async function touch_direct_participant_and_room(
     .update({
       status: 'active',
       updated_at: now,
-      participant_uuid: participant.participant_uuid,
     })
     .eq('room_uuid', room.room_uuid)
 
@@ -427,17 +458,15 @@ async function move_participant_to_new_direct_room(
 
   const participant_result = await supabase
     .from('participants')
-    .update({
-      room_uuid: new_room.room_uuid,
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid ?? null,
-      last_channel: input.channel,
-      updated_at: now,
-      status: 'active',
-      room_type: 'direct',
-    })
+    .update(
+      build_user_participant_move_update(
+        input,
+        new_room.room_uuid,
+        now,
+      ),
+    )
     .eq('participant_uuid', participant.participant_uuid)
-    .select(participant_select_fields)
+    .select(PARTICIPANT_DB_SELECT)
     .maybeSingle()
 
   if (participant_result.error) {
@@ -450,10 +479,7 @@ async function move_participant_to_new_direct_room(
     throw new Error('move_participant: update returned no row')
   }
 
-  await link_room_participant(
-    new_room.room_uuid,
-    participant.participant_uuid,
-  )
+  await touch_room_row(new_room.room_uuid)
 
   const final_room = await load_room(new_room.room_uuid)
 
@@ -470,7 +496,7 @@ async function move_participant_to_new_direct_room(
 async function find_bot_participant(room_uuid: string) {
   const result = await supabase
     .from('participants')
-    .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
+    .select(PARTICIPANT_DB_SELECT)
     .eq('room_uuid', room_uuid ?? null)
     .eq('role', 'bot')
     .order('created_at', { ascending: true })
@@ -489,12 +515,8 @@ async function find_bot_participant(room_uuid: string) {
 async function create_bot_participant(room_uuid: string) {
   const result = await supabase
     .from('participants')
-    .insert({
-      room_uuid: room_uuid ?? null,
-      role: 'bot',
-      status: 'active',
-    })
-    .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
+    .insert(build_bot_participant_insert_row(room_uuid))
+    .select(PARTICIPANT_DB_SELECT)
     .maybeSingle()
 
   if (result.error) {
