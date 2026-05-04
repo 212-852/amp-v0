@@ -3,8 +3,15 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { randomUUID } from 'crypto'
 
-export const visitor_cookie_name = 'amp_visitor_uuid'
-export const session_cookie_name = 'amp_session_uuid'
+import {
+  session_cookie_name,
+  visitor_cookie_name,
+} from './cookie'
+
+export {
+  session_cookie_name,
+  visitor_cookie_name,
+} from './cookie'
 
 export type visitor_context = {
   visitor_uuid: string

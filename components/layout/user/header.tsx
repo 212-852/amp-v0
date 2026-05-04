@@ -17,6 +17,7 @@ import {
 } from '@/lib/locale/action'
 import {
   apply_locale_from_session,
+  get_locale,
   set_locale as set_locale_state,
   subscribe_locale,
 } from '@/lib/locale/state'
@@ -106,7 +107,7 @@ export default function UserHeader() {
     const unsubscribe_locale = subscribe_locale(set_locale)
     const mounted_timer = window.setTimeout(() => {
       set_mounted(true)
-      apply_locale_from_session(undefined)
+      set_locale(get_locale())
     }, 0)
     fetch('/api/session', {
       method: 'GET',
@@ -169,7 +170,7 @@ export default function UserHeader() {
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <Link
-              href="/user"
+              href="/"
               className="inline-block shrink-0 text-[17px] font-semibold tracking-[0.02em] leading-[1.35] text-[#2a1d18]"
             >
               PET TAXI

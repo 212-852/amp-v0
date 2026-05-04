@@ -1,10 +1,15 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import type { overlay_variant } from './types'
+import type {
+  overlay_motion,
+  overlay_variant,
+} from './types'
 
 type panel_props = {
   variant?: overlay_variant
+  motion?: overlay_motion
+  panel_class_name?: string
   children: ReactNode
 }
 
@@ -36,23 +41,21 @@ const content_class: Record<overlay_variant, string> = {
     'justify-end',
 }
 
-const content_animate: Record<
-  Exclude<overlay_variant, 'center'>,
-  string
-> = {
-  bottom:
-    'animate-[modal_in_0.3s_cubic-bezier(0.22,1,0.36,1)_both]',
-
-  left:
-    'animate-[modal_in_0.3s_cubic-bezier(0.22,1,0.36,1)_both]',
-
-  right:
-    'animate-[modal_in_0.3s_cubic-bezier(0.22,1,0.36,1)_both]',
+const motion_class: Record<overlay_motion, string> = {
+  center: 'center_modal_pop_in',
+  bottom: 'overlay_panel_from_bottom',
+  left: 'overlay_panel_from_left',
 }
 
 export default function OverlayPanel(props: panel_props) {
   const variant = props.variant ?? 'center'
   const is_center = variant === 'center'
+  const motion =
+    props.motion ?? (
+      variant === 'bottom' || variant === 'left'
+        ? variant
+        : 'center'
+    )
 
   if (is_center) {
     return (
@@ -64,13 +67,20 @@ export default function OverlayPanel(props: panel_props) {
         "
       >
         <div
-          className="
-            center_modal_pop_in
+          className={`
             flex w-full justify-center
             pointer-events-auto
-          "
+            ${motion_class[motion]}
+          `}
         >
-          {props.children}
+          <div
+            className={[
+              'flex w-full justify-center',
+              props.panel_class_name ?? '',
+            ].join(' ')}
+          >
+            {props.children}
+          </div>
         </div>
       </div>
     )
@@ -89,8 +99,9 @@ export default function OverlayPanel(props: panel_props) {
         className={`
           flex w-full
           pointer-events-auto
-          ${content_animate[variant]}
+          ${motion_class[motion]}
           ${content_class[variant]}
+          ${props.panel_class_name ?? ''}
         `}
       >
         {props.children}

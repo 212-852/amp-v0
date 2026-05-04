@@ -2,6 +2,7 @@ import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
 
@@ -192,12 +193,24 @@ export async function POST(request: Request) {
         provider: 'line',
         provider_id: line_user_id,
       })
+      const initial_chat = await resolve_initial_chat({
+        visitor_uuid: access.visitor_uuid,
+        user_uuid: access.user_uuid,
+        channel: 'line',
+        external_room_id:
+          event.source?.roomId ??
+          event.source?.groupId ??
+          line_user_id,
+      })
 
       const passed_data: Record<string, unknown> = {
         user_uuid: access.user_uuid,
         visitor_uuid: access.visitor_uuid,
         is_new_user: access.is_new_user,
         is_new_visitor: access.is_new_visitor,
+        chat_room_uuid: initial_chat.room.room_uuid,
+        chat_seeded: initial_chat.is_seeded,
+        chat_message_count: initial_chat.messages.length,
 
         line_user_id,
         event_type: event.type,

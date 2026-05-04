@@ -40,7 +40,11 @@ export default function OverlayRoot(props: overlay_props) {
         "
       />
 
-      <OverlayPanel variant={props.variant}>
+      <OverlayPanel
+        variant={props.variant}
+        motion={props.motion}
+        panel_class_name={props.panel_class_name}
+      >
         {props.children}
       </OverlayPanel>
     </div>

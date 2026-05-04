@@ -13,12 +13,26 @@ type locale_event = CustomEvent<{
   locale: locale_key
 }>
 
+function get_saved_locale() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const raw = window.localStorage.getItem(locale_storage_key)
+
+  if (raw === 'ja' || raw === 'en' || raw === 'es') {
+    return raw
+  }
+
+  return null
+}
+
 export function get_locale() {
   if (typeof window === 'undefined') {
     return 'ja'
   }
 
-  return normalize_locale(window.localStorage.getItem(locale_storage_key))
+  return get_saved_locale() ?? 'ja'
 }
 
 function notify_locale(locale: locale_key) {
@@ -44,17 +58,15 @@ export function resolve_locale_preference(
     )
   }
 
-  const raw = window.localStorage.getItem(locale_storage_key)
+  const saved_locale = get_saved_locale()
 
-  if (raw === 'ja' || raw === 'en' || raw === 'es') {
-    return raw
+  if (saved_locale) {
+    return saved_locale
   }
 
-  if (session_locale) {
-    return normalize_locale(String(session_locale))
-  }
-
-  return 'ja'
+  return session_locale
+    ? normalize_locale(String(session_locale))
+    : 'ja'
 }
 
 export function set_locale(locale: locale_key) {
@@ -75,16 +87,16 @@ export function apply_locale_from_session(
     return
   }
 
-  const raw = window.localStorage.getItem(locale_storage_key)
-  const has_saved_choice =
-    raw === 'ja' || raw === 'en' || raw === 'es'
-
-  if (has_saved_choice) {
+  if (get_saved_locale()) {
     notify_locale(resolved)
     return
   }
 
-  set_locale(resolved)
+  if (session_locale) {
+    window.localStorage.setItem(locale_storage_key, resolved)
+  }
+
+  notify_locale(resolved)
 }
 
 export function subscribe_locale(callback: (locale: locale_key) => void) {

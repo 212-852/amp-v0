@@ -5,6 +5,7 @@ import {
   resolve_guest_access,
   resolve_session_access,
 } from '@/lib/auth/access'
+import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
 import { debug } from '@/lib/debug'
@@ -14,6 +15,11 @@ import { resolve_visitor_context } from '@/lib/visitor/context'
 type normalized_role = 'user' | 'driver' | 'admin' | 'guest'
 type normalized_tier = 'guest' | 'member' | 'vip'
 type connected_provider = 'line' | 'google' | 'email'
+type session_chat_state = {
+  room_uuid: string
+  is_seeded: boolean
+  message_count: number
+} | null
 
 function get_browser_locale(accept_language: string | null) {
   return normalize_locale(accept_language?.split(',')[0])
@@ -59,6 +65,7 @@ function normalize_client_session_shape(
   state: {
     role: normalized_role
     tier: normalized_tier
+    user_uuid: string | null
     locale: locale_key | null
     display_name: string | null
     line_connected: boolean
@@ -119,6 +126,95 @@ function get_access_platform(user_agent: string | null) {
   return 'unknown'
 }
 
+function format_session_error(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(error))
+  } catch {
+    return String(error)
+  }
+}
+
+function create_session_payload(input: {
+  visitor_uuid: string | null
+  session_uuid: string | null
+  is_new_visitor: boolean
+  is_new_session: boolean
+  locale: locale_key
+  role: normalized_role
+  tier: normalized_tier
+  display_name: string | null
+  line_connected: boolean
+  connected_providers: connected_provider[]
+  chat: session_chat_state
+  is_line_webview: boolean
+  requires_line_auth: boolean
+  line_auth_method: string | null
+}) {
+  const session = input.visitor_uuid
+    ? {
+        visitor_uuid: input.visitor_uuid,
+        session_uuid: input.session_uuid,
+        locale: input.locale,
+        role: input.role,
+        tier: input.tier,
+        display_name: input.display_name,
+        line_connected: input.line_connected,
+        connected_providers: input.connected_providers,
+        chat: input.chat,
+      }
+    : null
+
+  return {
+    ok: true,
+    session,
+    visitor_uuid: input.visitor_uuid,
+    session_uuid: input.session_uuid,
+    is_new_visitor: input.is_new_visitor,
+    is_new_session: input.is_new_session,
+    locale: input.locale,
+    role: input.role,
+    tier: input.tier,
+    display_name: input.display_name,
+    line_connected: input.line_connected,
+    connected_providers: input.connected_providers,
+    chat: input.chat,
+    is_line_webview: input.is_line_webview,
+    requires_line_auth: input.requires_line_auth,
+    line_auth_method: input.line_auth_method,
+  }
+}
+
+async function resolve_session_chat(input: {
+  visitor_uuid: string
+  user_uuid: string | null
+  channel: 'web' | 'liff'
+}): Promise<session_chat_state> {
+  try {
+    const initial_chat = await resolve_initial_chat(input)
+
+    return {
+      room_uuid: initial_chat.room.room_uuid,
+      is_seeded: initial_chat.is_seeded,
+      message_count: initial_chat.messages.length,
+    }
+  } catch (error) {
+    console.error(
+      '[session_api_chat_seed_error]',
+      format_session_error(error),
+    )
+
+    return null
+  }
+}
+
 async function resolve_session_state(visitor_uuid: string) {
   const visitor_result = await supabase
     .from('visitors')
@@ -136,6 +232,7 @@ async function resolve_session_state(visitor_uuid: string) {
     return {
       role: 'guest' as normalized_role,
       tier: 'guest' as normalized_tier,
+      user_uuid: null,
       locale: null as locale_key | null,
       display_name: null as string | null,
       line_connected: false,
@@ -169,6 +266,7 @@ async function resolve_session_state(visitor_uuid: string) {
   return {
     role: normalize_role(user_result.data?.role),
     tier: normalize_tier(user_result.data?.tier),
+    user_uuid,
     locale: user_result.data?.locale ?? null,
     display_name: user_result.data?.display_name ?? null,
     line_connected: connected_providers.includes('line'),
@@ -176,7 +274,7 @@ async function resolve_session_state(visitor_uuid: string) {
   }
 }
 
-export async function GET() {
+async function resolve_session_payload() {
   const header_store = await headers()
 
   const user_agent = header_store.get('user-agent')
@@ -199,6 +297,12 @@ export async function GET() {
     user_agent,
   })
   const session_state = await resolve_session_state(guest_access.visitor_uuid)
+  const chat_channel = is_line_webview ? 'liff' : 'web'
+  const chat = await resolve_session_chat({
+    visitor_uuid: guest_access.visitor_uuid,
+    user_uuid: session_state.user_uuid,
+    channel: chat_channel,
+  })
   const normalized_session =
     normalize_client_session_shape(session_state)
   const resolved_locale = normalize_locale(
@@ -231,6 +335,9 @@ export async function GET() {
         display_name,
         line_connected,
         connected_providers,
+        chat_room_uuid: chat?.room_uuid ?? null,
+        chat_seeded: chat?.is_seeded ?? false,
+        chat_message_count: chat?.message_count ?? 0,
         is_line_webview,
         requires_line_auth,
         line_auth_method,
@@ -238,8 +345,7 @@ export async function GET() {
     })
   }
 
-  return NextResponse.json({
-    ok: true,
+  return create_session_payload({
     visitor_uuid: guest_access.visitor_uuid,
     session_uuid: session_access.session_uuid,
     is_new_visitor: guest_access.is_new_visitor,
@@ -250,8 +356,39 @@ export async function GET() {
     display_name,
     line_connected,
     connected_providers,
+    chat,
     is_line_webview,
     requires_line_auth,
     line_auth_method,
   })
+}
+
+export async function GET() {
+  try {
+    return NextResponse.json(await resolve_session_payload())
+  } catch (error) {
+    console.error(
+      '[session_api_error]',
+      format_session_error(error),
+    )
+
+    return NextResponse.json(
+      create_session_payload({
+        visitor_uuid: null,
+        session_uuid: null,
+        is_new_visitor: false,
+        is_new_session: false,
+        locale: 'ja',
+        role: 'guest',
+        tier: 'guest',
+        display_name: null,
+        line_connected: false,
+        connected_providers: [],
+        chat: null,
+        is_line_webview: false,
+        requires_line_auth: false,
+        line_auth_method: null,
+      }),
+    )
+  }
 }

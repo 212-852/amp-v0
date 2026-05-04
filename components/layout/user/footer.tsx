@@ -10,6 +10,14 @@ import { useEffect, useState } from 'react'
 import { FaPaw } from 'react-icons/fa'
 
 import PawIcon from '@/components/icons/paw'
+import MenuModal from '@/components/modal/menu'
+import MypageModal from '@/components/modal/mypage'
+import QuickModal from '@/components/modal/quick'
+import OverlayRoot from '@/components/overlay/root'
+import type {
+  quick_menu_item,
+  quick_menu_item_key,
+} from '@/components/shared/quick/cards'
 import { get_copyright_text } from '@/lib/config/site'
 import type { locale_key } from '@/lib/locale/action'
 import {
@@ -47,12 +55,73 @@ const content = {
   },
 }
 
+const quick_menu_items: quick_menu_item[] = [
+  {
+    key: 'availability',
+    title: {
+      ja: '空き状況の確認',
+      en: 'Check Availability',
+      es: 'Ver disponibilidad',
+    },
+    description: {
+      ja: '日時とエリアから空き状況を確認します',
+      en: 'Check open slots by date, time, and area.',
+      es: 'Consulta horarios disponibles por fecha, hora y zona.',
+    },
+    label: {
+      ja: '確認する',
+      en: 'Check',
+      es: 'Consultar',
+    },
+  },
+  {
+    key: 'dispatch',
+    title: {
+      ja: '配車の手配',
+      en: 'Arrange Dispatch',
+      es: 'Solicitar traslado',
+    },
+    description: {
+      ja: '出発地・到着地・ペット情報を入力します',
+      en: 'Enter pickup, destination, and pet details.',
+      es: 'Ingresa origen, destino y datos de la mascota.',
+    },
+    label: {
+      ja: '手配する',
+      en: 'Arrange',
+      es: 'Solicitar',
+    },
+  },
+  {
+    key: 'reservation',
+    title: {
+      ja: '予約の確認',
+      en: 'Check Reservation',
+      es: 'Ver reserva',
+    },
+    description: {
+      ja: '現在の予約内容を確認します',
+      en: 'Review your current reservation details.',
+      es: 'Revisa los detalles de tu reserva actual.',
+    },
+    label: {
+      ja: '確認する',
+      en: 'View',
+      es: 'Ver',
+    },
+  },
+]
+
 export default function UserFooter() {
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [mode, set_mode] = useState<footer_mode>('nav')
   const [flip_rotation, set_flip_rotation] = useState(0)
   const [card_scale, set_card_scale] = useState(1)
+  const [is_mypage_open, set_is_mypage_open] = useState(false)
+  const [is_menu_open, set_is_menu_open] = useState(false)
+  const [is_quick_menu_open, set_is_quick_menu_open] = useState(false)
+  const [is_paw_pressed, set_is_paw_pressed] = useState(false)
   const is_input_mode = mode === 'input'
   const render_locale = mounted ? locale : 'ja'
 
@@ -70,6 +139,9 @@ export default function UserFooter() {
   }, [])
 
   function open_input() {
+    set_is_mypage_open(false)
+    set_is_menu_open(false)
+    set_is_quick_menu_open(false)
     set_mode('input')
     set_card_scale(0.98)
     set_flip_rotation((current_rotation) => current_rotation + 180)
@@ -83,9 +155,64 @@ export default function UserFooter() {
     window.setTimeout(() => set_card_scale(1), 40)
   }
 
+  function handle_paw_click() {
+    set_is_mypage_open(false)
+    set_is_menu_open(false)
+    set_is_paw_pressed(true)
+    set_is_quick_menu_open((current) => !current)
+
+    window.setTimeout(() => {
+      set_is_paw_pressed(false)
+    }, 220)
+  }
+
+  function handle_quick_menu_item_click(_item_key: quick_menu_item_key) {
+    void _item_key
+  }
+
   return (
-    <footer className="fixed bottom-0 left-0 right-0 z-50 bg-[#EBD5C0] pb-[env(safe-area-inset-bottom,0px)]">
-      <div className="relative bg-[#EBD5C0] pb-1 pt-6">
+    <>
+      <OverlayRoot
+        open={is_mypage_open}
+        on_close={() => set_is_mypage_open(false)}
+        variant="bottom"
+        motion="bottom"
+      >
+        <MypageModal
+          locale={render_locale}
+          on_close={() => set_is_mypage_open(false)}
+        />
+      </OverlayRoot>
+
+      <OverlayRoot
+        open={is_menu_open}
+        on_close={() => set_is_menu_open(false)}
+        variant="left"
+        motion="left"
+        panel_class_name="h-full min-h-dvh"
+      >
+        <MenuModal
+          locale={render_locale}
+          on_close={() => set_is_menu_open(false)}
+        />
+      </OverlayRoot>
+
+      <OverlayRoot
+        open={is_quick_menu_open}
+        on_close={() => set_is_quick_menu_open(false)}
+        variant="center"
+        panel_class_name="translate-y-[120px]"
+      >
+        <QuickModal
+          locale={render_locale}
+          items={quick_menu_items}
+          on_close={() => set_is_quick_menu_open(false)}
+          on_select={handle_quick_menu_item_click}
+        />
+      </OverlayRoot>
+
+      <footer className="fixed bottom-0 left-0 right-0 z-50 bg-transparent pb-[env(safe-area-inset-bottom,0px)]">
+        <div className="relative bg-transparent pb-1 pt-6">
 
         {/* top curve */}
         <div className="absolute bottom-0 left-0 z-0 h-[86px] w-full drop-shadow-[0_-1px_8px_rgba(42,29,24,0.05)]">
@@ -159,7 +286,8 @@ export default function UserFooter() {
               {/* center paw */}
               <button
                 type="button"
-                aria-label="toggle view"
+                aria-label="Toggle quick menu"
+                onClick={handle_paw_click}
                 className="
                   absolute left-1/2 top-[-18px] z-20
                   flex h-[74px] w-[74px]
@@ -171,7 +299,12 @@ export default function UserFooter() {
                   shadow-[0_2px_8px_rgba(42,29,24,0.06)]
                 "
               >
-                <div className="p-[9px]">
+                <div
+                  className={[
+                    'p-[9px]',
+                    is_paw_pressed ? 'paw_puyo' : '',
+                  ].join(' ')}
+                >
                   <PawIcon className="h-[26px] w-[26px] text-[#b56f69]" />
                 </div>
               </button>
@@ -182,6 +315,11 @@ export default function UserFooter() {
                 {/* left */}
                 <button
                   type="button"
+                  onClick={() => {
+                    set_is_quick_menu_open(false)
+                    set_is_menu_open(false)
+                    set_is_mypage_open(true)
+                  }}
                   className="flex w-[60px] translate-y-[16px] flex-col items-center text-[#2a1d18]"
                 >
                   <FaPaw
@@ -239,6 +377,11 @@ export default function UserFooter() {
                 {/* right */}
                 <button
                   type="button"
+                  onClick={() => {
+                    set_is_quick_menu_open(false)
+                    set_is_mypage_open(false)
+                    set_is_menu_open(true)
+                  }}
                   className="flex w-[60px] translate-y-[16px] flex-col items-center text-[#2a1d18]"
                 >
                   <Menu
@@ -335,6 +478,7 @@ export default function UserFooter() {
           </div>
         </div>
       </div>
-    </footer>
+      </footer>
+    </>
   )
 }

@@ -29,7 +29,7 @@ export function build_breadcrumb(
 
   if (needs_app_home_prefix) {
     items.push({
-      href: '/user',
+      href: '/',
       label: resolve_segment_label('user', locale),
     })
   }

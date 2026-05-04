@@ -100,7 +100,7 @@ export default function LiffPage() {
         }
 
         if (!cancelled) {
-          window.location.href = '/user'
+          window.location.href = '/'
         }
       } catch {
         if (!cancelled) {
