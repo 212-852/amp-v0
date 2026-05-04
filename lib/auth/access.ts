@@ -18,6 +18,7 @@ export type auth_provider = 'line' | 'google' | 'email'
 type access_input = {
   provider: auth_provider
   provider_id: string
+  visitor_uuid?: string | null
   display_name?: string | null
   image_url?: string | null
   locale?: string | null
@@ -36,7 +37,51 @@ async function find_visitor_by_user(user_uuid: string) {
     .from('visitors')
     .select('visitor_uuid')
     .eq('user_uuid', user_uuid)
+    .order('updated_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
+}
+
+async function attach_preferred_visitor(input: {
+  visitor_uuid: string
+  user_uuid: string
+}) {
+  const updated = await supabase
+    .from('visitors')
+    .update({
+      user_uuid: input.user_uuid,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('visitor_uuid', input.visitor_uuid)
+    .select('visitor_uuid')
+    .maybeSingle()
+
+  if (!updated.error && updated.data?.visitor_uuid) {
+    return updated.data.visitor_uuid
+  }
+
+  if (updated.error && !is_unique_violation(updated.error)) {
+    throw updated.error
+  }
+
+  const created = await supabase
+    .from('visitors')
+    .insert({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid,
+    })
+    .select('visitor_uuid')
+    .single()
+
+  if (!created.error) {
+    return created.data.visitor_uuid
+  }
+
+  if (!is_unique_violation(created.error)) {
+    throw created.error
+  }
+
+  return input.visitor_uuid
 }
 
 export async function resolve_auth_access(
@@ -88,10 +133,27 @@ export async function resolve_auth_access(
       .from('visitors')
       .select('visitor_uuid')
       .eq('user_uuid', user_uuid)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .maybeSingle()
 
     if (existing_visitor.error) {
       throw existing_visitor.error
+    }
+
+    if (input.visitor_uuid) {
+      const preferred_visitor_uuid = await attach_preferred_visitor({
+        visitor_uuid: input.visitor_uuid,
+        user_uuid,
+      })
+
+      return {
+        user_uuid,
+        visitor_uuid: preferred_visitor_uuid,
+        locale: resolved_locale,
+        is_new_user: false,
+        is_new_visitor: false,
+      }
     }
 
     if (existing_visitor.data?.visitor_uuid) {
@@ -178,6 +240,44 @@ export async function resolve_auth_access(
   }
 
   const user_uuid = created_user.data.user_uuid
+
+  if (input.visitor_uuid) {
+    const preferred_visitor_uuid = await attach_preferred_visitor({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid,
+    })
+
+    const created_identity = await supabase
+      .from('identities')
+      .insert({
+        user_uuid,
+        provider: input.provider,
+        provider_id: input.provider_id,
+      })
+
+    if (created_identity.error) {
+      throw created_identity.error
+    }
+
+    await notify({
+      event: 'new_user_created',
+      provider: input.provider,
+      user_uuid,
+      visitor_uuid: preferred_visitor_uuid,
+      display_name: input.display_name ?? null,
+      locale: created_user.data.locale ?? null,
+      is_new_user: true,
+      is_new_visitor: false,
+    })
+
+    return {
+      user_uuid,
+      visitor_uuid: preferred_visitor_uuid,
+      locale: created_user.data.locale ?? null,
+      is_new_user: true,
+      is_new_visitor: false,
+    }
+  }
 
   const created_visitor = await supabase
     .from('visitors')

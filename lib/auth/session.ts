@@ -77,6 +77,14 @@ export type browser_session_result = {
   session_exists: boolean
 }
 
+export type identity_promotion_result = {
+  visitor_uuid: string
+  user_uuid: string
+  existing_room_uuid: string | null
+  participant_uuid: string | null
+  promoted: boolean
+}
+
 function is_unique_violation(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false
@@ -121,6 +129,35 @@ async function emit_session_debug(input: {
   })
 }
 
+async function emit_identity_promotion_debug(
+  event:
+    | 'identity_promote_started'
+    | 'visitor_promoted_to_user'
+    | 'session_promoted'
+    | 'existing_guest_room_found'
+    | 'guest_room_reused_for_user'
+    | 'identity_promote_finished',
+  payload: {
+    old_visitor_uuid: string | null
+    user_uuid: string
+    existing_room_uuid?: string | null
+    participant_uuid?: string | null
+  },
+) {
+  const { debug_event } = await import('@/lib/debug')
+
+  await debug_event({
+    category: 'session',
+    event,
+    payload: {
+      old_visitor_uuid: payload.old_visitor_uuid,
+      user_uuid: payload.user_uuid,
+      existing_room_uuid: payload.existing_room_uuid ?? null,
+      participant_uuid: payload.participant_uuid ?? null,
+    },
+  })
+}
+
 async function find_visitor_row(
   supabase: Awaited<ReturnType<typeof get_supabase>>,
   visitor_uuid: string,
@@ -130,6 +167,28 @@ async function find_visitor_row(
     .select('visitor_uuid')
     .eq('visitor_uuid', visitor_uuid)
     .maybeSingle()
+}
+
+async function find_guest_participant_by_visitor(
+  supabase: Awaited<ReturnType<typeof get_supabase>>,
+  visitor_uuid: string,
+) {
+  const result = await supabase
+    .from('participants')
+    .select('participant_uuid, room_uuid')
+    .eq('role', 'user')
+    .eq('visitor_uuid', visitor_uuid)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (result.error) {
+    throw result.error
+  }
+
+  return result.data as
+    | { participant_uuid: string; room_uuid: string | null }
+    | null
 }
 
 async function ensure_browser_visitor(input: {
@@ -356,5 +415,119 @@ export async function resolve_browser_session(
     is_new_session,
     cookie_exists,
     session_exists,
+  }
+}
+
+export async function promote_browser_visitor_to_user(input: {
+  old_visitor_uuid: string | null
+  session_uuid?: string | null
+  user_uuid: string
+}): Promise<identity_promotion_result> {
+  const supabase = await get_supabase()
+  const old_visitor_uuid = input.old_visitor_uuid
+
+  await emit_identity_promotion_debug('identity_promote_started', {
+    old_visitor_uuid,
+    user_uuid: input.user_uuid,
+  })
+
+  if (!old_visitor_uuid) {
+    await emit_identity_promotion_debug('identity_promote_finished', {
+      old_visitor_uuid,
+      user_uuid: input.user_uuid,
+    })
+
+    return {
+      visitor_uuid: '',
+      user_uuid: input.user_uuid,
+      existing_room_uuid: null,
+      participant_uuid: null,
+      promoted: false,
+    }
+  }
+
+  const guest_participant = await find_guest_participant_by_visitor(
+    supabase,
+    old_visitor_uuid,
+  )
+
+  if (guest_participant?.room_uuid) {
+    await emit_identity_promotion_debug('existing_guest_room_found', {
+      old_visitor_uuid,
+      user_uuid: input.user_uuid,
+      existing_room_uuid: guest_participant.room_uuid,
+      participant_uuid: guest_participant.participant_uuid,
+    })
+  }
+
+  const visitor_update = await supabase
+    .from('visitors')
+    .update({
+      user_uuid: input.user_uuid,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('visitor_uuid', old_visitor_uuid)
+
+  if (visitor_update.error && !is_unique_violation(visitor_update.error)) {
+    throw visitor_update.error
+  }
+
+  await emit_identity_promotion_debug('visitor_promoted_to_user', {
+    old_visitor_uuid,
+    user_uuid: input.user_uuid,
+    existing_room_uuid: guest_participant?.room_uuid ?? null,
+    participant_uuid: guest_participant?.participant_uuid ?? null,
+  })
+
+  let session_update = supabase
+    .from('sessions')
+    .update({
+      visitor_uuid: old_visitor_uuid,
+      user_uuid: input.user_uuid,
+      updated_at: new Date().toISOString(),
+      last_seen_at: new Date().toISOString(),
+    })
+
+  if (input.session_uuid) {
+    session_update = session_update.eq('session_uuid', input.session_uuid)
+  } else {
+    session_update = session_update.eq('visitor_uuid', old_visitor_uuid)
+  }
+
+  const session_result = await session_update
+
+  if (session_result.error) {
+    throw session_result.error
+  }
+
+  await emit_identity_promotion_debug('session_promoted', {
+    old_visitor_uuid,
+    user_uuid: input.user_uuid,
+    existing_room_uuid: guest_participant?.room_uuid ?? null,
+    participant_uuid: guest_participant?.participant_uuid ?? null,
+  })
+
+  if (guest_participant?.room_uuid) {
+    await emit_identity_promotion_debug('guest_room_reused_for_user', {
+      old_visitor_uuid,
+      user_uuid: input.user_uuid,
+      existing_room_uuid: guest_participant.room_uuid,
+      participant_uuid: guest_participant.participant_uuid,
+    })
+  }
+
+  await emit_identity_promotion_debug('identity_promote_finished', {
+    old_visitor_uuid,
+    user_uuid: input.user_uuid,
+    existing_room_uuid: guest_participant?.room_uuid ?? null,
+    participant_uuid: guest_participant?.participant_uuid ?? null,
+  })
+
+  return {
+    visitor_uuid: old_visitor_uuid,
+    user_uuid: input.user_uuid,
+    existing_room_uuid: guest_participant?.room_uuid ?? null,
+    participant_uuid: guest_participant?.participant_uuid ?? null,
+    promoted: true,
   }
 }

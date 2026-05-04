@@ -2,6 +2,11 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import {
+  promote_browser_visitor_to_user,
+  session_cookie_name,
+  visitor_cookie_name,
+} from '@/lib/auth/session'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
@@ -123,6 +128,10 @@ export async function GET(request: Request) {
   const error = url.searchParams.get('error')
   const cookie_store = await cookies()
   const saved_state = cookie_store.get(line_login_state_cookie_name)?.value
+  const current_visitor_uuid =
+    cookie_store.get(visitor_cookie_name)?.value ?? null
+  const current_session_uuid =
+    cookie_store.get(session_cookie_name)?.value ?? null
 
   cookie_store.delete(line_login_state_cookie_name)
 
@@ -171,6 +180,7 @@ export async function GET(request: Request) {
     const access = await resolve_auth_access({
       provider: 'line',
       provider_id: line_user_id,
+      visitor_uuid: current_visitor_uuid,
       display_name: profile?.displayName ?? null,
       image_url: profile?.pictureUrl ?? null,
       locale: initial_locale.locale,
@@ -180,8 +190,15 @@ export async function GET(request: Request) {
       stored_user_locale: access.locale,
       line_profile_locale: profile?.language ?? null,
     })
+    const promoted = await promote_browser_visitor_to_user({
+      old_visitor_uuid: current_visitor_uuid,
+      session_uuid: current_session_uuid,
+      user_uuid: access.user_uuid,
+    })
+    const resolved_visitor_uuid =
+      promoted.visitor_uuid || access.visitor_uuid
 
-    await bind_visitor_session(access.visitor_uuid)
+    await bind_visitor_session(resolved_visitor_uuid)
 
     if (control.debug.line_auth) {
       await debug({
@@ -189,7 +206,8 @@ export async function GET(request: Request) {
         event: 'line_login_callback_passed',
         data: {
           user_uuid: access.user_uuid,
-          visitor_uuid: access.visitor_uuid,
+          visitor_uuid: resolved_visitor_uuid,
+          auth_visitor_uuid: access.visitor_uuid,
           is_new_user: access.is_new_user,
           is_new_visitor: access.is_new_visitor,
           line_user_id,

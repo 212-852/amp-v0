@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import {
+  promote_browser_visitor_to_user,
+  session_cookie_name,
+  visitor_cookie_name,
+} from '@/lib/auth/session'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
@@ -51,6 +57,11 @@ async function debug_liff_failed(
 export async function POST(request: Request) {
   const body = (await request.json()) as liff_auth_body
   const line_user_id = body.line_user_id
+  const cookie_store = await cookies()
+  const current_visitor_uuid =
+    cookie_store.get(visitor_cookie_name)?.value ?? null
+  const current_session_uuid =
+    cookie_store.get(session_cookie_name)?.value ?? null
 
   if (!line_user_id) {
     await debug_liff_failed('missing_line_user_id')
@@ -81,6 +92,7 @@ export async function POST(request: Request) {
     const access = await resolve_auth_access({
       provider: 'line',
       provider_id: line_user_id,
+      visitor_uuid: current_visitor_uuid,
       display_name: body.display_name ?? null,
       image_url: body.image_url ?? null,
       locale: initial_locale.locale,
@@ -90,8 +102,15 @@ export async function POST(request: Request) {
       stored_user_locale: access.locale,
       browser_selected_locale: body.locale ?? null,
     })
+    const promoted = await promote_browser_visitor_to_user({
+      old_visitor_uuid: current_visitor_uuid,
+      session_uuid: current_session_uuid,
+      user_uuid: access.user_uuid,
+    })
+    const resolved_visitor_uuid =
+      promoted.visitor_uuid || access.visitor_uuid
 
-    await bind_visitor_session(access.visitor_uuid)
+    await bind_visitor_session(resolved_visitor_uuid)
 
     if (control.debug.liff_auth) {
       await debug({
@@ -99,7 +118,8 @@ export async function POST(request: Request) {
         event: 'liff_auth_passed',
         data: {
           user_uuid: access.user_uuid,
-          visitor_uuid: access.visitor_uuid,
+          visitor_uuid: resolved_visitor_uuid,
+          auth_visitor_uuid: access.visitor_uuid,
           is_new_user: access.is_new_user,
           is_new_visitor: access.is_new_visitor,
           line_user_id,
@@ -112,7 +132,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       user_uuid: access.user_uuid,
-      visitor_uuid: access.visitor_uuid,
+      visitor_uuid: resolved_visitor_uuid,
       is_new_user: access.is_new_user,
       is_new_visitor: access.is_new_visitor,
       locale: resolved_locale.locale,
