@@ -5,7 +5,7 @@ import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
 import { debug, debug_event } from '@/lib/debug'
-import { normalize_locale } from '@/lib/locale/action'
+import { resolve_dispatch_locale } from '@/lib/dispatch/context'
 
 type line_webhook_event = {
   type?: string
@@ -19,6 +19,8 @@ type line_webhook_event = {
     userId?: string
     groupId?: string
     roomId?: string
+    locale?: string
+    language?: string
   }
   message?: {
     type?: string
@@ -232,15 +234,31 @@ export async function POST(request: Request) {
         })
       }
 
+      const profile_locale = await resolve_dispatch_locale({
+        source_channel: 'line',
+        line_user_id,
+        webhook_source_locale:
+          event.source?.locale ?? event.source?.language ?? null,
+        debug: false,
+      })
       const access = await resolve_auth_access({
         provider: 'line',
         provider_id: line_user_id,
+        locale: profile_locale.locale,
+      })
+      const resolved_locale = await resolve_dispatch_locale({
+        source_channel: 'line',
+        stored_user_locale: access.locale,
+        line_profile_locale: profile_locale.raw_locale,
+        webhook_source_locale:
+          event.source?.locale ?? event.source?.language ?? null,
+        line_user_id,
       })
       const initial_chat = await resolve_initial_chat({
         visitor_uuid: access.visitor_uuid,
         user_uuid: access.user_uuid,
         channel: 'line',
-        locale: normalize_locale(access.locale),
+        locale: resolved_locale.locale,
         external_room_id:
           event.source?.roomId ??
           event.source?.groupId ??
@@ -278,6 +296,8 @@ export async function POST(request: Request) {
         chat_seeded: initial_chat.is_seeded,
         chat_message_count: initial_chat.messages.length,
         initial_carousel_card_count,
+        locale: resolved_locale.locale,
+        locale_source: resolved_locale.source,
 
         line_user_id,
         event_type: event.type,

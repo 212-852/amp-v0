@@ -66,7 +66,7 @@ function bubble_hero(image_url: string | null): Record<string, unknown> | null {
     url: image_url,
     size: 'full',
     aspectRatio: '20:13',
-    aspectMode: 'cover',
+    aspectMode: 'fit',
   }
 }
 

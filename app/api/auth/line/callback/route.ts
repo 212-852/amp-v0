@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
+import { resolve_dispatch_locale } from '@/lib/dispatch/context'
 import { bind_visitor_session } from '@/lib/visitor/context'
 import { line_login_state_cookie_name } from '../route'
 
@@ -162,12 +163,22 @@ export async function GET(request: Request) {
       return redirect_home()
     }
 
+    const initial_locale = await resolve_dispatch_locale({
+      source_channel: 'line',
+      line_profile_locale: profile?.language ?? null,
+      debug: false,
+    })
     const access = await resolve_auth_access({
       provider: 'line',
       provider_id: line_user_id,
       display_name: profile?.displayName ?? null,
       image_url: profile?.pictureUrl ?? null,
-      locale: profile?.language ?? null,
+      locale: initial_locale.locale,
+    })
+    const resolved_locale = await resolve_dispatch_locale({
+      source_channel: 'line',
+      stored_user_locale: access.locale,
+      line_profile_locale: profile?.language ?? null,
     })
 
     await bind_visitor_session(access.visitor_uuid)
@@ -182,6 +193,8 @@ export async function GET(request: Request) {
           is_new_user: access.is_new_user,
           is_new_visitor: access.is_new_visitor,
           line_user_id,
+          locale: resolved_locale.locale,
+          locale_source: resolved_locale.source,
         },
       })
     }

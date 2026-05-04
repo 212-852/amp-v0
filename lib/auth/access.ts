@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
+import { normalize_locale } from '@/lib/locale/action'
 import { notify } from '@/lib/notify'
 import { emit_visitor_access_debug } from '@/lib/visitor/context'
 
@@ -41,6 +42,7 @@ async function find_visitor_by_user(user_uuid: string) {
 export async function resolve_auth_access(
   input: access_input,
 ): Promise<access_result> {
+  const input_locale = normalize_locale(input.locale)
   const existing_identity = await supabase
     .from('identities')
     .select('user_uuid')
@@ -64,6 +66,24 @@ export async function resolve_auth_access(
       throw user_result.error
     }
 
+    const stored_locale = user_result.data?.locale ?? null
+    const resolved_locale = stored_locale
+      ? normalize_locale(stored_locale)
+      : input_locale
+
+    if (stored_locale !== resolved_locale) {
+      const locale_update = await supabase
+        .from('users')
+        .update({
+          locale: resolved_locale,
+        })
+        .eq('user_uuid', user_uuid)
+
+      if (locale_update.error) {
+        throw locale_update.error
+      }
+    }
+
     const existing_visitor = await supabase
       .from('visitors')
       .select('visitor_uuid')
@@ -78,7 +98,7 @@ export async function resolve_auth_access(
       return {
         user_uuid,
         visitor_uuid: existing_visitor.data.visitor_uuid,
-        locale: user_result.data?.locale ?? null,
+        locale: resolved_locale,
         is_new_user: false,
         is_new_visitor: false,
       }
@@ -96,7 +116,7 @@ export async function resolve_auth_access(
       return {
         user_uuid,
         visitor_uuid: created_visitor.data.visitor_uuid,
-        locale: user_result.data?.locale ?? null,
+        locale: resolved_locale,
         is_new_user: false,
         is_new_visitor: true,
       }
@@ -135,7 +155,7 @@ export async function resolve_auth_access(
     return {
       user_uuid,
       visitor_uuid: reused_visitor.data.visitor_uuid,
-      locale: user_result.data?.locale ?? null,
+      locale: resolved_locale,
       is_new_user: false,
       is_new_visitor: false,
     }
@@ -148,7 +168,7 @@ export async function resolve_auth_access(
       tier: 'member',
       display_name: input.display_name ?? null,
       image_url: input.image_url ?? null,
-      locale: input.locale ?? null,
+      locale: input_locale,
     })
     .select('user_uuid, locale')
     .single()

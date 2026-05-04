@@ -1,6 +1,129 @@
 import 'server-only'
 
+import { debug_event } from '@/lib/debug'
+import { normalize_locale, type locale_key } from '@/lib/locale/action'
+
 export {
   resolve_chat_context,
   type chat_request_context,
 } from '@/lib/chat/context'
+
+export type dispatch_source_channel = 'web' | 'line' | 'liff' | 'pwa'
+
+type locale_source =
+  | 'stored_user'
+  | 'line_profile'
+  | 'browser_selected'
+  | 'webhook_source'
+  | 'fallback'
+
+type line_profile_locale = {
+  language?: string | null
+}
+
+function raw_locale_is_supported(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase()
+
+  return Boolean(
+    normalized &&
+      (normalized.startsWith('ja') ||
+        normalized.startsWith('en') ||
+        normalized.startsWith('es')),
+  )
+}
+
+async function fetch_line_profile_locale(
+  line_user_id: string | null | undefined,
+) {
+  const access_token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN
+
+  if (!line_user_id || !access_token) {
+    return null
+  }
+
+  const response = await fetch(
+    `https://api.line.me/v2/bot/profile/${line_user_id}`,
+    {
+      headers: {
+        authorization: `Bearer ${access_token}`,
+      },
+    },
+  )
+
+  if (!response.ok) {
+    return null
+  }
+
+  const profile = (await response.json()) as line_profile_locale
+
+  return profile.language ?? null
+}
+
+export async function resolve_dispatch_locale(input: {
+  source_channel: dispatch_source_channel
+  stored_user_locale?: string | null
+  line_profile_locale?: string | null
+  browser_selected_locale?: string | null
+  webhook_source_locale?: string | null
+  line_user_id?: string | null
+  debug?: boolean
+}): Promise<{
+  locale: locale_key
+  raw_locale: string | null
+  source: locale_source
+}> {
+  const profile_locale =
+    input.line_profile_locale ??
+    (input.source_channel === 'line'
+      ? await fetch_line_profile_locale(input.line_user_id)
+      : null)
+  const candidates: Array<{
+    source: locale_source
+    raw_locale: string | null | undefined
+  }> = [
+    {
+      source: 'stored_user',
+      raw_locale: input.stored_user_locale,
+    },
+    {
+      source: 'line_profile',
+      raw_locale: profile_locale,
+    },
+    {
+      source: 'browser_selected',
+      raw_locale: input.browser_selected_locale,
+    },
+    {
+      source: 'webhook_source',
+      raw_locale: input.webhook_source_locale,
+    },
+  ]
+
+  const resolved =
+    candidates.find((candidate) =>
+      raw_locale_is_supported(candidate.raw_locale),
+    ) ?? {
+      source: 'fallback' as const,
+      raw_locale: null,
+    }
+  const locale = normalize_locale(resolved.raw_locale)
+
+  if (input.debug !== false) {
+    await debug_event({
+      category: 'locale',
+      event: 'locale_resolved',
+      payload: {
+        source_channel: input.source_channel,
+        raw_locale: resolved.raw_locale ?? null,
+        normalized_locale: locale,
+        source: resolved.source,
+      },
+    })
+  }
+
+  return {
+    locale,
+    raw_locale: resolved.raw_locale ?? null,
+    source: resolved.source,
+  }
+}

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
+import { resolve_dispatch_locale } from '@/lib/dispatch/context'
 import { bind_visitor_session } from '@/lib/visitor/context'
 
 type liff_auth_body = {
@@ -72,12 +73,22 @@ export async function POST(request: Request) {
   }
 
   try {
+    const initial_locale = await resolve_dispatch_locale({
+      source_channel: 'liff',
+      browser_selected_locale: body.locale ?? null,
+      debug: false,
+    })
     const access = await resolve_auth_access({
       provider: 'line',
       provider_id: line_user_id,
       display_name: body.display_name ?? null,
       image_url: body.image_url ?? null,
-      locale: body.locale ?? null,
+      locale: initial_locale.locale,
+    })
+    const resolved_locale = await resolve_dispatch_locale({
+      source_channel: 'liff',
+      stored_user_locale: access.locale,
+      browser_selected_locale: body.locale ?? null,
     })
 
     await bind_visitor_session(access.visitor_uuid)
@@ -92,6 +103,8 @@ export async function POST(request: Request) {
           is_new_user: access.is_new_user,
           is_new_visitor: access.is_new_visitor,
           line_user_id,
+          locale: resolved_locale.locale,
+          locale_source: resolved_locale.source,
         },
       })
     }
@@ -102,6 +115,7 @@ export async function POST(request: Request) {
       visitor_uuid: access.visitor_uuid,
       is_new_user: access.is_new_user,
       is_new_visitor: access.is_new_visitor,
+      locale: resolved_locale.locale,
     })
   } catch {
     await debug_liff_failed('resolve_auth_access_failed', {
