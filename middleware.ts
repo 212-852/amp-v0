@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import {
   get_browser_session_cookie_options,
-  read_browser_session_cookie_values,
+  resolve_browser_session_cookie_values,
   session_cookie_max_age,
   session_cookie_name,
   visitor_cookie_max_age,
@@ -28,53 +28,40 @@ function append_request_cookie(
   )
 }
 
-/**
- * Forward existing httpOnly cookies into the request. Do not mint visitor/session
- * (single path: server resolve_visitor_context + lib/auth/session.ts).
- */
 function create_response(
   request: NextRequest,
   response_builder: (headers: Headers) => NextResponse,
 ) {
   const request_headers = new Headers(request.headers)
-  const existing = read_browser_session_cookie_values(
+  const session = resolve_browser_session_cookie_values(
     request.cookies.get(visitor_cookie_name)?.value,
     request.cookies.get(session_cookie_name)?.value,
   )
 
-  if (existing.visitor_uuid) {
-    append_request_cookie(
-      request_headers,
-      visitor_cookie_name,
-      existing.visitor_uuid,
-    )
-  }
-
-  if (existing.session_uuid) {
-    append_request_cookie(
-      request_headers,
-      session_cookie_name,
-      existing.session_uuid,
-    )
-  }
+  append_request_cookie(
+    request_headers,
+    visitor_cookie_name,
+    session.visitor_uuid,
+  )
+  append_request_cookie(
+    request_headers,
+    session_cookie_name,
+    session.session_uuid,
+  )
 
   const response = response_builder(request_headers)
 
-  if (existing.visitor_uuid) {
-    response.cookies.set(
-      visitor_cookie_name,
-      existing.visitor_uuid,
-      get_browser_session_cookie_options(visitor_cookie_max_age),
-    )
-  }
+  response.cookies.set(
+    visitor_cookie_name,
+    session.visitor_uuid,
+    get_browser_session_cookie_options(visitor_cookie_max_age),
+  )
 
-  if (existing.session_uuid) {
-    response.cookies.set(
-      session_cookie_name,
-      existing.session_uuid,
-      get_browser_session_cookie_options(session_cookie_max_age),
-    )
-  }
+  response.cookies.set(
+    session_cookie_name,
+    session.session_uuid,
+    get_browser_session_cookie_options(session_cookie_max_age),
+  )
 
   return response
 }

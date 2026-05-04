@@ -703,7 +703,7 @@ export async function resolve_chat_room(
       payload: identity,
     })
 
-    let canonical = await find_canonical_user_participant(input)
+    const canonical = await find_canonical_user_participant(input)
 
     if (!canonical) {
       const created = await try_insert_participant_and_direct_room(

@@ -1,10 +1,6 @@
 import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-import {
-  resolve_guest_access,
-  resolve_session_access,
-} from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
@@ -285,22 +281,12 @@ async function resolve_session_payload() {
     user_agent?.toLowerCase().includes('line/') ?? false
 
   const session_src = is_line_webview ? 'liff' : 'web'
-  const visitor = await resolve_visitor_context(session_src)
-  const guest_access = await resolve_guest_access({
-    visitor_uuid: visitor.visitor_uuid,
+  const visitor = await resolve_visitor_context(session_src, 'api_session', {
     locale,
-    source_channel: session_src,
-  })
-  const session_access = await resolve_session_access({
-    visitor_uuid: guest_access.visitor_uuid,
-    session_uuid: visitor.session_uuid,
-    access_channel: 'web',
     access_platform: get_access_platform(user_agent),
-    locale,
     user_agent,
-    source_channel: session_src,
   })
-  const session_state = await resolve_session_state(guest_access.visitor_uuid)
+  const session_state = await resolve_session_state(visitor.visitor_uuid)
   const normalized_session =
     normalize_client_session_shape(session_state)
   const resolved_locale = normalize_locale(
@@ -308,7 +294,7 @@ async function resolve_session_payload() {
   )
   const chat_channel = is_line_webview ? 'liff' : 'web'
   const chat = await resolve_session_chat({
-    visitor_uuid: guest_access.visitor_uuid,
+    visitor_uuid: visitor.visitor_uuid,
     user_uuid: session_state.user_uuid,
     channel: chat_channel,
     locale: resolved_locale,
@@ -324,14 +310,14 @@ async function resolve_session_payload() {
   if (control.debug.session_route) {
     await debug({
       category: 'visitor',
-      event: guest_access.is_new_visitor
+      event: visitor.is_new_visitor
         ? 'visitor_created'
         : 'visitor_restored',
       data: {
-        visitor_uuid: guest_access.visitor_uuid,
-        session_uuid: session_access.session_uuid,
-        is_new_visitor: guest_access.is_new_visitor,
-        is_new_session: session_access.is_new_session,
+        visitor_uuid: visitor.visitor_uuid,
+        session_uuid: visitor.session_uuid,
+        is_new_visitor: visitor.is_new_visitor,
+        is_new_session: visitor.is_new_session,
         locale: resolved_locale,
         accept_language,
         user_agent,
@@ -351,10 +337,10 @@ async function resolve_session_payload() {
   }
 
   return create_session_payload({
-    visitor_uuid: guest_access.visitor_uuid,
-    session_uuid: session_access.session_uuid,
-    is_new_visitor: guest_access.is_new_visitor,
-    is_new_session: session_access.is_new_session,
+    visitor_uuid: visitor.visitor_uuid,
+    session_uuid: visitor.session_uuid,
+    is_new_visitor: visitor.is_new_visitor,
+    is_new_session: visitor.is_new_session,
     locale: resolved_locale,
     role,
     tier,

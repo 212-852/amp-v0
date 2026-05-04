@@ -3,7 +3,6 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { headers } from 'next/headers'
 
-import { resolve_guest_access } from '@/lib/auth/access'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
 import { locale_cookie_name } from '@/lib/locale/cookie'
@@ -92,24 +91,28 @@ export async function resolve_chat_context(
   const cookie_store = await cookies()
   const header_store = await headers()
   const session_src = session_source_from_channel(input.channel)
-  const browser_session = await resolve_visitor_context(session_src)
-
-  const guest_access = await resolve_guest_access({
-    visitor_uuid: browser_session.visitor_uuid,
-    source_channel: session_src,
-  })
-  const user_state = await resolve_user_state(guest_access.visitor_uuid)
   const accept_language =
     input.browser_locale ??
     header_store.get('accept-language')?.split(',')[0] ??
     null
+  const browser_locale = normalize_optional_locale(accept_language)
+  const browser_session = await resolve_visitor_context(
+    session_src,
+    'page',
+    {
+      locale: browser_locale,
+      user_agent: header_store.get('user-agent'),
+    },
+  )
+
+  const user_state = await resolve_user_state(browser_session.visitor_uuid)
   const selected_locale =
     input.explicit_locale ??
     cookie_store.get(locale_cookie_name)?.value ??
     user_state.locale
 
   return {
-    visitor_uuid: guest_access.visitor_uuid,
+    visitor_uuid: browser_session.visitor_uuid,
     user_uuid: user_state.user_uuid,
     channel: input.channel,
     locale: first_locale(
