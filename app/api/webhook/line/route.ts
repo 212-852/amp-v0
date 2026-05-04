@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
-import { debug } from '@/lib/debug'
+import { debug, debug_event } from '@/lib/debug'
 
 type line_webhook_event = {
   type?: string
@@ -123,6 +123,15 @@ function append_line_webhook_meta(
 
 export async function POST(request: Request) {
   const body_text = await request.text()
+
+  await debug_event({
+    category: 'line_webhook',
+    event: 'webhook_reached',
+    payload: {
+      received_at: new Date().toISOString(),
+    },
+  })
+
   const signature = request.headers.get('x-line-signature')
 
   if (!verify_line_signature(body_text, signature)) {
@@ -140,8 +149,27 @@ export async function POST(request: Request) {
     )
   }
 
-  const body = JSON.parse(body_text) as line_webhook_body
+  let body: line_webhook_body
+
+  try {
+    body = JSON.parse(body_text) as line_webhook_body
+  } catch {
+    return NextResponse.json(
+      { error: 'Invalid JSON' },
+      { status: 400 },
+    )
+  }
+
   const events = body.events ?? []
+
+  await debug_event({
+    category: 'line_webhook',
+    event: 'events_parsed',
+    payload: {
+      event_count: events.length,
+      event_types: events.map((event) => event.type ?? 'unknown'),
+    },
+  })
 
   for (const event of events) {
     const line_user_id = event.source?.userId
@@ -167,7 +195,6 @@ export async function POST(request: Request) {
             event_type: event.type,
             source_type: event.source?.type,
             message_id: event.message?.id,
-            reply_token: event.replyToken,
             timestamp: event.timestamp,
           },
         })
@@ -189,6 +216,21 @@ export async function POST(request: Request) {
         continue
       }
 
+      if (event.type === 'message') {
+        await debug_event({
+          category: 'line_webhook',
+          event: 'message_received',
+          payload: {
+            line_user_id,
+            message_type: event.message?.type,
+            text:
+              event.message?.type === 'text'
+                ? event.message.text
+                : undefined,
+          },
+        })
+      }
+
       const access = await resolve_auth_access({
         provider: 'line',
         provider_id: line_user_id,
@@ -201,6 +243,18 @@ export async function POST(request: Request) {
           event.source?.roomId ??
           event.source?.groupId ??
           line_user_id,
+        line_reply_token:
+          event.type === 'message' ? (event.replyToken ?? null) : null,
+      })
+
+      await debug_event({
+        category: 'line_webhook',
+        event: 'room_resolved',
+        payload: {
+          room_uuid: initial_chat.room.room_uuid,
+          participant_uuid: initial_chat.room.participant_uuid,
+          was_created: initial_chat.is_new_room,
+        },
       })
 
       const passed_data: Record<string, unknown> = {
@@ -221,7 +275,6 @@ export async function POST(request: Request) {
           event.message?.type === 'text'
             ? event.message.text
             : undefined,
-        reply_token: event.replyToken,
         reply_token_exists: Boolean(event.replyToken),
         timestamp: event.timestamp,
         destination: body.destination,

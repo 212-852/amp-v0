@@ -20,6 +20,7 @@ type resolve_initial_chat_input = {
   user_uuid?: string | null
   channel: chat_channel
   external_room_id?: string | null
+  line_reply_token?: string | null
 }
 
 export type initial_chat_result = {
@@ -64,6 +65,7 @@ export async function resolve_initial_chat(
     room: room_result.room,
     channel: input.channel,
     messages: seeded_messages,
+    line_reply_token: input.line_reply_token ?? null,
   })
 
   return {

@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { notify } from '@/lib/notify'
+
 type debug_payload = {
   category: string
   event: string
@@ -24,6 +26,23 @@ function get_allowed_users() {
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean)
+}
+
+export async function debug_event(input: {
+  category: string
+  event: string
+  payload?: Record<string, unknown>
+}) {
+  try {
+    await notify({
+      event: 'debug_trace',
+      category: input.category,
+      debug_event: input.event,
+      payload: input.payload ?? {},
+    })
+  } catch {
+    // never block callers
+  }
 }
 
 export async function debug(payload: debug_payload) {

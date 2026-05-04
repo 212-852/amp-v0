@@ -28,6 +28,7 @@ type room_row = {
   room_uuid: string
   room_type: string | null
   status: string | null
+  updated_at: string | null
 }
 
 type participant_row = {
@@ -54,48 +55,78 @@ function normalize_room(
   }
 }
 
-async function find_participant_by_user(user_uuid: string) {
-  const result = await supabase
+async function list_user_participants_for_identity(
+  input: resolve_room_input,
+): Promise<participant_row[]> {
+  let query = supabase
     .from('participants')
     .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
-    .eq('user_uuid', user_uuid)
     .eq('role', 'user')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+
+  if (input.user_uuid) {
+    query = query.or(
+      `user_uuid.eq.${input.user_uuid},visitor_uuid.eq.${input.visitor_uuid}`,
+    )
+  } else {
+    query = query.eq('visitor_uuid', input.visitor_uuid)
+  }
+
+  const result = await query
 
   if (result.error) {
     throw result.error
   }
 
-  return result.data
-    ? (result.data as participant_row)
-    : null
+  return (result.data ?? []) as participant_row[]
 }
 
-async function find_participant_by_visitor(visitor_uuid: string) {
-  const result = await supabase
-    .from('participants')
-    .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
-    .eq('visitor_uuid', visitor_uuid)
-    .eq('role', 'user')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+async function resolve_latest_direct_room_for_identity(
+  input: resolve_room_input,
+): Promise<{ room: room_row; participant: participant_row } | null> {
+  const participants = await list_user_participants_for_identity(input)
 
-  if (result.error) {
-    throw result.error
+  if (participants.length === 0) {
+    return null
   }
 
-  return result.data
-    ? (result.data as participant_row)
-    : null
+  const room_uuids = [...new Set(participants.map((row) => row.room_uuid))]
+
+  const rooms_result = await supabase
+    .from('rooms')
+    .select('room_uuid, room_type, status, updated_at')
+    .in('room_uuid', room_uuids)
+    .eq('room_type', 'direct')
+
+  if (rooms_result.error) {
+    throw rooms_result.error
+  }
+
+  const direct_rooms = (rooms_result.data ?? []) as room_row[]
+
+  if (direct_rooms.length === 0) {
+    return null
+  }
+
+  direct_rooms.sort((a, b) => {
+    const tb = new Date(b.updated_at ?? 0).getTime()
+    const ta = new Date(a.updated_at ?? 0).getTime()
+    return tb - ta
+  })
+
+  const room = direct_rooms[0]
+  const participant = participants.find((row) => row.room_uuid === room.room_uuid)
+
+  if (!participant) {
+    return null
+  }
+
+  return { room, participant }
 }
 
 async function load_room(room_uuid: string) {
   const result = await supabase
     .from('rooms')
-    .select('room_uuid, room_type, status')
+    .select('room_uuid, room_type, status, updated_at')
     .eq('room_uuid', room_uuid)
     .maybeSingle()
 
@@ -211,7 +242,7 @@ async function create_room(input: resolve_room_input) {
       room_type: 'direct',
       status: 'active',
     })
-    .select('room_uuid, room_type, status')
+    .select('room_uuid, room_type, status, updated_at')
     .single()
 
   if (room_result.error) {
@@ -247,15 +278,13 @@ export async function resolve_chat_room(
   room: chat_room
   is_new_room: boolean
 }> {
-  const existing_by_user = input.user_uuid
-    ? await find_participant_by_user(input.user_uuid)
-    : null
-  const existing_participant =
-    existing_by_user ??
-    await find_participant_by_visitor(input.visitor_uuid)
+  const existing_direct = await resolve_latest_direct_room_for_identity(input)
 
-  if (existing_participant) {
-    const result = await update_existing_room(input, existing_participant)
+  if (existing_direct) {
+    const result = await update_existing_room(
+      input,
+      existing_direct.participant,
+    )
     const bot_participant = await resolve_bot_participant(
       result.room.room_uuid,
     )

@@ -14,6 +14,7 @@ type output_chat_input = {
   room: chat_room
   channel: chat_channel
   messages: archived_message[]
+  line_reply_token?: string | null
 }
 
 export async function output_chat_bundles(
@@ -25,6 +26,7 @@ export async function output_chat_bundles(
     await deliver_line_chat_bundles({
       room: input.room,
       messages: input.messages,
+      line_reply_token: input.line_reply_token ?? null,
     })
   } else {
     await deliver_web_chat_bundles({

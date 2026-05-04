@@ -9,5 +9,6 @@ export const control = {
 
   notify: {
     new_user_created: true,
+    debug_trace: true,
   },
 } as const

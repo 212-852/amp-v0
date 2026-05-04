@@ -1,8 +1,19 @@
 import 'server-only'
 
-import { debug } from '@/lib/debug'
-
 import type { notify_event } from './rules'
+
+function get_debug_discord_mention_user_ids() {
+  const raw = process.env.DISCORD_DEV_USER_IDS
+
+  if (!raw) {
+    return []
+  }
+
+  return raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+}
 
 function build_discord_content(event: notify_event) {
   if (event.event === 'new_user_created') {
@@ -19,10 +30,52 @@ function build_discord_content(event: notify_event) {
     ].join('\n')
   }
 
+  if (event.event === 'debug_trace') {
+    const lines = [
+      `**[DEBUG] ${event.category.toUpperCase()}**`,
+      `event: \`${event.debug_event}\``,
+    ]
+
+    if (Object.keys(event.payload).length > 0) {
+      lines.push(
+        `\`\`\`json\n${JSON.stringify(event.payload, null, 2)}\n\`\`\``,
+      )
+    }
+
+    return lines.join('\n')
+  }
+
   return null
 }
 
 export async function send_discord_notify(event: notify_event) {
+  if (event.event === 'debug_trace') {
+    const webhook_url = process.env.DISCORD_DEBUG_WEBHOOK_URL
+    const content = build_discord_content(event)
+
+    if (!content || !webhook_url) {
+      return
+    }
+
+    const mention_users = get_debug_discord_mention_user_ids()
+    const mentions = mention_users.map((id) => `<@${id}>`).join(' ')
+
+    await fetch(webhook_url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: [mentions, content].filter(Boolean).join('\n'),
+        allowed_mentions: {
+          users: mention_users,
+        },
+      }),
+    })
+
+    return
+  }
+
   const webhook_url = process.env.DISCORD_NOTIFY_WEBHOOK_URL
   const content = build_discord_content(event)
 
@@ -31,13 +84,8 @@ export async function send_discord_notify(event: notify_event) {
   }
 
   if (!webhook_url) {
-    await debug({
-      category: 'notify',
-      event: 'discord_notify_skipped',
-      data: {
-        reason: 'missing_webhook_url',
-        notify_event: event.event,
-      },
+    console.warn('[notify] discord_notify_skipped: missing DISCORD_NOTIFY_WEBHOOK_URL', {
+      notify_event: event.event,
     })
 
     return

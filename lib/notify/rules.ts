@@ -18,6 +18,12 @@ export type notify_event =
       line_user_id: string
       message: string
     }
+  | {
+      event: 'debug_trace'
+      category: string
+      debug_event: string
+      payload: Record<string, unknown>
+    }
 
 export type notify_channel = 'discord' | 'line'
 
@@ -32,6 +38,10 @@ export function should_send_notify(event: notify_event) {
 
   if (event.event === 'line_push') {
     return true
+  }
+
+  if (event.event === 'debug_trace') {
+    return control.notify.debug_trace
   }
 
   return false
@@ -53,6 +63,12 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
   if (event.event === 'line_push') {
     return {
       channels: ['line'],
+    }
+  }
+
+  if (event.event === 'debug_trace') {
+    return {
+      channels: ['discord'],
     }
   }
 
