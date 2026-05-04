@@ -2,6 +2,7 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import { parse_line_login_oauth_state } from '@/lib/auth/line/state'
 import {
   promote_browser_visitor_to_user,
   session_cookie_name,
@@ -132,6 +133,12 @@ export async function GET(request: Request) {
     cookie_store.get(visitor_cookie_name)?.value ?? null
   const current_session_uuid =
     cookie_store.get(session_cookie_name)?.value ?? null
+  const parsed_oauth_state =
+    saved_state && state && saved_state === state
+      ? parse_line_login_oauth_state(saved_state)
+      : null
+  const merge_visitor_uuid =
+    parsed_oauth_state?.browser_visitor_uuid ?? current_visitor_uuid ?? null
 
   cookie_store.delete(line_login_state_cookie_name)
 
@@ -180,7 +187,7 @@ export async function GET(request: Request) {
     const access = await resolve_auth_access({
       provider: 'line',
       provider_id: line_user_id,
-      visitor_uuid: current_visitor_uuid,
+      visitor_uuid: merge_visitor_uuid,
       display_name: profile?.displayName ?? null,
       image_url: profile?.pictureUrl ?? null,
       locale: initial_locale.locale,
@@ -191,7 +198,7 @@ export async function GET(request: Request) {
       line_profile_locale: profile?.language ?? null,
     })
     const promoted = await promote_browser_visitor_to_user({
-      old_visitor_uuid: current_visitor_uuid,
+      old_visitor_uuid: merge_visitor_uuid,
       session_uuid: current_session_uuid,
       user_uuid: access.user_uuid,
     })
@@ -208,6 +215,10 @@ export async function GET(request: Request) {
           user_uuid: access.user_uuid,
           visitor_uuid: resolved_visitor_uuid,
           auth_visitor_uuid: access.visitor_uuid,
+          merge_visitor_uuid,
+          merge_visitor_from_oauth_state: Boolean(
+            parsed_oauth_state?.browser_visitor_uuid,
+          ),
           is_new_user: access.is_new_user,
           is_new_visitor: access.is_new_visitor,
           line_user_id,

@@ -1,8 +1,8 @@
-import { randomUUID } from 'crypto'
-
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
+import { build_line_login_oauth_state } from '@/lib/auth/line/state'
+import { visitor_cookie_name } from '@/lib/auth/session'
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
 
@@ -30,8 +30,10 @@ export async function GET() {
     )
   }
 
-  const state = randomUUID()
   const cookie_store = await cookies()
+  const browser_visitor_uuid =
+    cookie_store.get(visitor_cookie_name)?.value ?? null
+  const state = build_line_login_oauth_state(browser_visitor_uuid)
 
   cookie_store.set(line_login_state_cookie_name, state, {
     httpOnly: true,

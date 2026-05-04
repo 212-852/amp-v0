@@ -1,3 +1,5 @@
+import { control } from '@/lib/config/control'
+
 export { session_cookie_name, visitor_cookie_name } from '@/lib/visitor/cookie'
 
 export const visitor_cookie_max_age = 60 * 60 * 24 * 365
@@ -144,6 +146,10 @@ async function emit_identity_promotion_debug(
     participant_uuid?: string | null
   },
 ) {
+  if (!control.debug.identity_promotion) {
+    return
+  }
+
   const { debug_event } = await import('@/lib/debug')
 
   await debug_event({
@@ -177,6 +183,7 @@ async function find_guest_participant_by_visitor(
     .from('participants')
     .select('participant_uuid, room_uuid')
     .eq('role', 'user')
+    .is('user_uuid', null)
     .eq('visitor_uuid', visitor_uuid)
     .order('updated_at', { ascending: false })
     .limit(1)
@@ -470,6 +477,37 @@ export async function promote_browser_visitor_to_user(input: {
 
   if (visitor_update.error && !is_unique_violation(visitor_update.error)) {
     throw visitor_update.error
+  }
+
+  const promotion_now = new Date().toISOString()
+
+  if (guest_participant?.participant_uuid) {
+    const cleared_member_slot = await supabase
+      .from('participants')
+      .update({
+        user_uuid: null,
+        updated_at: promotion_now,
+      })
+      .eq('role', 'user')
+      .eq('status', 'active')
+      .eq('user_uuid', input.user_uuid)
+      .neq('participant_uuid', guest_participant.participant_uuid)
+
+    if (cleared_member_slot.error) {
+      throw cleared_member_slot.error
+    }
+
+    const participant_promotion = await supabase
+      .from('participants')
+      .update({
+        user_uuid: input.user_uuid,
+        updated_at: promotion_now,
+      })
+      .eq('participant_uuid', guest_participant.participant_uuid)
+
+    if (participant_promotion.error) {
+      throw participant_promotion.error
+    }
   }
 
   await emit_identity_promotion_debug('visitor_promoted_to_user', {
