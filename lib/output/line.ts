@@ -3,16 +3,10 @@ import 'server-only'
 import type { archived_message } from '@/lib/chat/archive'
 import { env } from '@/lib/config/env'
 import { debug_event } from '@/lib/debug'
-import type {
-  faq_bundle,
-  how_to_use_bundle,
-  message_bundle,
-  quick_menu_bundle,
-  welcome_bundle,
-} from '@/lib/chat/message'
+import type { message_bundle } from '@/lib/chat/message'
 import type { chat_room } from '@/lib/chat/room'
 
-import { cap_line_messages_for_reply } from './rules'
+import { build_seed_carousel_line_messages } from './line/flex'
 
 type deliver_line_chat_bundles_input = {
   room: chat_room
@@ -21,14 +15,6 @@ type deliver_line_chat_bundles_input = {
 }
 
 type line_api_message = Record<string, unknown>
-
-function pick_text(content: string | { ja?: string } | undefined) {
-  if (typeof content === 'string') {
-    return content
-  }
-
-  return content?.ja ?? ''
-}
 
 function truncate(s: string, max: number) {
   if (s.length <= max) {
@@ -48,263 +34,75 @@ function to_absolute_asset_url(path: string): string | null {
   return `${base}${path}`
 }
 
-function flex_text_line(
-  text: string,
-  options?: { weight?: string; size?: string; color?: string },
-): Record<string, unknown> {
-  return {
-    type: 'text',
-    text: truncate(text, 2000),
-    wrap: true,
-    ...(options?.weight ? { weight: options.weight } : {}),
-    ...(options?.size ? { size: options.size } : {}),
-    ...(options?.color ? { color: options.color } : {}),
+function build_flex_failure_text_fallback(
+  bundles: message_bundle[],
+): line_api_message[] {
+  const lines: string[] = []
+
+  for (const bundle of bundles) {
+    if (bundle.bundle_type === 'welcome') {
+      lines.push(`${bundle.payload.title}\n${bundle.payload.text}`)
+    }
+
+    if (bundle.bundle_type === 'quick_menu') {
+      const p = bundle.payload
+      lines.push(
+        [
+          p.title,
+          p.subtitle,
+          ...p.items.map((i) => i.label),
+          p.support_heading,
+          p.support_body,
+          ...(p.links?.map((l) => l.label) ?? []),
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      )
+    }
+
+    if (bundle.bundle_type === 'how_to_use') {
+      const p = bundle.payload
+      lines.push(
+        [
+          p.title,
+          ...p.steps.map((s) =>
+            s.description.trim() ? `${s.title}\n${s.description}` : s.title,
+          ),
+          p.notice_heading,
+          p.notice_body,
+          p.footer_link_label,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      )
+    }
+
+    if (bundle.bundle_type === 'faq') {
+      const p = bundle.payload
+      lines.push(
+        [
+          p.title,
+          ...p.items.flatMap((i) =>
+            i.answer.trim() ? [i.question, i.answer] : [i.question],
+          ),
+          p.primary_cta_label,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      )
+    }
+
+    if (bundle.bundle_type === 'text') {
+      lines.push(bundle.payload.text)
+    }
   }
-}
 
-function build_flex_bubble(input: {
-  alt: string
-  image_url?: string | null
-  lines: Array<{ text: string; weight?: string; size?: string; color?: string }>
-}): line_api_message {
-  const body_contents = input.lines.map((line) =>
-    flex_text_line(line.text, {
-      weight: line.weight,
-      size: line.size,
-      color: line.color,
-    }),
-  )
-
-  const bubble: Record<string, unknown> = {
-    type: 'bubble',
-    body: {
-      type: 'box',
-      layout: 'vertical',
-      spacing: 'sm',
-      contents: body_contents,
+  return [
+    {
+      type: 'text',
+      text: truncate(lines.join('\n\n'), 5000),
     },
-  }
-
-  if (input.image_url) {
-    bubble.hero = {
-      type: 'image',
-      url: input.image_url,
-      size: 'full',
-      aspectRatio: '20:13',
-      aspectMode: 'cover',
-    }
-  }
-
-  return {
-    type: 'flex',
-    altText: truncate(input.alt, 400),
-    contents: bubble,
-  }
-}
-
-function welcome_to_line_message(bundle: welcome_bundle): line_api_message {
-  const title = pick_text(bundle.payload.title)
-  const text = pick_text(bundle.payload.text)
-
-  return {
-    type: 'text',
-    text: truncate(`${title}\n${text}`, 5000),
-  }
-}
-
-function quick_menu_to_line_message(bundle: quick_menu_bundle): line_api_message {
-  const p = bundle.payload
-  const title = pick_text(p.title)
-  const lines: Array<{
-    text: string
-    weight?: string
-    size?: string
-    color?: string
-  }> = [{ text: title, weight: 'bold', size: 'lg' }]
-
-  if (p.subtitle) {
-    lines.push({
-      text: pick_text(p.subtitle),
-      size: 'sm',
-      color: '#a1887f',
-    })
-  }
-
-  for (const item of p.items) {
-    lines.push({ text: pick_text(item.label), weight: 'bold' })
-  }
-
-  if (p.support_heading) {
-    lines.push({ text: pick_text(p.support_heading), weight: 'bold' })
-  }
-
-  if (p.support_body) {
-    lines.push({ text: pick_text(p.support_body), size: 'sm' })
-  }
-
-  if (p.links) {
-    for (const link of p.links) {
-      lines.push({
-        text: pick_text(link.label),
-        size: 'sm',
-        color: '#c9a77d',
-      })
-    }
-  }
-
-  const image_url = to_absolute_asset_url(p.image.src)
-
-  try {
-    return build_flex_bubble({
-      alt: title,
-      image_url,
-      lines,
-    })
-  } catch {
-    return {
-      type: 'text',
-      text: truncate(
-        lines.map((row) => row.text).join('\n'),
-        5000,
-      ),
-    }
-  }
-}
-
-function how_to_use_to_line_message(bundle: how_to_use_bundle): line_api_message {
-  const p = bundle.payload
-  const title = pick_text(p.title)
-  const lines: Array<{
-    text: string
-    weight?: string
-    size?: string
-    color?: string
-  }> = [{ text: title, weight: 'bold', size: 'lg' }]
-
-  for (const step of p.steps) {
-    const line = pick_text(step.title)
-    const desc = pick_text(step.description).trim()
-    lines.push({
-      text: desc ? `${line}\n${desc}` : line,
-    })
-  }
-
-  if (p.notice_heading) {
-    lines.push({ text: pick_text(p.notice_heading), weight: 'bold' })
-  }
-
-  if (p.notice_body) {
-    lines.push({ text: pick_text(p.notice_body), size: 'sm' })
-  }
-
-  if (p.footer_link_label) {
-    lines.push({
-      text: pick_text(p.footer_link_label),
-      size: 'sm',
-      color: '#c9a77d',
-    })
-  }
-
-  const image_url = to_absolute_asset_url(p.image.src)
-
-  try {
-    return build_flex_bubble({
-      alt: title,
-      image_url,
-      lines,
-    })
-  } catch {
-    return {
-      type: 'text',
-      text: truncate(
-        lines.map((row) => row.text).join('\n'),
-        5000,
-      ),
-    }
-  }
-}
-
-function faq_to_line_message(bundle: faq_bundle): line_api_message {
-  const p = bundle.payload
-  const title = pick_text(p.title)
-  const lines: Array<{
-    text: string
-    weight?: string
-    size?: string
-    color?: string
-  }> = [{ text: title, weight: 'bold', size: 'lg' }]
-
-  for (const item of p.items) {
-    lines.push({ text: pick_text(item.question), weight: 'bold' })
-    const answer = pick_text(item.answer).trim()
-    if (answer) {
-      lines.push({ text: answer, size: 'sm' })
-    }
-  }
-
-  if (p.primary_cta_label) {
-    lines.push({
-      text: pick_text(p.primary_cta_label),
-      weight: 'bold',
-      color: '#c9a77d',
-    })
-  }
-
-  const image_url = to_absolute_asset_url(p.image.src)
-
-  try {
-    return build_flex_bubble({
-      alt: title,
-      image_url,
-      lines,
-    })
-  } catch {
-    return {
-      type: 'text',
-      text: truncate(
-        lines.map((row) => row.text).join('\n'),
-        5000,
-      ),
-    }
-  }
-}
-
-function text_bundle_to_line_message(bundle: {
-  payload: { text: string | { ja?: string } }
-}): line_api_message {
-  return {
-    type: 'text',
-    text: truncate(pick_text(bundle.payload.text), 5000),
-  }
-}
-
-function archived_bundle_to_line_message(
-  bundle: message_bundle,
-): line_api_message {
-  if (bundle.bundle_type === 'welcome') {
-    return welcome_to_line_message(bundle)
-  }
-
-  if (bundle.bundle_type === 'quick_menu') {
-    return quick_menu_to_line_message(bundle)
-  }
-
-  if (bundle.bundle_type === 'how_to_use') {
-    return how_to_use_to_line_message(bundle)
-  }
-
-  if (bundle.bundle_type === 'faq') {
-    return faq_to_line_message(bundle)
-  }
-
-  if (bundle.bundle_type === 'text') {
-    return text_bundle_to_line_message(bundle)
-  }
-
-  return {
-    type: 'text',
-    text: truncate(JSON.stringify(bundle), 5000),
-  }
+  ]
 }
 
 type line_reply_error = Error & {
@@ -358,6 +156,7 @@ export async function deliver_line_chat_bundles(
   }
 
   const bundles = input.messages.map((row) => row.bundle)
+  const bundle_count = bundles.length
 
   await debug_event({
     category: 'line_webhook',
@@ -365,36 +164,65 @@ export async function deliver_line_chat_bundles(
     payload: {
       room_uuid: input.room.room_uuid,
       reply_token_exists: Boolean(reply_token),
-      bundle_count: bundles.length,
+      bundle_count,
+    },
+  })
+
+  await debug_event({
+    category: 'line_webhook',
+    event: 'line_flex_render_started',
+    payload: {
+      room_uuid: input.room.room_uuid,
+      bundle_count,
+      line_message_count: 0,
+      flex_bubble_count: 0,
     },
   })
 
   let line_messages: line_api_message[]
+  let flex_bubble_count = 0
+  let used_flex_carousel = false
 
   try {
-    line_messages = cap_line_messages_for_reply(
-      bundles.map((bundle) => archived_bundle_to_line_message(bundle)),
-    )
-  } catch (conversion_error) {
+    const built = build_seed_carousel_line_messages({
+      bundles,
+      absolute_url: to_absolute_asset_url,
+    })
+    line_messages = built.messages
+    flex_bubble_count = built.flex_bubble_count
+    used_flex_carousel = true
+  } catch (flex_error) {
     await debug_event({
       category: 'line_webhook',
-      event: 'line_reply_failed',
+      event: 'line_flex_render_failed',
       payload: {
         room_uuid: input.room.room_uuid,
+        bundle_count,
         error_message:
-          conversion_error instanceof Error
-            ? conversion_error.message
-            : String(conversion_error),
-        error_status: undefined,
-        error_body: undefined,
+          flex_error instanceof Error
+            ? flex_error.message
+            : String(flex_error),
       },
     })
 
-    return
+    line_messages = build_flex_failure_text_fallback(bundles)
+    flex_bubble_count = 0
+    used_flex_carousel = false
   }
 
-  if (line_messages.length === 0) {
-    return
+  const line_message_count = line_messages.length
+
+  if (used_flex_carousel) {
+    await debug_event({
+      category: 'line_webhook',
+      event: 'line_flex_render_succeeded',
+      payload: {
+        room_uuid: input.room.room_uuid,
+        bundle_count,
+        line_message_count,
+        flex_bubble_count,
+      },
+    })
   }
 
   await debug_event({
@@ -402,7 +230,9 @@ export async function deliver_line_chat_bundles(
     event: 'line_reply_attempted',
     payload: {
       room_uuid: input.room.room_uuid,
-      reply_message_count: line_messages.length,
+      bundle_count,
+      line_message_count,
+      flex_bubble_count,
     },
   })
 
@@ -417,6 +247,9 @@ export async function deliver_line_chat_bundles(
       event: 'line_reply_succeeded',
       payload: {
         room_uuid: input.room.room_uuid,
+        bundle_count,
+        line_message_count,
+        flex_bubble_count,
       },
     })
   } catch (reply_error) {
@@ -433,6 +266,9 @@ export async function deliver_line_chat_bundles(
             : String(reply_error),
         error_status: err.line_status,
         error_body: err.line_body,
+        bundle_count,
+        line_message_count,
+        flex_bubble_count,
       },
     })
   }
