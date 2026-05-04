@@ -4,7 +4,8 @@ import type { archived_message } from '@/lib/chat/archive'
 import type {
   faq_bundle,
   how_to_use_bundle,
-  message_bundle,
+  initial_carousel_bundle,
+  initial_carousel_card,
   quick_menu_bundle,
   welcome_bundle,
 } from '@/lib/chat/message'
@@ -209,7 +210,7 @@ function FaqCard({ bundle }: { bundle: faq_bundle }) {
   )
 }
 
-function ChatCard({ bundle }: { bundle: message_bundle }) {
+function ChatCard({ bundle }: { bundle: initial_carousel_card }) {
   if (bundle.bundle_type === 'quick_menu') {
     return <QuickMenuCard bundle={bundle} />
   }
@@ -225,9 +226,28 @@ function ChatCard({ bundle }: { bundle: message_bundle }) {
   return null
 }
 
+function InitialCarouselBubble({
+  bundle,
+}: {
+  bundle: initial_carousel_bundle
+}) {
+  return (
+    <div className="overflow-x-auto px-5 pb-3">
+      <div className="flex w-max gap-4">
+        {bundle.cards.map((card) => (
+          <ChatCard key={card.bundle_uuid} bundle={card} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function WebChat({ messages }: { messages: archived_message[] }) {
   const welcome_messages = messages.filter(
     (message) => message.bundle.bundle_type === 'welcome',
+  )
+  const carousel_messages = messages.filter(
+    (message) => message.bundle.bundle_type === 'initial_carousel',
   )
   const card_messages = messages.filter((message) =>
     ['quick_menu', 'how_to_use', 'faq'].includes(message.bundle.bundle_type),
@@ -242,17 +262,27 @@ export function WebChat({ messages }: { messages: archived_message[] }) {
         />
       ))}
 
+      {carousel_messages.map((message) => (
+        <InitialCarouselBubble
+          key={message.archive_uuid}
+          bundle={message.bundle as initial_carousel_bundle}
+        />
+      ))}
+
       {card_messages.length > 0 ? (
-        <div className="overflow-x-auto px-5 pb-3">
-          <div className="flex w-max gap-4">
-            {card_messages.map((message) => (
-              <ChatCard
-                key={message.archive_uuid}
-                bundle={message.bundle}
-              />
-            ))}
-          </div>
-        </div>
+        <InitialCarouselBubble
+          bundle={{
+            bundle_uuid: 'legacy_initial_carousel',
+            bundle_type: 'initial_carousel',
+            sender: 'bot',
+            version: 1,
+            locale: 'ja',
+            content_key: 'initial.carousel',
+            cards: card_messages.map(
+              (message) => message.bundle as initial_carousel_card,
+            ),
+          }}
+        />
       ) : null}
     </section>
   )

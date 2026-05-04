@@ -3,6 +3,7 @@ import 'server-only'
 import type {
   faq_bundle,
   how_to_use_bundle,
+  initial_carousel_bundle,
   message_bundle,
   quick_menu_bundle,
   welcome_bundle,
@@ -280,6 +281,12 @@ function is_welcome(b: message_bundle): b is welcome_bundle {
   return b.bundle_type === 'welcome'
 }
 
+function is_initial_carousel(
+  b: message_bundle,
+): b is initial_carousel_bundle {
+  return b.bundle_type === 'initial_carousel'
+}
+
 function is_quick_menu(b: message_bundle): b is quick_menu_bundle {
   return b.bundle_type === 'quick_menu'
 }
@@ -298,17 +305,27 @@ export function build_seed_carousel_line_messages(input: {
 }): { messages: line_api_message[]; flex_bubble_count: number } {
   const bundles = input.bundles
 
-  if (bundles.length < 4) {
-    throw new Error('expected at least 4 seed bundles for line carousel')
+  if (bundles.length < 2) {
+    throw new Error('expected welcome and initial_carousel bundles')
   }
 
   const welcome = bundles.find(is_welcome)
-  const quick = bundles.find(is_quick_menu)
-  const how = bundles.find(is_how_to_use)
-  const faq = bundles.find(is_faq)
+  const carousel_bundle = bundles.find(is_initial_carousel)
+  const carousel_cards =
+    carousel_bundle?.cards ??
+    [
+      bundles.find(is_quick_menu),
+      bundles.find(is_how_to_use),
+      bundles.find(is_faq),
+    ].filter((card): card is quick_menu_bundle | how_to_use_bundle | faq_bundle =>
+      Boolean(card),
+    )
+  const quick = carousel_cards.find(is_quick_menu)
+  const how = carousel_cards.find(is_how_to_use)
+  const faq = carousel_cards.find(is_faq)
 
   if (!welcome || !quick || !how || !faq) {
-    throw new Error('missing welcome, quick_menu, how_to_use, or faq bundle')
+    throw new Error('missing welcome or initial carousel cards')
   }
 
   const welcome_message: line_api_message = {

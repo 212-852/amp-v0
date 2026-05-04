@@ -103,6 +103,21 @@ export type faq_bundle = {
   }
 }
 
+export type initial_carousel_card =
+  | quick_menu_bundle
+  | how_to_use_bundle
+  | faq_bundle
+
+export type initial_carousel_bundle = {
+  bundle_uuid: string
+  bundle_type: 'initial_carousel'
+  sender: 'bot'
+  version: 1
+  locale: chat_locale
+  content_key: 'initial.carousel'
+  cards: initial_carousel_card[]
+}
+
 export type text_bundle = {
   bundle_uuid: string
   bundle_type: 'text'
@@ -117,6 +132,7 @@ export type text_bundle = {
 
 export type message_bundle =
   | welcome_bundle
+  | initial_carousel_bundle
   | quick_menu_bundle
   | how_to_use_bundle
   | faq_bundle
@@ -398,6 +414,96 @@ export function build_initial_chat_bundles(input: {
   locale: chat_locale
 }): message_bundle[] {
   const { locale } = input
+  const quick_menu_card: quick_menu_bundle = {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'quick_menu',
+    sender: 'bot',
+    version: 1,
+    locale,
+    content_key: 'initial.quick_menu',
+    payload: {
+      title: pick_text(initial_content.quick_menu.title, locale),
+      subtitle: pick_text(initial_content.quick_menu.subtitle, locale),
+      image: {
+        src: '/images/LINE---quick-menu.jpg',
+        alt: pick_text(initial_content.quick_menu.alt, locale),
+      },
+      items: initial_content.quick_menu.items.map((item) => ({
+        key: item.key,
+        title: pick_text(item.title, locale),
+        description: pick_text(item.description, locale),
+        label: pick_text(item.label, locale),
+      })),
+      support_heading: pick_text(
+        initial_content.quick_menu.support_heading,
+        locale,
+      ),
+      support_body: pick_text(
+        initial_content.quick_menu.support_body,
+        locale,
+      ),
+      links: initial_content.quick_menu.links.map((link) => ({
+        key: link.key,
+        label: pick_text(link.label, locale),
+      })),
+    },
+  }
+  const how_to_use_card: how_to_use_bundle = {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'how_to_use',
+    sender: 'bot',
+    version: 1,
+    locale,
+    content_key: 'initial.how_to_use',
+    payload: {
+      title: pick_text(initial_content.how_to_use.title, locale),
+      image: {
+        src: '/images/LINE---how-yo-use.jpg',
+        alt: pick_text(initial_content.how_to_use.alt, locale),
+      },
+      steps: initial_content.how_to_use.steps.map((step) => ({
+        key: step.key,
+        title: pick_text(step.title, locale),
+        description: pick_text(step.description, locale),
+      })),
+      notice_heading: pick_text(
+        initial_content.how_to_use.notice_heading,
+        locale,
+      ),
+      notice_body: pick_text(
+        initial_content.how_to_use.notice_body,
+        locale,
+      ),
+      footer_link_label: pick_text(
+        initial_content.how_to_use.footer_link_label,
+        locale,
+      ),
+    },
+  }
+  const faq_card: faq_bundle = {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'faq',
+    sender: 'bot',
+    version: 1,
+    locale,
+    content_key: 'initial.faq',
+    payload: {
+      title: pick_text(initial_content.faq.title, locale),
+      image: {
+        src: '/images/LINE---FAQ.jpg',
+        alt: pick_text(initial_content.faq.alt, locale),
+      },
+      items: initial_content.faq.items.map((item) => ({
+        key: item.key,
+        question: pick_text(item.question, locale),
+        answer: pick_text(item.answer, locale),
+      })),
+      primary_cta_label: pick_text(
+        initial_content.faq.primary_cta_label,
+        locale,
+      ),
+    },
+  }
 
   return [
     {
@@ -414,93 +520,12 @@ export function build_initial_chat_bundles(input: {
     },
     {
       bundle_uuid: create_bundle_uuid(),
-      bundle_type: 'quick_menu',
+      bundle_type: 'initial_carousel',
       sender: 'bot',
       version: 1,
       locale,
-      content_key: 'initial.quick_menu',
-      payload: {
-        title: pick_text(initial_content.quick_menu.title, locale),
-        subtitle: pick_text(initial_content.quick_menu.subtitle, locale),
-        image: {
-          src: '/images/LINE---quick-menu.jpg',
-          alt: pick_text(initial_content.quick_menu.alt, locale),
-        },
-        items: initial_content.quick_menu.items.map((item) => ({
-          key: item.key,
-          title: pick_text(item.title, locale),
-          description: pick_text(item.description, locale),
-          label: pick_text(item.label, locale),
-        })),
-        support_heading: pick_text(
-          initial_content.quick_menu.support_heading,
-          locale,
-        ),
-        support_body: pick_text(
-          initial_content.quick_menu.support_body,
-          locale,
-        ),
-        links: initial_content.quick_menu.links.map((link) => ({
-          key: link.key,
-          label: pick_text(link.label, locale),
-        })),
-      },
-    },
-    {
-      bundle_uuid: create_bundle_uuid(),
-      bundle_type: 'how_to_use',
-      sender: 'bot',
-      version: 1,
-      locale,
-      content_key: 'initial.how_to_use',
-      payload: {
-        title: pick_text(initial_content.how_to_use.title, locale),
-        image: {
-          src: '/images/LINE---how-yo-use.jpg',
-          alt: pick_text(initial_content.how_to_use.alt, locale),
-        },
-        steps: initial_content.how_to_use.steps.map((step) => ({
-          key: step.key,
-          title: pick_text(step.title, locale),
-          description: pick_text(step.description, locale),
-        })),
-        notice_heading: pick_text(
-          initial_content.how_to_use.notice_heading,
-          locale,
-        ),
-        notice_body: pick_text(
-          initial_content.how_to_use.notice_body,
-          locale,
-        ),
-        footer_link_label: pick_text(
-          initial_content.how_to_use.footer_link_label,
-          locale,
-        ),
-      },
-    },
-    {
-      bundle_uuid: create_bundle_uuid(),
-      bundle_type: 'faq',
-      sender: 'bot',
-      version: 1,
-      locale,
-      content_key: 'initial.faq',
-      payload: {
-        title: pick_text(initial_content.faq.title, locale),
-        image: {
-          src: '/images/LINE---FAQ.jpg',
-          alt: pick_text(initial_content.faq.alt, locale),
-        },
-        items: initial_content.faq.items.map((item) => ({
-          key: item.key,
-          question: pick_text(item.question, locale),
-          answer: pick_text(item.answer, locale),
-        })),
-        primary_cta_label: pick_text(
-          initial_content.faq.primary_cta_label,
-          locale,
-        ),
-      },
+      content_key: 'initial.carousel',
+      cards: [quick_menu_card, how_to_use_card, faq_card],
     },
   ]
 }

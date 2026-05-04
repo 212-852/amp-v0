@@ -127,7 +127,7 @@ export async function archive_message_bundles(
       locale: bundle.locale,
       content_key: bundle.content_key,
       sequence: next_sequence + index,
-      payload: bundle.payload,
+      payload: 'payload' in bundle ? bundle.payload : undefined,
       bundle,
     }),
   }))

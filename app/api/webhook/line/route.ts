@@ -248,6 +248,16 @@ export async function POST(request: Request) {
         line_reply_token:
           event.type === 'message' ? (event.replyToken ?? null) : null,
       })
+      const initial_carousel_card_count = initial_chat.messages.reduce(
+        (count, message) => {
+          if (message.bundle.bundle_type !== 'initial_carousel') {
+            return count
+          }
+
+          return count + message.bundle.cards.length
+        },
+        0,
+      )
 
       await debug_event({
         category: 'line_webhook',
@@ -267,6 +277,7 @@ export async function POST(request: Request) {
         chat_room_uuid: initial_chat.room.room_uuid,
         chat_seeded: initial_chat.is_seeded,
         chat_message_count: initial_chat.messages.length,
+        initial_carousel_card_count,
 
         line_user_id,
         event_type: event.type,

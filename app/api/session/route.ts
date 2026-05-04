@@ -15,6 +15,7 @@ type session_chat_state = {
   room_uuid: string
   is_seeded: boolean
   message_count: number
+  initial_carousel_card_count: number
 } | null
 
 function get_browser_locale(accept_language: string | null) {
@@ -196,11 +197,22 @@ async function resolve_session_chat(input: {
 }): Promise<session_chat_state> {
   try {
     const initial_chat = await resolve_initial_chat(input)
+    const initial_carousel_card_count = initial_chat.messages.reduce(
+      (count, message) => {
+        if (message.bundle.bundle_type !== 'initial_carousel') {
+          return count
+        }
+
+        return count + message.bundle.cards.length
+      },
+      0,
+    )
 
     return {
       room_uuid: initial_chat.room.room_uuid,
       is_seeded: initial_chat.is_seeded,
       message_count: initial_chat.messages.length,
+      initial_carousel_card_count,
     }
   } catch (error) {
     console.error(
@@ -329,6 +341,8 @@ async function resolve_session_payload() {
         chat_room_uuid: chat?.room_uuid ?? null,
         chat_seeded: chat?.is_seeded ?? false,
         chat_message_count: chat?.message_count ?? 0,
+        initial_carousel_card_count:
+          chat?.initial_carousel_card_count ?? 0,
         is_line_webview,
         requires_line_auth,
         line_auth_method,

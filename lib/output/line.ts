@@ -44,6 +44,60 @@ function build_flex_failure_text_fallback(
       lines.push(`${bundle.payload.title}\n${bundle.payload.text}`)
     }
 
+    if (bundle.bundle_type === 'initial_carousel') {
+      for (const card of bundle.cards) {
+        if (card.bundle_type === 'quick_menu') {
+          const p = card.payload
+          lines.push(
+            [
+              p.title,
+              p.subtitle,
+              ...p.items.map((i) => i.label),
+              p.support_heading,
+              p.support_body,
+              ...(p.links?.map((l) => l.label) ?? []),
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          )
+        }
+
+        if (card.bundle_type === 'how_to_use') {
+          const p = card.payload
+          lines.push(
+            [
+              p.title,
+              ...p.steps.map((s) =>
+                s.description.trim()
+                  ? `${s.title}\n${s.description}`
+                  : s.title,
+              ),
+              p.notice_heading,
+              p.notice_body,
+              p.footer_link_label,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          )
+        }
+
+        if (card.bundle_type === 'faq') {
+          const p = card.payload
+          lines.push(
+            [
+              p.title,
+              ...p.items.flatMap((i) =>
+                i.answer.trim() ? [i.question, i.answer] : [i.question],
+              ),
+              p.primary_cta_label,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          )
+        }
+      }
+    }
+
     if (bundle.bundle_type === 'quick_menu') {
       const p = bundle.payload
       lines.push(
@@ -175,7 +229,9 @@ export async function deliver_line_chat_bundles(
       room_uuid: input.room.room_uuid,
       bundle_count,
       line_message_count: 0,
+      line_reply_message_count: 0,
       flex_bubble_count: 0,
+      line_flex_bubble_count: 0,
     },
   })
 
@@ -220,7 +276,9 @@ export async function deliver_line_chat_bundles(
         room_uuid: input.room.room_uuid,
         bundle_count,
         line_message_count,
+        line_reply_message_count: line_message_count,
         flex_bubble_count,
+        line_flex_bubble_count: flex_bubble_count,
       },
     })
   }
@@ -232,7 +290,9 @@ export async function deliver_line_chat_bundles(
       room_uuid: input.room.room_uuid,
       bundle_count,
       line_message_count,
+      line_reply_message_count: line_message_count,
       flex_bubble_count,
+      line_flex_bubble_count: flex_bubble_count,
     },
   })
 
@@ -249,7 +309,9 @@ export async function deliver_line_chat_bundles(
         room_uuid: input.room.room_uuid,
         bundle_count,
         line_message_count,
+        line_reply_message_count: line_message_count,
         flex_bubble_count,
+        line_flex_bubble_count: flex_bubble_count,
       },
     })
   } catch (reply_error) {
@@ -268,7 +330,9 @@ export async function deliver_line_chat_bundles(
         error_body: err.line_body,
         bundle_count,
         line_message_count,
+        line_reply_message_count: line_message_count,
         flex_bubble_count,
+        line_flex_bubble_count: flex_bubble_count,
       },
     })
   }
