@@ -9,7 +9,6 @@ import {
 
 import UserFooter from '@/components/layout/user/footer'
 import UserHeader from '@/components/layout/user/header'
-import LiffBootstrap from '@/components/session/liffbootstrap'
 
 type UserShellProps = {
   children: React.ReactNode
@@ -42,7 +41,6 @@ export default function UserShell({ children }: UserShellProps) {
 
   return (
     <div className="min-h-[100dvh] bg-[#f6e5cf]">
-      <LiffBootstrap />
       <div className="relative mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col overflow-x-hidden bg-[#f6e5cf]">
         <div className="fixed inset-x-0 top-0 z-50 mx-auto w-full max-w-[430px]">
           <UserHeader />

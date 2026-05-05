@@ -441,6 +441,16 @@ export async function GET() {
 
     return response
   } catch (error) {
+    const header_store = await headers()
+    const cookie_store = await cookies()
+    const fallback_source_channel = resolve_session_source_channel(
+      cookie_store.get(browser_channel_cookie_name)?.value ?? null,
+      header_store.get('user-agent'),
+    )
+    const fallback_is_line_webview = is_line_in_app_browser(
+      header_store.get('user-agent'),
+    )
+
     console.error(
       '[session_api_error]',
       format_session_error(error),
@@ -459,10 +469,10 @@ export async function GET() {
         line_connected: false,
         connected_providers: [],
         chat: null,
-        is_line_webview: false,
+        is_line_webview: fallback_is_line_webview,
         requires_line_auth: false,
         line_auth_method: null,
-        source_channel: 'web',
+        source_channel: fallback_source_channel,
       }),
     )
   }

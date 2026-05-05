@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { M_PLUS_Rounded_1c } from 'next/font/google'
 import './globals.css'
 import UserShell from '@/components/layout/user/shell'
+import LiffBootstrap from '@/components/session/liffbootstrap'
 
 const rounded = M_PLUS_Rounded_1c({
   subsets: ['latin'],
@@ -22,6 +23,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className={rounded.variable}>
+        <LiffBootstrap />
         <UserShell>{children}</UserShell>
       </body>
     </html>

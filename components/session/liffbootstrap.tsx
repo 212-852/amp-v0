@@ -37,6 +37,9 @@ export default function LiffBootstrap() {
     async function run() {
       const liff_id = process.env.NEXT_PUBLIC_LINE_LIFF_ID
 
+      console.log('[liff] bootstrap mounted')
+      console.log('[liff] liff_id', liff_id ?? null)
+
       if (!liff_id) {
         return
       }
@@ -46,6 +49,10 @@ export default function LiffBootstrap() {
       })
 
       await liff.init({ liffId: liff_id })
+
+      console.log('[liff] init completed')
+      console.log('[liff] isInClient', liff.isInClient())
+      console.log('[liff] isLoggedIn', liff.isLoggedIn())
 
       console.info('[DEBUG] LIFF', {
         event: 'liff_initialized',
@@ -68,6 +75,8 @@ export default function LiffBootstrap() {
       const profile = await liff.getProfile()
       const locale = liff.getLanguage()
 
+      console.log('[liff] profile', profile)
+
       console.info('[DEBUG] LIFF', {
         event: 'liff_profile_resolved',
       })
@@ -87,6 +96,9 @@ export default function LiffBootstrap() {
           source_channel: 'liff',
         }),
       })
+      const result = await response.json().catch(() => null)
+
+      console.log('[liff] auth api result', result)
 
       if (response.ok) {
         window.dispatchEvent(new Event('amp_session_changed'))

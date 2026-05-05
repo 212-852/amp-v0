@@ -78,6 +78,7 @@ export type read_session_result = {
   is_new_session: false
   cookie_exists: boolean
   session_exists: boolean
+  source_channel: browser_session_source_channel
 }
 
 export type identity_promotion_result = {
@@ -767,6 +768,7 @@ export const read_session = cache(async (): Promise<read_session_result> => {
     is_new_session: false,
     cookie_exists,
     session_exists,
+    source_channel,
   }
 })
 
@@ -835,13 +837,17 @@ export async function track_session_resolution(
 
   try {
     const session = await read_session()
+    const resolved_source_channel = merge_visitor_access_channel(
+      session.source_channel,
+      source_channel,
+    )
     const user_uuid = session.visitor_uuid
       ? await resolve_visitor_user_uuid(session.visitor_uuid)
       : null
 
     await emit_session_core_event('session_resolve_finished', {
       caller,
-      source_channel,
+      source_channel: resolved_source_channel,
       cookie_exists: Boolean(pre_v),
       cookie_visitor_uuid: pre_v,
       resolved_visitor_uuid: session.visitor_uuid,
