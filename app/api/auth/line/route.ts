@@ -9,7 +9,7 @@ import { line_login_channel_id } from '@/lib/config/line_env'
 export const line_login_state_cookie_name = 'line_login_state'
 
 /**
- * Normal LINE Login (OAuth) start only. LIFF uses `LiffBootstrap` + `POST /api/auth/liff` (see `lib/auth/liff_login.ts`).
+ * Normal LINE Login (OAuth) start only. LIFF uses `LiffBootstrap` + `POST /api/auth/line/liff` (no access.line.me from this route).
  */
 export async function GET() {
   const client_id = line_login_channel_id()

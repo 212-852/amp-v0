@@ -1,101 +1,103 @@
 'use client'
 
-import Loading from '@/components/shared/loading'
+import liff from '@line/liff'
 import { useEffect, useState } from 'react'
 
-type liff_profile = {
-  userId: string
-  displayName?: string
-  pictureUrl?: string
-}
+import Loading from '@/components/shared/loading'
 
-type liff_client = {
-  init: (input: { liffId: string }) => Promise<void>
-  isLoggedIn: () => boolean
-  login: (input?: { redirectUri?: string }) => void
-  getProfile: () => Promise<liff_profile>
-  getLanguage: () => string
-}
+async function read_liff_id_token(): Promise<string | null> {
+  const raw = liff.getIDToken()
 
-declare global {
-  interface Window {
-    liff?: liff_client
+  if (typeof raw === 'string') {
+    return raw.length > 0 ? raw : null
   }
-}
 
-function load_liff_sdk() {
-  return new Promise<liff_client>((resolve, reject) => {
-    if (window.liff) {
-      resolve(window.liff)
-      return
+  if (
+    raw !== null &&
+    raw !== undefined &&
+    typeof (raw as Promise<string | null>).then === 'function'
+  ) {
+    try {
+      const resolved = await (raw as Promise<string | null>)
+
+      return typeof resolved === 'string' && resolved.length > 0
+        ? resolved
+        : null
+    } catch {
+      return null
     }
+  }
 
-    const script = document.createElement('script')
-    script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js'
-    script.async = true
-    script.onload = () => {
-      if (window.liff) {
-        resolve(window.liff)
-        return
-      }
-
-      reject(new Error('LIFF SDK was not loaded'))
-    }
-    script.onerror = () => reject(new Error('LIFF SDK load failed'))
-
-    document.head.appendChild(script)
-  })
+  return null
 }
 
 export default function LiffPage() {
   const [is_loading, set_is_loading] = useState(true)
-  const [status, set_status] = useState('loading')
+  const [status, set_status] = useState<'loading' | 'failed'>('loading')
 
   useEffect(() => {
     let cancelled = false
 
-    async function run_liff_login() {
-      set_is_loading(true)
+    async function run() {
+      const liff_id = process.env.NEXT_PUBLIC_LIFF_ID ?? ''
 
-      let deferred_line_login = false
+      if (!liff_id) {
+        if (!cancelled) {
+          set_status('failed')
+          set_is_loading(false)
+        }
+
+        return
+      }
+
+      let skip_loading_off = false
 
       try {
-        const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
+        await liff.init({
+          liffId: liff_id,
+          withLoginOnExternalBrowser: true,
+        } as Parameters<typeof liff.init>[0])
 
-        if (!liff_id) {
-          set_status('missing_liff_id')
+        if (!liff.isInClient()) {
+          window.location.replace(`https://liff.line.me/${liff_id}`)
+          skip_loading_off = true
+
           return
         }
 
-        const liff = await load_liff_sdk()
+        const id_token = await read_liff_id_token()
 
-        await liff.init({ liffId: liff_id })
-
-        if (!liff.isLoggedIn()) {
-          deferred_line_login = true
+        if (!id_token) {
           liff.login()
+          skip_loading_off = true
+
           return
         }
 
-        const profile = await liff.getProfile()
-        const locale = liff.getLanguage()
-
-        const response = await fetch('/api/auth/liff', {
+        const response = await fetch('/api/auth/line/liff', {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-          },
+          headers: { 'content-type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({
-            line_user_id: profile.userId,
-            display_name: profile.displayName ?? null,
-            image_url: profile.pictureUrl ?? null,
-            locale,
-          }),
+          body: JSON.stringify({ id_token }),
         })
 
-        if (!response.ok) {
-          set_status('failed')
+        if (!response.ok || cancelled) {
+          if (!cancelled) {
+            set_status('failed')
+          }
+
+          return
+        }
+
+        const data = (await response.json().catch(() => null)) as {
+          ok?: boolean
+        } | null
+
+        if (!data?.ok) {
+          if (!cancelled) {
+            set_status('failed')
+          }
+
           return
         }
 
@@ -107,13 +109,13 @@ export default function LiffPage() {
           set_status('failed')
         }
       } finally {
-        if (!cancelled && !deferred_line_login) {
+        if (!cancelled && !skip_loading_off) {
           set_is_loading(false)
         }
       }
     }
 
-    void run_liff_login()
+    void run()
 
     return () => {
       cancelled = true

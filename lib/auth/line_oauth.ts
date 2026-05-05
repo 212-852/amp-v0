@@ -7,7 +7,7 @@ import {
 
 /**
  * Normal LINE Login (OAuth) only. Used by `/api/auth/line` and `/api/auth/line/callback`.
- * Do not import this module from LIFF (`/api/auth/liff`, `liff_login.ts`).
+ * Do not import this module from LIFF (`/api/auth/line/liff`, `liff_login.ts`).
  */
 
 const LINE_AUTHORIZE_URL = 'https://access.line.me/oauth2/v2.1/authorize'

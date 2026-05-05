@@ -10,7 +10,8 @@ import {
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
 
 /**
- * LIFF profile -> user/identity/visitor. No OAuth code exchange, no id_token, no LINE_LOGIN_*.
+ * LIFF login resolution (user/identity/visitor). Used after LIFF id_token is verified on the server.
+ * No `access.line.me` authorize, no LINE_LOGIN_* secrets, no Messaging API secrets.
  */
 
 export type resolve_liff_login_input = {
