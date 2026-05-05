@@ -43,7 +43,13 @@ export function should_redirect_line_browser_to_liff(input: {
   search_params: URLSearchParams
   user_agent: string | null
 }): boolean {
+  const ua = input.user_agent?.toLowerCase() ?? ''
+
   if (!is_line_in_app_browser(input.user_agent)) {
+    return false
+  }
+
+  if (ua.includes('liff')) {
     return false
   }
 
