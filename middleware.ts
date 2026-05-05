@@ -65,17 +65,17 @@ export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const is_local = is_local_host(host)
   const is_api = pathname.startsWith('/api')
-  const skip_session_forward =
+  const skip_visitor_cookie_forward =
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon.ico') ||
     is_public_asset_path(pathname) ||
     pathname.startsWith('/api/webhook')
 
-  if (skip_session_forward) {
+  if (skip_visitor_cookie_forward) {
     return NextResponse.next()
   }
 
-  const next_with_session = () =>
+  const next_with_visitor_cookie = () =>
     create_response(request, (headers) =>
       NextResponse.next({
         request: { headers },
@@ -83,16 +83,16 @@ export function middleware(request: NextRequest) {
     )
 
   if (is_local) {
-    return next_with_session()
+    return next_with_visitor_cookie()
   }
 
   if (host === env.domain.platform) {
-    return next_with_session()
+    return next_with_visitor_cookie()
   }
 
   if (host === env.domain.corporate) {
     if (is_api) {
-      return next_with_session()
+      return next_with_visitor_cookie()
     }
 
     const url = request.nextUrl.clone()
@@ -107,7 +107,7 @@ export function middleware(request: NextRequest) {
 
   if (host === env.domain.airport) {
     if (is_api) {
-      return next_with_session()
+      return next_with_visitor_cookie()
     }
 
     const url = request.nextUrl.clone()
@@ -120,7 +120,7 @@ export function middleware(request: NextRequest) {
     )
   }
 
-  return next_with_session()
+  return next_with_visitor_cookie()
 }
 
 export const config = {

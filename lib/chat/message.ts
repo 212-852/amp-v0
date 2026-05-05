@@ -529,3 +529,21 @@ export function build_initial_chat_bundles(input: {
     },
   ]
 }
+
+export function build_user_text_bundle(input: {
+  text: string
+  locale?: chat_locale
+  content_key?: string
+}): text_bundle {
+  return {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'text',
+    sender: 'user',
+    version: 1,
+    locale: input.locale,
+    content_key: input.content_key,
+    payload: {
+      text: input.text,
+    },
+  }
+}

@@ -103,6 +103,20 @@ function normalize_client_session_shape(
   }
 }
 
+function get_client_ip(header_store: Headers) {
+  const forwarded = header_store.get('x-forwarded-for')
+
+  if (forwarded) {
+    const first = forwarded.split(',')[0]?.trim()
+
+    if (first) {
+      return first
+    }
+  }
+
+  return header_store.get('x-real-ip')
+}
+
 function get_access_platform(user_agent: string | null) {
   const normalized_user_agent = user_agent?.toLowerCase() ?? ''
 
@@ -292,6 +306,7 @@ async function resolve_session_payload() {
 
   const user_agent = header_store.get('user-agent')
   const accept_language = header_store.get('accept-language')
+  const client_ip = get_client_ip(header_store)
   const locale = get_browser_locale(accept_language)
   const is_line_webview =
     user_agent?.toLowerCase().includes('line/') ?? false
@@ -306,6 +321,7 @@ async function resolve_session_payload() {
     locale,
     user_agent,
     access_platform: get_access_platform(user_agent),
+    ip: client_ip,
   })
   const session_state = await resolve_session_state(visitor.visitor_uuid)
   const normalized_session =

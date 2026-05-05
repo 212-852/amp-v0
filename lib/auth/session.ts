@@ -57,6 +57,7 @@ export type browser_session_input = {
   locale?: string | null
   user_agent?: string | null
   access_platform?: browser_access_platform
+  ip?: string | null
 }
 
 export type browser_session_result = {
@@ -191,7 +192,6 @@ async function emit_identity_promotion_debug(
   event:
     | 'identity_promote_started'
     | 'visitor_promoted_to_user'
-    | 'session_promoted'
     | 'existing_guest_room_found'
     | 'guest_room_reused_for_user'
     | 'identity_promote_finished',
@@ -480,12 +480,43 @@ async function find_guest_participant_by_visitor(
     | null
 }
 
+function build_visitor_access_patch(input: {
+  source_channel: browser_session_source_channel
+  locale?: string | null
+  user_agent?: string | null
+  access_platform?: browser_access_platform
+  ip?: string | null
+}) {
+  const current_time = new Date().toISOString()
+
+  return {
+    access_channel: input.source_channel,
+    access_platform: input.access_platform ?? 'unknown',
+    locale: input.locale ?? null,
+    ip: input.ip ?? null,
+    user_agent: input.user_agent ?? null,
+    last_seen_at: current_time,
+    updated_at: current_time,
+  }
+}
+
 async function ensure_browser_visitor(input: {
   supabase: Awaited<ReturnType<typeof get_supabase>>
   visitor_uuid: string
   source_channel: browser_session_source_channel
   caller: browser_session_caller
+  locale?: string | null
+  user_agent?: string | null
+  access_platform?: browser_access_platform
+  ip?: string | null
 }) {
+  const access_patch = build_visitor_access_patch({
+    source_channel: input.source_channel,
+    locale: input.locale,
+    user_agent: input.user_agent,
+    access_platform: input.access_platform,
+    ip: input.ip,
+  })
   await emit_session_core_event('session_visitor_lookup_started', {
     caller: input.caller,
     cookie_exists: true,
@@ -524,9 +555,7 @@ async function ensure_browser_visitor(input: {
 
     const updated_visitor = await input.supabase
       .from('visitors')
-      .update({
-        updated_at: new Date().toISOString(),
-      })
+      .update(access_patch)
       .eq('visitor_uuid', input.visitor_uuid)
 
     if (updated_visitor.error) {
@@ -567,6 +596,7 @@ async function ensure_browser_visitor(input: {
     .insert({
       visitor_uuid: input.visitor_uuid,
       user_uuid: null,
+      ...access_patch,
     })
     .select('visitor_uuid')
     .single()
@@ -620,102 +650,6 @@ async function ensure_browser_visitor(input: {
   return false
 }
 
-async function find_session_row(
-  supabase: Awaited<ReturnType<typeof get_supabase>>,
-  session_uuid: string,
-) {
-  return supabase
-    .from('sessions')
-    .select('session_uuid')
-    .eq('session_uuid', session_uuid)
-    .maybeSingle()
-}
-
-async function ensure_browser_session(input: {
-  supabase: Awaited<ReturnType<typeof get_supabase>>
-  visitor_uuid: string
-  session_uuid: string
-  source_channel: browser_session_source_channel
-  locale?: string | null
-  user_agent?: string | null
-  access_platform?: browser_access_platform
-}) {
-  const existing_session = await find_session_row(
-    input.supabase,
-    input.session_uuid,
-  )
-  const current_time = new Date().toISOString()
-
-  if (existing_session.error) {
-    throw existing_session.error
-  }
-
-  const session_payload = {
-    visitor_uuid: input.visitor_uuid,
-    access_channel: input.source_channel,
-    access_platform: input.access_platform ?? 'unknown',
-    locale: input.locale ?? null,
-    user_agent: input.user_agent ?? null,
-    last_seen_at: current_time,
-    updated_at: current_time,
-  }
-
-  if (existing_session.data?.session_uuid) {
-    const updated_session = await input.supabase
-      .from('sessions')
-      .update(session_payload)
-      .eq('session_uuid', input.session_uuid)
-
-    if (updated_session.error) {
-      throw updated_session.error
-    }
-
-    return false
-  }
-
-  const created_session = await input.supabase
-    .from('sessions')
-    .insert({
-      session_uuid: input.session_uuid,
-      user_uuid: null,
-      ...session_payload,
-    })
-    .select('session_uuid')
-    .single()
-
-  if (!created_session.error) {
-    return true
-  }
-
-  if (!is_unique_violation(created_session.error)) {
-    throw created_session.error
-  }
-
-  const after_conflict = await find_session_row(
-    input.supabase,
-    input.session_uuid,
-  )
-
-  if (after_conflict.error) {
-    throw after_conflict.error
-  }
-
-  if (!after_conflict.data?.session_uuid) {
-    throw created_session.error
-  }
-
-  const updated_session = await input.supabase
-    .from('sessions')
-    .update(session_payload)
-    .eq('session_uuid', input.session_uuid)
-
-  if (updated_session.error) {
-    throw updated_session.error
-  }
-
-  return false
-}
-
 /**
  * Read cookie values only (no mint). Middleware forwards these to the request.
  */
@@ -734,7 +668,6 @@ async function ensure_session_rows(
   input: browser_session_input,
 ): Promise<browser_session_result> {
   const visitor_uuid = input.visitor_uuid ?? mint_visitor_uuid()
-  const session_uuid = visitor_uuid
   const cookie_exists = Boolean(input.visitor_uuid)
   const session_exists = cookie_exists
   const source_channel = input.source_channel ?? 'web'
@@ -744,21 +677,16 @@ async function ensure_session_rows(
     visitor_uuid,
     source_channel,
     caller: input.caller ?? 'unknown',
-  })
-  const is_new_session = await ensure_browser_session({
-    supabase,
-    visitor_uuid,
-    session_uuid,
-    source_channel,
     locale: input.locale,
     user_agent: input.user_agent,
     access_platform: input.access_platform,
+    ip: input.ip,
   })
 
   return {
     visitor_uuid,
     is_new_visitor,
-    is_new_session,
+    is_new_session: is_new_visitor,
     cookie_exists,
     session_exists,
   }
@@ -817,7 +745,7 @@ export async function ensure_session(input: browser_session_input) {
   }
 
   const session = await ensure_session_rows(input)
-  const created = session.is_new_visitor || session.is_new_session
+  const created = session.is_new_visitor
 
   await emit_session_core_event(created ? 'session_created' : 'session_reused', {
     caller: 'api_session',
@@ -948,19 +876,20 @@ export async function promote_browser_visitor_to_user(input: {
     })
   }
 
+  const promotion_now = new Date().toISOString()
+
   const visitor_update = await supabase
     .from('visitors')
     .update({
       user_uuid: input.user_uuid,
-      updated_at: new Date().toISOString(),
+      updated_at: promotion_now,
+      last_seen_at: promotion_now,
     })
     .eq('visitor_uuid', old_visitor_uuid)
 
   if (visitor_update.error && !is_unique_violation(visitor_update.error)) {
     throw visitor_update.error
   }
-
-  const promotion_now = new Date().toISOString()
 
   if (guest_participant?.participant_uuid) {
     const cleared_member_slot = await supabase
@@ -992,29 +921,6 @@ export async function promote_browser_visitor_to_user(input: {
   }
 
   await emit_identity_promotion_debug('visitor_promoted_to_user', {
-    old_visitor_uuid,
-    user_uuid: input.user_uuid,
-    existing_room_uuid: guest_participant?.room_uuid ?? null,
-    participant_uuid: guest_participant?.participant_uuid ?? null,
-  })
-
-  const session_update = supabase
-    .from('sessions')
-    .update({
-      visitor_uuid: old_visitor_uuid,
-      user_uuid: input.user_uuid,
-      updated_at: new Date().toISOString(),
-      last_seen_at: new Date().toISOString(),
-    })
-    .eq('visitor_uuid', old_visitor_uuid)
-
-  const session_result = await session_update
-
-  if (session_result.error) {
-    throw session_result.error
-  }
-
-  await emit_identity_promotion_debug('session_promoted', {
     old_visitor_uuid,
     user_uuid: input.user_uuid,
     existing_room_uuid: guest_participant?.room_uuid ?? null,

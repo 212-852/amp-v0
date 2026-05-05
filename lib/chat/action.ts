@@ -1,13 +1,17 @@
 import 'server-only'
 
 import {
+  archive_incoming_line_text,
   archive_message_bundles,
   load_archived_messages,
   type archived_message,
 } from './archive'
 import { debug_event } from '@/lib/debug'
 import { resolve_chat_context } from '@/lib/dispatch/context'
-import { build_initial_chat_bundles } from './message'
+import {
+  build_initial_chat_bundles,
+  build_user_text_bundle,
+} from './message'
 import type { chat_locale } from './message'
 import {
   resolve_chat_room,
@@ -25,6 +29,13 @@ type resolve_initial_chat_input = {
   external_room_id?: string | null
   line_reply_token?: string | null
   line_user_id?: string | null
+  incoming_line_text?: {
+    text: string
+    line_message_id: string
+    created_at: string
+    webhook_event_id?: string | null
+    delivery_context_redelivery?: boolean | null
+  } | null
 }
 
 export type initial_chat_result = {
@@ -32,6 +43,37 @@ export type initial_chat_result = {
   is_new_room: boolean
   is_seeded: boolean
   messages: archived_message[]
+}
+
+async function archive_input_line_text_for_room(input: {
+  room: chat_room
+  locale: chat_locale
+  line_user_id?: string | null
+  incoming_line_text?: resolve_initial_chat_input['incoming_line_text']
+}) {
+  if (!input.line_user_id || !input.incoming_line_text) {
+    return null
+  }
+
+  return archive_incoming_line_text({
+    room_uuid: input.room.room_uuid,
+    participant_uuid: input.room.participant_uuid,
+    user_uuid: input.room.user_uuid,
+    visitor_uuid: input.room.visitor_uuid,
+    line_user_id: input.line_user_id,
+    line_message_id: input.incoming_line_text.line_message_id,
+    text: input.incoming_line_text.text,
+    created_at: input.incoming_line_text.created_at,
+    webhook_event_id:
+      input.incoming_line_text.webhook_event_id ?? null,
+    delivery_context_redelivery:
+      input.incoming_line_text.delivery_context_redelivery ?? null,
+    bundle: build_user_text_bundle({
+      text: input.incoming_line_text.text,
+      locale: input.locale,
+      content_key: 'line.incoming.text',
+    }),
+  })
 }
 
 export async function resolve_initial_chat(
@@ -84,6 +126,21 @@ export async function resolve_initial_chat(
   }
 
   if (!should_seed_initial_messages(archived_messages)) {
+    if (input.channel === 'line') {
+      const archived_incoming = await archive_input_line_text_for_room({
+        room: room_result.room,
+        locale: input.locale,
+        line_user_id: input.line_user_id,
+        incoming_line_text: input.incoming_line_text,
+      })
+
+      if (archived_incoming) {
+        archived_messages = await load_archived_messages(
+          room_result.room.room_uuid,
+        )
+      }
+    }
+
     return {
       room: room_result.room,
       is_new_room: room_result.is_new_room,
@@ -93,6 +150,27 @@ export async function resolve_initial_chat(
   }
 
   try {
+    const archived_incoming =
+      input.channel === 'line'
+        ? await archive_input_line_text_for_room({
+            room: room_result.room,
+            locale: input.locale,
+            line_user_id: input.line_user_id,
+            incoming_line_text: input.incoming_line_text,
+          })
+        : null
+
+    if (archived_incoming?.is_duplicate) {
+      return {
+        room: room_result.room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages: await load_archived_messages(
+          room_result.room.room_uuid,
+        ),
+      }
+    }
+
     const bundles = build_initial_chat_bundles({
       locale: input.locale,
     })
@@ -116,7 +194,12 @@ export async function resolve_initial_chat(
       room: room_result.room,
       is_new_room: room_result.is_new_room,
       is_seeded: true,
-      messages: seeded_messages,
+      messages: [
+        ...(archived_incoming?.archived_message
+          ? [archived_incoming.archived_message]
+          : []),
+        ...seeded_messages,
+      ],
     }
   } catch (error) {
     const e = error as { code?: string; message?: string }

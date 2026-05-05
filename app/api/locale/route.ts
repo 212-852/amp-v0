@@ -51,6 +51,21 @@ export async function PATCH(request: Request) {
   const user_uuid = visitor_result.data?.user_uuid
 
   if (!user_uuid) {
+    const guest_update = await supabase
+      .from('visitors')
+      .update({
+        locale,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('visitor_uuid', visitor_uuid)
+
+    if (guest_update.error) {
+      return NextResponse.json(
+        { locale, error: 'Locale update failed' },
+        { status: 500 },
+      )
+    }
+
     return NextResponse.json({ locale })
   }
 

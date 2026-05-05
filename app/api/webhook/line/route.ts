@@ -175,17 +175,20 @@ export async function POST(request: Request) {
 
   for (const event of events) {
     const line_user_id = event.source?.userId
-    const event_key = get_line_event_key(event)
 
-    if (event.deliveryContext?.isRedelivery === true) {
-      continue
+    if (event.type !== 'message') {
+      const event_key = get_line_event_key(event)
+
+      if (event.deliveryContext?.isRedelivery === true) {
+        continue
+      }
+
+      if (processed_line_event_keys.has(event_key)) {
+        continue
+      }
+
+      processed_line_event_keys.add(event_key)
     }
-
-    if (processed_line_event_keys.has(event_key)) {
-      continue
-    }
-
-    processed_line_event_keys.add(event_key)
 
     try {
       if (!is_allowed_line_user(line_user_id)) {
@@ -262,6 +265,22 @@ export async function POST(request: Request) {
         line_reply_token:
           event.type === 'message' ? (event.replyToken ?? null) : null,
         line_user_id,
+        incoming_line_text:
+          event.type === 'message' &&
+          event.message?.type === 'text' &&
+          event.message.id &&
+          typeof event.message.text === 'string'
+            ? {
+                text: event.message.text,
+                line_message_id: event.message.id,
+                created_at: event.timestamp
+                  ? new Date(event.timestamp).toISOString()
+                  : new Date().toISOString(),
+                webhook_event_id: event.webhookEventId ?? null,
+                delivery_context_redelivery:
+                  event.deliveryContext?.isRedelivery ?? null,
+              }
+            : null,
       })
       const initial_carousel_card_count = initial_chat.messages.reduce(
         (count, message) => {

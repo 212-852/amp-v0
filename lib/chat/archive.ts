@@ -20,6 +20,26 @@ type archive_row = {
   created_at: string
 }
 
+export type archive_incoming_line_text_input = {
+  room_uuid: string
+  participant_uuid: string
+  user_uuid?: string | null
+  visitor_uuid: string
+  line_user_id: string
+  line_message_id: string
+  text: string
+  created_at: string
+  webhook_event_id?: string | null
+  delivery_context_redelivery?: boolean | null
+  bundle: message_bundle
+}
+
+export type archive_incoming_line_text_result = {
+  archived_message: archived_message | null
+  is_duplicate: boolean
+  message_uuid: string | null
+}
+
 function parse_bundle(row: archive_row): message_bundle {
   if (!row.body) {
     return {
@@ -87,6 +107,170 @@ export async function load_archived_messages(room_uuid: string) {
 
   return ((result.data ?? []) as archive_row[])
     .map(normalize_archive)
+}
+
+function debug_incoming_line_archive_payload(
+  input: archive_incoming_line_text_input,
+  message_uuid?: string | null,
+) {
+  return {
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    user_uuid: input.user_uuid ?? null,
+    visitor_uuid: input.visitor_uuid,
+    line_user_id: input.line_user_id,
+    line_message_id: input.line_message_id,
+    direction: 'incoming' as const,
+    channel: 'line' as const,
+    message_uuid: message_uuid ?? undefined,
+  }
+}
+
+function parse_archive_body(body: string | null) {
+  if (!body) {
+    return null
+  }
+
+  try {
+    return JSON.parse(body) as {
+      line_message_id?: string
+      metadata?: {
+        line_message_id?: string
+      }
+    }
+  } catch {
+    return null
+  }
+}
+
+function archive_row_has_line_message_id(
+  row: archive_row,
+  line_message_id: string,
+) {
+  const body = parse_archive_body(row.body)
+
+  return (
+    body?.line_message_id === line_message_id ||
+    body?.metadata?.line_message_id === line_message_id
+  )
+}
+
+export async function archive_incoming_line_text(
+  input: archive_incoming_line_text_input,
+): Promise<archive_incoming_line_text_result> {
+  await debug_event({
+    category: 'chat_room',
+    event: 'incoming_message_archive_started',
+    payload: debug_incoming_line_archive_payload(input),
+  })
+
+  try {
+    const existing_result = await supabase
+      .from('messages')
+      .select('message_uuid, room_uuid, body, created_at')
+      .eq('room_uuid', input.room_uuid)
+      .order('created_at', { ascending: true })
+
+    if (existing_result.error) {
+      throw existing_result.error
+    }
+
+    const existing_rows = (existing_result.data ?? []) as archive_row[]
+    const duplicate = existing_rows.find((row) =>
+      archive_row_has_line_message_id(row, input.line_message_id),
+    )
+
+    if (duplicate) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'incoming_message_archive_skipped_duplicate',
+        payload: debug_incoming_line_archive_payload(
+          input,
+          duplicate.message_uuid,
+        ),
+      })
+
+      return {
+        archived_message: normalize_archive(
+          duplicate,
+          existing_rows.indexOf(duplicate),
+        ),
+        is_duplicate: true,
+        message_uuid: duplicate.message_uuid,
+      }
+    }
+
+    const body = {
+      type: input.bundle.bundle_type,
+      sender_role: 'user' as const,
+      source_channel: 'line' as const,
+      channel: 'line' as const,
+      direction: 'incoming' as const,
+      message_type: 'text' as const,
+      text: input.text,
+      user_uuid: input.user_uuid ?? null,
+      visitor_uuid: input.visitor_uuid,
+      participant_uuid: input.participant_uuid,
+      line_message_id: input.line_message_id,
+      line_user_id: input.line_user_id,
+      metadata: {
+        line_message_id: input.line_message_id,
+        line_user_id: input.line_user_id,
+        webhook_event_id: input.webhook_event_id ?? null,
+        delivery_context_redelivery:
+          input.delivery_context_redelivery ?? null,
+      },
+      payload:
+        'payload' in input.bundle
+          ? input.bundle.payload
+          : undefined,
+      bundle: input.bundle,
+    }
+
+    const result = await supabase
+      .from('messages')
+      .insert({
+        room_uuid: input.room_uuid,
+        participant_uuid: input.participant_uuid,
+        channel: 'line',
+        body: JSON.stringify(body),
+        created_at: input.created_at,
+      })
+      .select('message_uuid, room_uuid, body, created_at')
+      .single()
+
+    if (result.error) {
+      throw result.error
+    }
+
+    const row = result.data as archive_row
+
+    await debug_event({
+      category: 'chat_room',
+      event: 'incoming_message_archived',
+      payload: debug_incoming_line_archive_payload(
+        input,
+        row.message_uuid,
+      ),
+    })
+
+    return {
+      archived_message: normalize_archive(row, existing_rows.length),
+      is_duplicate: false,
+      message_uuid: row.message_uuid,
+    }
+  } catch (error) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'incoming_message_archive_failed',
+      payload: {
+        ...debug_incoming_line_archive_payload(input),
+        error,
+      },
+    })
+
+    throw error
+  }
 }
 
 function resolve_participant_uuid(
