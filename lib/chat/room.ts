@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
 
@@ -1241,6 +1242,26 @@ export async function resolve_chat_room(
     const canonical_participant =
       merged_participant ??
       (await find_canonical_user_participant(input))
+
+    if (canonical_participant) {
+      if (control.debug.chat_room) {
+        await debug_event({
+          category: 'chat_room',
+          event: 'participant_lookup_found',
+          payload: {
+            ...identity,
+            participant_uuid: canonical_participant.participant_uuid,
+            room_uuid: canonical_participant.room_uuid ?? null,
+          },
+        })
+      }
+    } else if (control.debug.chat_room) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'participant_lookup_empty',
+        payload: identity,
+      })
+    }
 
     await debug_event({
       category: 'chat_room',

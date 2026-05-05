@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import {
   get_browser_session_cookie_options,
-  resolve_browser_session_cookie_values,
+  read_browser_session_cookie_values,
   session_cookie_max_age,
   session_cookie_name,
   visitor_cookie_max_age,
@@ -33,37 +33,60 @@ function create_response(
   response_builder: (headers: Headers) => NextResponse,
 ) {
   const request_headers = new Headers(request.headers)
-  const session = resolve_browser_session_cookie_values(
+  const existing = read_browser_session_cookie_values(
     request.cookies.get(visitor_cookie_name)?.value,
     request.cookies.get(session_cookie_name)?.value,
   )
 
-  append_request_cookie(
-    request_headers,
-    visitor_cookie_name,
-    session.visitor_uuid,
-  )
-  append_request_cookie(
-    request_headers,
-    session_cookie_name,
-    session.session_uuid,
-  )
+  if (existing.visitor_uuid) {
+    append_request_cookie(
+      request_headers,
+      visitor_cookie_name,
+      existing.visitor_uuid,
+    )
+  }
+
+  if (existing.session_uuid) {
+    append_request_cookie(
+      request_headers,
+      session_cookie_name,
+      existing.session_uuid,
+    )
+  }
 
   const response = response_builder(request_headers)
 
-  response.cookies.set(
-    visitor_cookie_name,
-    session.visitor_uuid,
-    get_browser_session_cookie_options(visitor_cookie_max_age),
-  )
+  if (existing.visitor_uuid) {
+    response.cookies.set(
+      visitor_cookie_name,
+      existing.visitor_uuid,
+      get_browser_session_cookie_options(visitor_cookie_max_age),
+    )
+  }
 
-  response.cookies.set(
-    session_cookie_name,
-    session.session_uuid,
-    get_browser_session_cookie_options(session_cookie_max_age),
-  )
+  if (existing.session_uuid) {
+    response.cookies.set(
+      session_cookie_name,
+      existing.session_uuid,
+      get_browser_session_cookie_options(session_cookie_max_age),
+    )
+  }
 
   return response
+}
+
+function is_public_asset_path(pathname: string) {
+  if (
+    pathname.startsWith('/images/') ||
+    pathname.startsWith('/assets/') ||
+    pathname.startsWith('/fonts/')
+  ) {
+    return true
+  }
+
+  return /\.(?:avif|css|gif|ico|jpeg|jpg|js|json|map|png|svg|txt|webmanifest|webp|woff2?)$/i.test(
+    pathname,
+  )
 }
 
 export function middleware(request: NextRequest) {
@@ -74,6 +97,7 @@ export function middleware(request: NextRequest) {
   const skip_session_forward =
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon.ico') ||
+    is_public_asset_path(pathname) ||
     pathname.startsWith('/api/webhook')
 
   if (skip_session_forward) {

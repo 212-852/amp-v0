@@ -98,7 +98,7 @@ export async function resolve_chat_context(
   const browser_locale = normalize_optional_locale(accept_language)
   const browser_session = await resolve_visitor_context(
     session_src,
-    'page',
+    'chat_room',
     {
       locale: browser_locale,
       user_agent: header_store.get('user-agent'),

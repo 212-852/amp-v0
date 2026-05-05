@@ -1,17 +1,9 @@
 import 'server-only'
 
+import { resolve_user_visitor } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
 import { notify } from '@/lib/notify'
-import { emit_visitor_access_debug } from '@/lib/visitor/context'
-
-function is_unique_violation(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false
-  }
-
-  return (error as { code?: string }).code === '23505'
-}
 
 export type auth_provider = 'line' | 'google' | 'email'
 
@@ -30,58 +22,6 @@ export type access_result = {
   locale: string | null
   is_new_user: boolean
   is_new_visitor: boolean
-}
-
-async function find_visitor_by_user(user_uuid: string) {
-  return supabase
-    .from('visitors')
-    .select('visitor_uuid')
-    .eq('user_uuid', user_uuid)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-}
-
-async function attach_preferred_visitor(input: {
-  visitor_uuid: string
-  user_uuid: string
-}) {
-  const updated = await supabase
-    .from('visitors')
-    .update({
-      user_uuid: input.user_uuid,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('visitor_uuid', input.visitor_uuid)
-    .select('visitor_uuid')
-    .maybeSingle()
-
-  if (!updated.error && updated.data?.visitor_uuid) {
-    return updated.data.visitor_uuid
-  }
-
-  if (updated.error && !is_unique_violation(updated.error)) {
-    throw updated.error
-  }
-
-  const created = await supabase
-    .from('visitors')
-    .insert({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
-    })
-    .select('visitor_uuid')
-    .single()
-
-  if (!created.error) {
-    return created.data.visitor_uuid
-  }
-
-  if (!is_unique_violation(created.error)) {
-    throw created.error
-  }
-
-  return input.visitor_uuid
 }
 
 export async function resolve_auth_access(
@@ -129,97 +69,17 @@ export async function resolve_auth_access(
       }
     }
 
-    const existing_visitor = await supabase
-      .from('visitors')
-      .select('visitor_uuid')
-      .eq('user_uuid', user_uuid)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (existing_visitor.error) {
-      throw existing_visitor.error
-    }
-
-    if (input.visitor_uuid) {
-      const preferred_visitor_uuid = await attach_preferred_visitor({
-        visitor_uuid: input.visitor_uuid,
-        user_uuid,
-      })
-
-      return {
-        user_uuid,
-        visitor_uuid: preferred_visitor_uuid,
-        locale: resolved_locale,
-        is_new_user: false,
-        is_new_visitor: false,
-      }
-    }
-
-    if (existing_visitor.data?.visitor_uuid) {
-      return {
-        user_uuid,
-        visitor_uuid: existing_visitor.data.visitor_uuid,
-        locale: resolved_locale,
-        is_new_user: false,
-        is_new_visitor: false,
-      }
-    }
-
-    const created_visitor = await supabase
-      .from('visitors')
-      .insert({
-        user_uuid,
-      })
-      .select('visitor_uuid')
-      .single()
-
-    if (!created_visitor.error) {
-      return {
-        user_uuid,
-        visitor_uuid: created_visitor.data.visitor_uuid,
-        locale: resolved_locale,
-        is_new_user: false,
-        is_new_visitor: true,
-      }
-    }
-
-    if (!is_unique_violation(created_visitor.error)) {
-      throw created_visitor.error
-    }
-
-    await emit_visitor_access_debug({
-      event: 'visitor_create_conflict',
-      visitor_uuid: null,
-      session_uuid: null,
+    const visitor = await resolve_user_visitor({
       user_uuid,
-      source_channel: 'web',
-    })
-
-    const reused_visitor = await find_visitor_by_user(user_uuid)
-
-    if (reused_visitor.error) {
-      throw reused_visitor.error
-    }
-
-    if (!reused_visitor.data?.visitor_uuid) {
-      throw created_visitor.error
-    }
-
-    await emit_visitor_access_debug({
-      event: 'visitor_reused_after_conflict',
-      visitor_uuid: reused_visitor.data.visitor_uuid,
-      session_uuid: null,
-      user_uuid,
-      source_channel: 'web',
+      visitor_uuid: input.visitor_uuid,
     })
 
     return {
       user_uuid,
-      visitor_uuid: reused_visitor.data.visitor_uuid,
+      visitor_uuid: visitor.visitor_uuid,
       locale: resolved_locale,
       is_new_user: false,
-      is_new_visitor: false,
+      is_new_visitor: visitor.is_new_visitor,
     }
   }
 
@@ -241,90 +101,10 @@ export async function resolve_auth_access(
 
   const user_uuid = created_user.data.user_uuid
 
-  if (input.visitor_uuid) {
-    const preferred_visitor_uuid = await attach_preferred_visitor({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid,
-    })
-
-    const created_identity = await supabase
-      .from('identities')
-      .insert({
-        user_uuid,
-        provider: input.provider,
-        provider_id: input.provider_id,
-      })
-
-    if (created_identity.error) {
-      throw created_identity.error
-    }
-
-    await notify({
-      event: 'new_user_created',
-      provider: input.provider,
-      user_uuid,
-      visitor_uuid: preferred_visitor_uuid,
-      display_name: input.display_name ?? null,
-      locale: created_user.data.locale ?? null,
-      is_new_user: true,
-      is_new_visitor: false,
-    })
-
-    return {
-      user_uuid,
-      visitor_uuid: preferred_visitor_uuid,
-      locale: created_user.data.locale ?? null,
-      is_new_user: true,
-      is_new_visitor: false,
-    }
-  }
-
-  const created_visitor = await supabase
-    .from('visitors')
-    .insert({
-      user_uuid,
-    })
-    .select('visitor_uuid')
-    .single()
-
-  let visitor_uuid_for_identity: string
-  let is_fresh_visitor_row = true
-
-  if (!created_visitor.error) {
-    visitor_uuid_for_identity = created_visitor.data.visitor_uuid
-  } else if (is_unique_violation(created_visitor.error)) {
-    is_fresh_visitor_row = false
-
-    await emit_visitor_access_debug({
-      event: 'visitor_create_conflict',
-      visitor_uuid: null,
-      session_uuid: null,
-      user_uuid,
-      source_channel: 'web',
-    })
-
-    const reused_visitor = await find_visitor_by_user(user_uuid)
-
-    if (reused_visitor.error) {
-      throw reused_visitor.error
-    }
-
-    if (!reused_visitor.data?.visitor_uuid) {
-      throw created_visitor.error
-    }
-
-    visitor_uuid_for_identity = reused_visitor.data.visitor_uuid
-
-    await emit_visitor_access_debug({
-      event: 'visitor_reused_after_conflict',
-      visitor_uuid: visitor_uuid_for_identity,
-      session_uuid: null,
-      user_uuid,
-      source_channel: 'web',
-    })
-  } else {
-    throw created_visitor.error
-  }
+  const visitor = await resolve_user_visitor({
+    user_uuid,
+    visitor_uuid: input.visitor_uuid,
+  })
 
   const created_identity = await supabase
     .from('identities')
@@ -342,18 +122,18 @@ export async function resolve_auth_access(
     event: 'new_user_created',
     provider: input.provider,
     user_uuid,
-    visitor_uuid: visitor_uuid_for_identity,
+    visitor_uuid: visitor.visitor_uuid,
     display_name: input.display_name ?? null,
     locale: created_user.data.locale ?? null,
     is_new_user: true,
-    is_new_visitor: is_fresh_visitor_row,
+    is_new_visitor: visitor.is_new_visitor,
   })
 
   return {
     user_uuid,
-    visitor_uuid: visitor_uuid_for_identity,
+    visitor_uuid: visitor.visitor_uuid,
     locale: created_user.data.locale ?? null,
     is_new_user: true,
-    is_new_visitor: is_fresh_visitor_row,
+    is_new_visitor: visitor.is_new_visitor,
   }
 }
