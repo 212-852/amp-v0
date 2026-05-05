@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.next/
+.next_stale_session_fix/
+
+.next/
+.next_stale_session_fix/
