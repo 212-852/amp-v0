@@ -116,10 +116,6 @@ export default function LiffBootstrap() {
 
         await liff.init({ liffId: resolved_liff_id })
 
-        console.info('[liff_initialized]', {
-          pathname: pathname ?? null,
-        })
-
         if (!liff.isLoggedIn()) {
           liff.login({
             redirectUri: window.location.href,

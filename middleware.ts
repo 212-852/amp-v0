@@ -94,13 +94,7 @@ export function middleware(request: NextRequest) {
       const path_and_query =
         `${pathname}${request.nextUrl.search}` || '/'
       const redirect_param = encodeURIComponent(path_and_query)
-      const target = `https://liff.line.me/${liff_id}?redirect=${redirect_param}`
-
-      console.info('[line_browser_detected]', {
-        pathname,
-        ua_preview: ua?.slice(0, 80) ?? null,
-      })
-      console.info('[redirect_to_liff]', { target })
+      const target = `https://liff.line.me/${liff_id}?redirect_path=${redirect_param}`
 
       return NextResponse.redirect(target)
     }
