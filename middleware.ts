@@ -5,6 +5,7 @@ import {
   should_redirect_line_browser_to_liff,
 } from '@/lib/auth/context'
 import { env } from '@/lib/config/env'
+import { next_public_liff_id } from '@/lib/config/line_env'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
 
 function read_browser_session_cookie_values(
@@ -88,7 +89,7 @@ export function middleware(request: NextRequest) {
       user_agent: ua,
     })
   ) {
-    const liff_id = process.env.NEXT_PUBLIC_LINE_LIFF_ID
+    const liff_id = next_public_liff_id()
 
     if (liff_id) {
       const target = `https://liff.line.me/${liff_id}`
