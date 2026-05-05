@@ -285,23 +285,85 @@ async function find_visitor_by_user(
 }
 
 async function emit_visitor_conflict_debug(input: {
-  event: 'session_visitor_create_conflict' | 'session_visitor_reused_after_conflict'
+  event:
+    | 'session_visitor_create_conflict'
+    | 'session_visitor_reused_after_conflict'
+  caller?: browser_session_caller
   visitor_uuid: string | null
   session_uuid: string | null
   user_uuid: string | null
+  source_channel?: browser_session_source_channel
+  error_code?: string | null
+  error_message?: string | null
 }) {
   await emit_session_core_event(input.event, {
-    caller: 'unknown',
+    caller: input.caller ?? 'unknown',
     cookie_exists: Boolean(input.visitor_uuid),
     cookie_visitor_uuid: input.visitor_uuid,
     resolved_visitor_uuid: input.visitor_uuid,
     user_uuid: input.user_uuid,
-    source_channel: 'web',
+    source_channel: input.source_channel ?? 'web',
     created: false,
     reused: true,
-    error_code: null,
-    error_message: null,
+    error_code: input.error_code ?? null,
+    error_message: input.error_message ?? null,
   })
+}
+
+async function find_visitor_row_after_conflict(input: {
+  supabase: Awaited<ReturnType<typeof get_supabase>>
+  visitor_uuid: string
+}) {
+  const max_attempts = 3
+
+  for (let attempt = 1; attempt <= max_attempts; attempt += 1) {
+    const result = await find_visitor_row(
+      input.supabase,
+      input.visitor_uuid,
+    )
+
+    if (result.error) {
+      throw result.error
+    }
+
+    if (result.data?.visitor_uuid) {
+      return result.data.visitor_uuid
+    }
+
+    if (attempt < max_attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt))
+    }
+  }
+
+  return input.visitor_uuid
+}
+
+async function find_user_visitor_after_conflict(input: {
+  supabase: Awaited<ReturnType<typeof get_supabase>>
+  user_uuid: string
+}) {
+  const max_attempts = 3
+
+  for (let attempt = 1; attempt <= max_attempts; attempt += 1) {
+    const result = await find_visitor_by_user(
+      input.supabase,
+      input.user_uuid,
+    )
+
+    if (result.error) {
+      throw result.error
+    }
+
+    if (result.data?.visitor_uuid) {
+      return result.data.visitor_uuid
+    }
+
+    if (attempt < max_attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt))
+    }
+  }
+
+  throw new Error('visitor unique conflict could not be reselected')
 }
 
 async function attach_preferred_visitor(input: {
@@ -370,35 +432,29 @@ async function create_user_visitor(input: {
     throw created_visitor.error
   }
 
-  await emit_visitor_conflict_debug({
-    event: 'session_visitor_create_conflict',
-    visitor_uuid: null,
-    session_uuid: null,
+  const reused_visitor_uuid = await find_user_visitor_after_conflict({
+    supabase: input.supabase,
     user_uuid: input.user_uuid,
   })
 
-  const reused_visitor = await find_visitor_by_user(
-    input.supabase,
-    input.user_uuid,
-  )
-
-  if (reused_visitor.error) {
-    throw reused_visitor.error
-  }
-
-  if (!reused_visitor.data?.visitor_uuid) {
-    throw created_visitor.error
-  }
+  await emit_visitor_conflict_debug({
+    event: 'session_visitor_create_conflict',
+    visitor_uuid: reused_visitor_uuid,
+    session_uuid: null,
+    user_uuid: input.user_uuid,
+    error_code: '23505',
+    error_message: 'visitor insert unique violation',
+  })
 
   await emit_visitor_conflict_debug({
     event: 'session_visitor_reused_after_conflict',
-    visitor_uuid: reused_visitor.data.visitor_uuid,
+    visitor_uuid: reused_visitor_uuid,
     session_uuid: null,
     user_uuid: input.user_uuid,
   })
 
   return {
-    visitor_uuid: reused_visitor.data.visitor_uuid,
+    visitor_uuid: reused_visitor_uuid,
     is_new_visitor: false,
   }
 }
@@ -471,9 +527,10 @@ async function ensure_browser_visitor(input: {
   supabase: Awaited<ReturnType<typeof get_supabase>>
   visitor_uuid: string
   source_channel: browser_session_source_channel
+  caller: browser_session_caller
 }) {
   await emit_session_core_event('session_visitor_lookup_started', {
-    caller: 'unknown',
+    caller: input.caller,
     cookie_exists: true,
     cookie_visitor_uuid: input.visitor_uuid,
     resolved_visitor_uuid: input.visitor_uuid,
@@ -496,7 +553,7 @@ async function ensure_browser_visitor(input: {
 
   if (existing_visitor.data?.visitor_uuid) {
     await emit_session_core_event('session_visitor_lookup_found', {
-      caller: 'unknown',
+      caller: input.caller,
       cookie_exists: true,
       cookie_visitor_uuid: input.visitor_uuid,
       resolved_visitor_uuid: input.visitor_uuid,
@@ -523,7 +580,7 @@ async function ensure_browser_visitor(input: {
   }
 
   await emit_session_core_event('session_visitor_lookup_empty', {
-    caller: 'unknown',
+    caller: input.caller,
     cookie_exists: true,
     cookie_visitor_uuid: input.visitor_uuid,
     resolved_visitor_uuid: input.visitor_uuid,
@@ -536,7 +593,7 @@ async function ensure_browser_visitor(input: {
   })
 
   await emit_session_core_event('session_visitor_create_started', {
-    caller: 'unknown',
+    caller: input.caller,
     cookie_exists: true,
     cookie_visitor_uuid: input.visitor_uuid,
     resolved_visitor_uuid: input.visitor_uuid,
@@ -559,7 +616,7 @@ async function ensure_browser_visitor(input: {
 
   if (!created_visitor.error) {
     await emit_session_core_event('session_visitor_created', {
-      caller: 'unknown',
+      caller: input.caller,
       cookie_exists: true,
       cookie_visitor_uuid: input.visitor_uuid,
       resolved_visitor_uuid: input.visitor_uuid,
@@ -578,41 +635,29 @@ async function ensure_browser_visitor(input: {
     throw created_visitor.error
   }
 
-  await emit_session_core_event('session_visitor_create_conflict', {
-    caller: 'unknown',
-    cookie_exists: true,
-    cookie_visitor_uuid: input.visitor_uuid,
-    resolved_visitor_uuid: input.visitor_uuid,
+  await emit_visitor_conflict_debug({
+    event: 'session_visitor_create_conflict',
+    caller: input.caller,
+    visitor_uuid: input.visitor_uuid,
+    session_uuid: null,
     user_uuid: null,
     source_channel: input.source_channel,
-    created: false,
-    reused: false,
     error_code: '23505',
     error_message: 'visitor insert unique violation',
   })
 
-  const after_conflict = await find_visitor_row(
-    input.supabase,
-    input.visitor_uuid,
-  )
+  const reused_visitor_uuid = await find_visitor_row_after_conflict({
+    supabase: input.supabase,
+    visitor_uuid: input.visitor_uuid,
+  })
 
-  if (after_conflict.error) {
-    throw after_conflict.error
-  }
-
-  if (!after_conflict.data?.visitor_uuid) {
-    throw created_visitor.error
-  }
-
-  await emit_session_core_event('session_visitor_reused_after_conflict', {
-    caller: 'unknown',
-    cookie_exists: true,
-    cookie_visitor_uuid: input.visitor_uuid,
-    resolved_visitor_uuid: after_conflict.data.visitor_uuid,
+  await emit_visitor_conflict_debug({
+    event: 'session_visitor_reused_after_conflict',
+    caller: input.caller,
+    visitor_uuid: reused_visitor_uuid,
+    session_uuid: null,
     user_uuid: null,
     source_channel: input.source_channel,
-    created: false,
-    reused: true,
     error_code: null,
     error_message: null,
   })
@@ -759,6 +804,7 @@ export async function resolve_browser_session(
     supabase,
     visitor_uuid,
     source_channel,
+    caller: input.caller ?? 'unknown',
   })
   const is_new_session = await ensure_browser_session({
     supabase,
