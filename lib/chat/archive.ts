@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
 import type { chat_channel } from './room'
@@ -158,11 +159,13 @@ function archive_row_has_line_message_id(
 export async function archive_incoming_line_text(
   input: archive_incoming_line_text_input,
 ): Promise<archive_incoming_line_text_result> {
-  await debug_event({
-    category: 'chat_room',
-    event: 'incoming_message_archive_started',
-    payload: debug_incoming_line_archive_payload(input),
-  })
+  if (control.debug.chat_room) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'incoming_message_archive_started',
+      payload: debug_incoming_line_archive_payload(input),
+    })
+  }
 
   try {
     const existing_result = await supabase
@@ -181,14 +184,16 @@ export async function archive_incoming_line_text(
     )
 
     if (duplicate) {
-      await debug_event({
-        category: 'chat_room',
-        event: 'incoming_message_archive_skipped_duplicate',
-        payload: debug_incoming_line_archive_payload(
-          input,
-          duplicate.message_uuid,
-        ),
-      })
+      if (control.debug.chat_room) {
+        await debug_event({
+          category: 'chat_room',
+          event: 'incoming_message_archive_skipped_duplicate',
+          payload: debug_incoming_line_archive_payload(
+            input,
+            duplicate.message_uuid,
+          ),
+        })
+      }
 
       return {
         archived_message: normalize_archive(
@@ -245,14 +250,16 @@ export async function archive_incoming_line_text(
 
     const row = result.data as archive_row
 
-    await debug_event({
-      category: 'chat_room',
-      event: 'incoming_message_archived',
-      payload: debug_incoming_line_archive_payload(
-        input,
-        row.message_uuid,
-      ),
-    })
+    if (control.debug.chat_room) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'incoming_message_archived',
+        payload: debug_incoming_line_archive_payload(
+          input,
+          row.message_uuid,
+        ),
+      })
+    }
 
     return {
       archived_message: normalize_archive(row, existing_rows.length),
@@ -333,24 +340,26 @@ export async function archive_message_bundles(
 
   const inserted = (result.data ?? []) as archive_row[]
 
-  for (let i = 0; i < inserted.length; i++) {
-    const row = inserted[i]
-    const bundle = input.bundles[i]
-    const direction = archive_direction_for_sender(bundle.sender)
+  if (control.debug.chat_room) {
+    for (let i = 0; i < inserted.length; i++) {
+      const row = inserted[i]
+      const bundle = input.bundles[i]
+      const direction = archive_direction_for_sender(bundle.sender)
 
-    await debug_event({
-      category: 'chat_room',
-      event:
-        direction === 'incoming'
-          ? 'incoming_message_archived'
-          : 'outgoing_message_archived',
-      payload: {
-        room_uuid: input.room_uuid,
-        message_uuid: row.message_uuid,
-        direction,
-        channel: input.channel,
-      },
-    })
+      await debug_event({
+        category: 'chat_room',
+        event:
+          direction === 'incoming'
+            ? 'incoming_message_archived'
+            : 'outgoing_message_archived',
+        payload: {
+          room_uuid: input.room_uuid,
+          message_uuid: row.message_uuid,
+          direction,
+          channel: input.channel,
+        },
+      })
+    }
   }
 
   return inserted.map((row, index) =>

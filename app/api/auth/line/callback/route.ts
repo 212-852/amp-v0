@@ -7,6 +7,7 @@ import {
   promote_browser_visitor_to_user,
   visitor_cookie_name,
 } from '@/lib/auth/session'
+import { control } from '@/lib/config/control'
 import { debug_event } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
 import { line_login_state_cookie_name } from '../route'
@@ -44,6 +45,10 @@ async function debug_line_login_failed(
   reason: string,
   data?: Record<string, unknown>,
 ) {
+  if (!control.debug.line) {
+    return
+  }
+
   await debug_event({
     category: 'line',
     event: 'line_login_callback_failed',
@@ -153,13 +158,15 @@ export async function GET(request: Request) {
   }
 
   try {
-    await debug_event({
-      category: 'line',
-      event: 'line_login_started',
-      payload: {
-        merge_visitor_uuid,
-      },
-    })
+    if (control.debug.line) {
+      await debug_event({
+        category: 'line',
+        event: 'line_login_started',
+        payload: {
+          merge_visitor_uuid,
+        },
+      })
+    }
 
     const access_token = await get_line_access_token(code)
 
@@ -178,14 +185,16 @@ export async function GET(request: Request) {
       return redirect_home()
     }
 
-    await debug_event({
-      category: 'line',
-      event: 'line_profile_fetched',
-      payload: {
-        line_user_id,
-        display_name: profile?.displayName ?? null,
-      },
-    })
+    if (control.debug.line) {
+      await debug_event({
+        category: 'line',
+        event: 'line_profile_fetched',
+        payload: {
+          line_user_id,
+          display_name: profile?.displayName ?? null,
+        },
+      })
+    }
 
     const initial_locale = await resolve_dispatch_locale({
       source_channel: 'line',
@@ -211,24 +220,26 @@ export async function GET(request: Request) {
     const resolved_visitor_uuid =
       promoted.visitor_uuid || access.visitor_uuid
 
-    await debug_event({
-      category: 'line',
-      event: 'line_login_completed',
-      payload: {
-        line_user_id,
-        user_uuid: access.user_uuid,
-        visitor_uuid: resolved_visitor_uuid,
-        auth_visitor_uuid: access.visitor_uuid,
-        merge_visitor_uuid,
-        merge_visitor_from_oauth_state: Boolean(
-          parsed_oauth_state?.browser_visitor_uuid,
-        ),
-        is_new_user: access.is_new_user,
-        is_new_visitor: access.is_new_visitor,
-        locale: resolved_locale.locale,
-        locale_source: resolved_locale.source,
-      },
-    })
+    if (control.debug.line) {
+      await debug_event({
+        category: 'line',
+        event: 'line_login_completed',
+        payload: {
+          line_user_id,
+          user_uuid: access.user_uuid,
+          visitor_uuid: resolved_visitor_uuid,
+          auth_visitor_uuid: access.visitor_uuid,
+          merge_visitor_uuid,
+          merge_visitor_from_oauth_state: Boolean(
+            parsed_oauth_state?.browser_visitor_uuid,
+          ),
+          is_new_user: access.is_new_user,
+          is_new_visitor: access.is_new_visitor,
+          locale: resolved_locale.locale,
+          locale_source: resolved_locale.source,
+        },
+      })
+    }
   } catch {
     await debug_line_login_failed('unexpected_error')
 

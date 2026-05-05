@@ -11,6 +11,26 @@ type debug_payload = {
 }
 
 function allow_discord_debug_category(category: string) {
+  if (category === 'chat_room' && !control.debug.chat_room) {
+    return false
+  }
+
+  if (category === 'line_webhook' && !control.debug.line_webhook) {
+    return false
+  }
+
+  if (category === 'line' && !control.debug.line) {
+    return false
+  }
+
+  if (category === 'locale' && !control.debug.locale) {
+    return false
+  }
+
+  if (category === 'identity' && !control.debug.identity) {
+    return false
+  }
+
   if (!control.debug.use_discord_category_allowlist) {
     return true
   }

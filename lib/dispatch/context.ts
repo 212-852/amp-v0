@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { control } from '@/lib/config/control'
 import { debug_event } from '@/lib/debug'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
@@ -120,7 +121,7 @@ export async function resolve_dispatch_locale(input: {
     }
   const locale = normalize_locale(resolved.raw_locale)
 
-  if (input.debug !== false) {
+  if (control.debug.locale && input.debug !== false) {
     await debug_event({
       category: 'locale',
       event: 'locale_resolved',

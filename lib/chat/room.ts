@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
 
@@ -314,6 +315,8 @@ async function insert_direct_room_row(
   input: resolve_room_input,
   identity: ReturnType<typeof debug_identity_payload>,
 ): Promise<direct_room_insert_result> {
+  void identity
+
   const now = new Date().toISOString()
 
   const room_result = await supabase
@@ -826,15 +829,17 @@ async function finish_with_bot(
   try {
     bot_participant = await resolve_bot_participant(room.room_uuid)
 
-    await debug_event({
-      category: 'chat_room',
-      event: 'bot_participant_ensured',
-      payload: {
-        ...identity,
-        room_uuid: room.room_uuid,
-        bot_participant_uuid: bot_participant.participant_uuid,
-      },
-    })
+    if (control.debug.chat_room) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'bot_participant_ensured',
+        payload: {
+          ...identity,
+          room_uuid: room.room_uuid,
+          bot_participant_uuid: bot_participant.participant_uuid,
+        },
+      })
+    }
   } catch (error) {
     const err_fields = supabase_error_fields(error)
     await debug_chat_room('room_failed', {
@@ -913,25 +918,27 @@ async function handle_existing_participant(
       room,
     )
 
-    await debug_event({
-      category: 'chat_room',
-      event: 'participant_reused',
-      payload: {
-        ...identity,
-        participant_uuid: touched.participant.participant_uuid,
-        room_uuid: touched.room.room_uuid,
-      },
-    })
+    if (control.debug.chat_room) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'participant_reused',
+        payload: {
+          ...identity,
+          participant_uuid: touched.participant.participant_uuid,
+          room_uuid: touched.room.room_uuid,
+        },
+      })
 
-    await debug_event({
-      category: 'chat_room',
-      event: 'room_reused',
-      payload: debug_participant_room_payload({
-        participant_uuid: touched.participant.participant_uuid,
-        room_uuid: touched.room.room_uuid,
-        source_channel: input.channel,
-      }),
-    })
+      await debug_event({
+        category: 'chat_room',
+        event: 'room_reused',
+        payload: debug_participant_room_payload({
+          participant_uuid: touched.participant.participant_uuid,
+          room_uuid: touched.room.room_uuid,
+          source_channel: input.channel,
+        }),
+      })
+    }
 
     return finish_with_bot(
       input,
@@ -948,26 +955,28 @@ async function handle_existing_participant(
     identity,
   )
 
-  await debug_event({
-    category: 'chat_room',
-    event: 'participant_reused',
-    payload: {
-      ...identity,
-      participant_uuid: moved.participant.participant_uuid,
-      room_uuid: moved.room.room_uuid,
-      note: 'moved_to_new_direct_room',
-    },
-  })
+  if (control.debug.chat_room) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'participant_reused',
+      payload: {
+        ...identity,
+        participant_uuid: moved.participant.participant_uuid,
+        room_uuid: moved.room.room_uuid,
+        note: 'moved_to_new_direct_room',
+      },
+    })
 
-  await debug_event({
-    category: 'chat_room',
-    event: 'room_created',
-    payload: debug_participant_room_payload({
-      participant_uuid: moved.participant.participant_uuid,
-      room_uuid: moved.room.room_uuid,
-      source_channel: input.channel,
-    }),
-  })
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_created',
+      payload: debug_participant_room_payload({
+        participant_uuid: moved.participant.participant_uuid,
+        room_uuid: moved.room.room_uuid,
+        source_channel: input.channel,
+      }),
+    })
+  }
 
   return finish_with_bot(
     input,
@@ -984,27 +993,31 @@ export async function resolve_chat_room(
   const identity = debug_identity_payload(input)
 
   try {
-    await debug_event({
-      category: 'chat_room',
-      event: 'participant_lookup_started',
-      payload: identity,
-    })
+    if (control.debug.chat_room) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'participant_lookup_started',
+        payload: identity,
+      })
+    }
 
     const merged_participant = await merge_identity_rooms(input)
     const canonical_participant =
       merged_participant ??
       (await find_canonical_user_participant(input))
 
-    await debug_event({
-      category: 'chat_room',
-      event: 'room_lookup_result',
-      payload: {
-        ...identity,
-        found: Boolean(canonical_participant),
-        participant_uuid: canonical_participant?.participant_uuid ?? null,
-        room_uuid: canonical_participant?.room_uuid ?? null,
-      },
-    })
+    if (control.debug.chat_room) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'room_lookup_result',
+        payload: {
+          ...identity,
+          found: Boolean(canonical_participant),
+          participant_uuid: canonical_participant?.participant_uuid ?? null,
+          room_uuid: canonical_participant?.room_uuid ?? null,
+        },
+      })
+    }
 
     if (!canonical_participant) {
       const created = await try_insert_participant_and_direct_room(
@@ -1020,25 +1033,27 @@ export async function resolve_chat_room(
         )
       }
 
-      await debug_event({
-        category: 'chat_room',
-        event: 'participant_created',
-        payload: {
-          ...identity,
-          participant_uuid: created.participant.participant_uuid,
-          room_uuid: created.room.room_uuid,
-        },
-      })
+      if (control.debug.chat_room) {
+        await debug_event({
+          category: 'chat_room',
+          event: 'participant_created',
+          payload: {
+            ...identity,
+            participant_uuid: created.participant.participant_uuid,
+            room_uuid: created.room.room_uuid,
+          },
+        })
 
-      await debug_event({
-        category: 'chat_room',
-        event: 'room_created',
-        payload: debug_participant_room_payload({
-          participant_uuid: created.participant.participant_uuid,
-          room_uuid: created.room.room_uuid,
-          source_channel: input.channel,
-        }),
-      })
+        await debug_event({
+          category: 'chat_room',
+          event: 'room_created',
+          payload: debug_participant_room_payload({
+            participant_uuid: created.participant.participant_uuid,
+            room_uuid: created.room.room_uuid,
+            source_channel: input.channel,
+          }),
+        })
+      }
 
       const linked_room = await load_room(created.room.room_uuid)
 

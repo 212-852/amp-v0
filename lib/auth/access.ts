@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { control } from '@/lib/config/control'
 import { resolve_user_visitor } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
@@ -30,7 +31,7 @@ export async function resolve_auth_access(
 ): Promise<access_result> {
   const input_locale = normalize_locale(input.locale)
 
-  if (input.provider === 'line') {
+  if (control.debug.identity && input.provider === 'line') {
     await debug_event({
       category: 'identity',
       event: 'line_identity_lookup_started',
@@ -86,7 +87,7 @@ export async function resolve_auth_access(
       visitor_uuid: input.visitor_uuid,
     })
 
-    if (input.provider === 'line') {
+    if (control.debug.identity && input.provider === 'line') {
       await debug_event({
         category: 'identity',
         event: 'line_identity_found',
@@ -153,7 +154,7 @@ export async function resolve_auth_access(
     is_new_visitor: visitor.is_new_visitor,
   })
 
-  if (input.provider === 'line') {
+  if (control.debug.identity && input.provider === 'line') {
     await debug_event({
       category: 'identity',
       event: 'line_identity_created',

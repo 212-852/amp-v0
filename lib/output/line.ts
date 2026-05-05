@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type { archived_message } from '@/lib/chat/archive'
+import { control } from '@/lib/config/control'
 import { env } from '@/lib/config/env'
 import { debug_event } from '@/lib/debug'
 import type { message_bundle } from '@/lib/chat/message'
@@ -248,18 +249,20 @@ export async function deliver_line_chat_bundles(
       messages: line_messages,
     })
 
-    await debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_succeeded',
-      payload: {
-        ...line_trace_base,
-        bundle_count,
-        line_message_count,
-        line_reply_message_count: line_message_count,
-        flex_bubble_count,
-        line_flex_bubble_count: flex_bubble_count,
-      },
-    })
+    if (control.debug.line_webhook) {
+      await debug_event({
+        category: 'line_webhook',
+        event: 'line_reply_succeeded',
+        payload: {
+          ...line_trace_base,
+          bundle_count,
+          line_message_count,
+          line_reply_message_count: line_message_count,
+          flex_bubble_count,
+          line_flex_bubble_count: flex_bubble_count,
+        },
+      })
+    }
   } catch (reply_error) {
     const err = reply_error as line_reply_error
 
