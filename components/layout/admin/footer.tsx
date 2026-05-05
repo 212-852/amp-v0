@@ -7,9 +7,5 @@ type AdminFooterProps = {
 export default function AdminFooter({
   display_name,
 }: AdminFooterProps) {
-  return (
-    <footer className="border-t border-gray-300 bg-white pb-[env(safe-area-inset-bottom)]">
-      <AdminAssistant display_name={display_name} />
-    </footer>
-  )
+  return <AdminAssistant display_name={display_name} />
 }

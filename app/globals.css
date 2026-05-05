@@ -176,6 +176,71 @@ canvas {
 }
 
 /* -----------------------------
+   admin shell - RoboNeko assistant
+----------------------------- */
+.admin_assistant_card {
+  position: relative;
+  min-height: 116px;
+  overflow: visible;
+  padding-left: 128px;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  border-radius: 28px 28px 0 0;
+}
+
+.admin_neko_peek {
+  position: absolute;
+  left: 18px;
+  bottom: -14px;
+  width: 96px;
+  height: 110px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.admin_neko_frame {
+  position: absolute;
+  left: 0;
+  bottom: -18px;
+  width: 96px;
+  height: 114.63px;
+  flex: 0 0 96px;
+  overflow: hidden;
+}
+
+.admin_neko_image {
+  width: 384px;
+  height: 114.63px;
+  max-width: none;
+  display: block;
+  animation: neko_blink_sprite 5.4s steps(1, end) infinite;
+  will-change: transform;
+}
+
+@keyframes neko_blink_sprite {
+  0%,
+  84%,
+  100% {
+    transform: translateX(0);
+  }
+
+  86% {
+    transform: translateX(-96px);
+  }
+
+  88% {
+    transform: translateX(-192px);
+  }
+
+  90% {
+    transform: translateX(-288px);
+  }
+
+  92% {
+    transform: translateX(0);
+  }
+}
+
+/* -----------------------------
    safe area (PWA / iPhone)
 ----------------------------- */
 .safe-screen {
