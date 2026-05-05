@@ -1,7 +1,9 @@
 'use client'
 
 import liff from '@line/liff'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+
+import Loading from '@/components/shared/loading'
 
 function resolve_liff_id() {
   return (
@@ -19,21 +21,43 @@ function should_skip_path(pathname: string) {
   )
 }
 
+function is_line_browser_or_liff_url(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const ua = navigator.userAgent.toLowerCase()
+
+  return ua.includes('line/') || window.location.href.includes('liff.line.me')
+}
+
 export default function LiffBootstrap() {
+  const [is_loading, set_is_loading] = useState(false)
+  const [liff_error, set_liff_error] = useState<string | null>(null)
+
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (should_skip_path(window.location.pathname)) {
+      return
+    }
+
+    if (!is_line_browser_or_liff_url()) {
+      return
+    }
+
+    set_is_loading(true)
+    set_liff_error(null)
+
     async function run() {
-      if (typeof window === 'undefined') {
-        return
-      }
-
-      if (should_skip_path(window.location.pathname)) {
-        return
-      }
-
       const liff_id = resolve_liff_id()
 
       if (!liff_id) {
         console.log('[liff] missing liff id')
+        set_is_loading(false)
+        set_liff_error('LIFF ID is not configured')
 
         return
       }
@@ -43,77 +67,115 @@ export default function LiffBootstrap() {
       console.log('[liff] href', window.location.href)
       console.log('[liff] user_agent', navigator.userAgent)
 
-      await liff.init({ liffId: liff_id })
+      try {
+        await liff.init({ liffId: liff_id })
 
-      console.log('[liff] init completed')
-      console.log('[liff] isInClient', liff.isInClient())
-      console.log('[liff] isLoggedIn', liff.isLoggedIn())
+        console.log('[liff] init completed')
+        console.log('[liff] isInClient', liff.isInClient())
+        console.log('[liff] isLoggedIn', liff.isLoggedIn())
 
-      const ua = navigator.userAgent.toLowerCase()
-      const is_liff_url = window.location.href.includes('liff.line.me')
-      const is_line_browser = ua.includes('line/')
-      const is_inside_line =
-        liff.isInClient() || is_liff_url || is_line_browser
+        if (
+          !liff.isInClient() &&
+          !window.location.href.includes('liff.line.me')
+        ) {
+          console.log(
+            '[liff] skip: not in LIFF client and not on liff.line.me URL',
+          )
+          set_is_loading(false)
 
-      if (!is_inside_line) {
-        console.log('[liff] not line environment, skip')
+          return
+        }
 
-        return
-      }
+        if (!liff.isLoggedIn()) {
+          console.log('[liff] liff_id', liff_id)
+          console.log('[liff] href before login', window.location.href)
+          console.log('[liff] origin', window.location.origin)
+          console.log('[liff] pathname', window.location.pathname)
+          console.log('[liff] login started')
+          liff.login()
 
-      if (!liff.isLoggedIn()) {
-        console.log('[liff] login started')
-        liff.login()
+          return
+        }
 
-        return
-      }
+        const global_gate = globalThis as unknown as {
+          __amp_liff_auth_inflight?: boolean
+        }
 
-      const global_gate = globalThis as unknown as {
-        __amp_liff_auth_inflight?: boolean
-      }
+        if (global_gate.__amp_liff_auth_inflight) {
+          set_is_loading(false)
 
-      if (global_gate.__amp_liff_auth_inflight) {
-        return
-      }
+          return
+        }
 
-      global_gate.__amp_liff_auth_inflight = true
+        global_gate.__amp_liff_auth_inflight = true
 
-      const profile = await liff.getProfile()
+        const profile = await liff.getProfile()
 
-      console.log('[liff] profile', profile)
+        console.log('[liff] profile', profile)
 
-      const response = await fetch('/api/auth/liff', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          line_user_id: profile.userId,
-          display_name: profile.displayName ?? null,
-          picture_url: profile.pictureUrl ?? null,
-          status_message: profile.statusMessage ?? null,
-          source_channel: 'liff',
-        }),
-      })
+        const response = await fetch('/api/auth/liff', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            line_user_id: profile.userId,
+            display_name: profile.displayName ?? null,
+            picture_url: profile.pictureUrl ?? null,
+            status_message: profile.statusMessage ?? null,
+            source_channel: 'liff',
+          }),
+        })
 
-      const result = await response.json().catch(() => null)
+        const result = await response.json().catch(() => null)
 
-      console.log('[liff] auth api result', result)
+        console.log('[liff] auth api result', result)
+        console.log('[liff] auth response status', response.status)
 
-      if (
-        response.ok &&
-        result &&
-        typeof result === 'object' &&
-        'ok' in result &&
-        result.ok === true
-      ) {
-        window.dispatchEvent(new Event('amp_session_changed'))
+        if (!response.ok) {
+          const msg =
+            result &&
+            typeof result === 'object' &&
+            'error' in result &&
+            typeof (result as { error?: string }).error === 'string'
+              ? (result as { error: string }).error
+              : `HTTP ${response.status}`
+          set_liff_error(msg)
+          console.error('[liff] auth API error', response.status, result)
+        } else if (
+          result &&
+          typeof result === 'object' &&
+          'ok' in result &&
+          result.ok === true
+        ) {
+          window.dispatchEvent(new Event('amp_session_changed'))
+        }
+
+        set_is_loading(false)
+      } catch (error) {
+        console.error('[liff] bootstrap failed', error)
+        set_liff_error(
+          error instanceof Error ? error.message : 'LIFF bootstrap failed',
+        )
+        set_is_loading(false)
       }
     }
 
-    void run().catch((error) => {
-      console.error('[liff] bootstrap failed', error)
-    })
+    void run()
   }, [])
 
-  return null
+  return (
+    <>
+      {is_loading ? (
+        <Loading full_screen text="LOADING..." />
+      ) : null}
+      {liff_error ? (
+        <div
+          className="fixed bottom-4 left-1/2 z-[10000] max-w-[90vw] -translate-x-1/2 rounded-md bg-red-900/90 px-3 py-2 text-center text-[11px] text-white shadow-lg"
+          role="alert"
+        >
+          {liff_error}
+        </div>
+      ) : null}
+    </>
+  )
 }
