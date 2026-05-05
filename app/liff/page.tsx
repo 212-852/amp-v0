@@ -1,34 +1,38 @@
 'use client'
 
-import liff from '@line/liff'
+import type { Liff } from '@line/liff'
 import { useEffect, useState } from 'react'
 
 import Loading from '@/components/shared/loading'
 
-async function read_liff_id_token(): Promise<string | null> {
-  const raw = liff.getIDToken()
+async function read_liff_id_token(liff: Liff): Promise<string | null> {
+  try {
+    const raw = liff.getIDToken()
 
-  if (typeof raw === 'string') {
-    return raw.length > 0 ? raw : null
-  }
-
-  if (
-    raw !== null &&
-    raw !== undefined &&
-    typeof (raw as Promise<string | null>).then === 'function'
-  ) {
-    try {
-      const resolved = await (raw as Promise<string | null>)
-
-      return typeof resolved === 'string' && resolved.length > 0
-        ? resolved
-        : null
-    } catch {
-      return null
+    if (typeof raw === 'string') {
+      return raw.length > 0 ? raw : null
     }
-  }
 
-  return null
+    if (
+      raw !== null &&
+      raw !== undefined &&
+      typeof (raw as Promise<string | null>).then === 'function'
+    ) {
+      try {
+        const resolved = await (raw as Promise<string | null>)
+
+        return typeof resolved === 'string' && resolved.length > 0
+          ? resolved
+          : null
+      } catch {
+        return null
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
 }
 
 export default function LiffPage() {
@@ -53,12 +57,14 @@ export default function LiffPage() {
       let skip_loading_off = false
 
       try {
+        const { default: liff } = await import('@line/liff')
+
         await liff.init({
           liffId: liff_id,
           withLoginOnExternalBrowser: true,
-        } as Parameters<typeof liff.init>[0])
+        } as Parameters<Liff['init']>[0])
 
-        const id_token = await read_liff_id_token()
+        const id_token = await read_liff_id_token(liff)
 
         let response: Response
 
@@ -112,7 +118,9 @@ export default function LiffPage() {
         if (!cancelled) {
           window.location.href = '/'
         }
-      } catch {
+      } catch (error) {
+        console.error('[liff] page bootstrap failed', error)
+
         if (!cancelled) {
           set_status('failed')
         }
@@ -123,7 +131,11 @@ export default function LiffPage() {
       }
     }
 
-    void run()
+    void run().catch((error) => {
+      console.error('[liff] page run rejected', error)
+      set_is_loading(false)
+      set_status('failed')
+    })
 
     return () => {
       cancelled = true

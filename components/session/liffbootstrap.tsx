@@ -1,6 +1,6 @@
 'use client'
 
-import liff from '@line/liff'
+import type { Liff } from '@line/liff'
 import { useEffect, useState } from 'react'
 
 import Loading from '@/components/shared/loading'
@@ -60,32 +60,38 @@ async function emit_liff_debug(
   }
 }
 
-async function read_liff_id_token(): Promise<string | null> {
-  const raw = liff.getIDToken()
+async function read_liff_id_token(liff: Liff): Promise<string | null> {
+  try {
+    const raw = liff.getIDToken()
 
-  if (typeof raw === 'string') {
-    return raw.length > 0 ? raw : null
-  }
-
-  if (
-    raw !== null &&
-    raw !== undefined &&
-    typeof (raw as Promise<string | null>).then === 'function'
-  ) {
-    try {
-      const resolved = await (raw as Promise<string | null>)
-
-      return typeof resolved === 'string' && resolved.length > 0
-        ? resolved
-        : null
-    } catch (error) {
-      console.error('[liff] id token read failed', error)
-
-      throw error
+    if (typeof raw === 'string') {
+      return raw.length > 0 ? raw : null
     }
-  }
 
-  return null
+    if (
+      raw !== null &&
+      raw !== undefined &&
+      typeof (raw as Promise<string | null>).then === 'function'
+    ) {
+      try {
+        const resolved = await (raw as Promise<string | null>)
+
+        return typeof resolved === 'string' && resolved.length > 0
+          ? resolved
+          : null
+      } catch (error) {
+        console.error('[liff] id token read failed', error)
+
+        return null
+      }
+    }
+
+    return null
+  } catch (error) {
+    console.error('[liff] getIDToken failed', error)
+
+    return null
+  }
 }
 
 export default function LiffBootstrap() {
@@ -207,6 +213,25 @@ export default function LiffBootstrap() {
           liff_id,
         })
 
+        let liff: Liff
+
+        try {
+          const mod = await import('@line/liff')
+
+          liff = mod.default
+          await emit_liff_debug('liff_sdk_imported', base_payload)
+        } catch (error) {
+          await emit_liff_debug('liff_sdk_import_failed', {
+            ...base_payload,
+            error: serialize_error(error),
+          })
+          console.error('[liff] @line/liff import failed', error)
+          set_liff_error('LIFF SDK could not be loaded')
+          set_is_loading(false)
+
+          return
+        }
+
         try {
           await emit_liff_debug('liff_init_started', {
             ...base_payload,
@@ -215,7 +240,7 @@ export default function LiffBootstrap() {
           await liff.init({
             liffId: liff_id,
             withLoginOnExternalBrowser: true,
-          } as Parameters<typeof liff.init>[0])
+          } as Parameters<Liff['init']>[0])
           await emit_liff_debug('liff_init_completed', base_payload)
         } catch (error) {
           await emit_liff_debug('liff_init_failed', {
@@ -251,7 +276,7 @@ export default function LiffBootstrap() {
           return
         }
 
-        let profile: Awaited<ReturnType<typeof liff.getProfile>>
+        let profile: Awaited<ReturnType<Liff['getProfile']>>
 
         try {
           await emit_liff_debug('liff_profile_fetch_started', {
@@ -279,15 +304,12 @@ export default function LiffBootstrap() {
           throw error
         }
 
-        let id_token: string | null = null
+        const id_token = await read_liff_id_token(liff)
 
-        try {
-          id_token = await read_liff_id_token()
-        } catch (error) {
-          await emit_liff_debug('liff_id_token_read_failed', {
+        if (!id_token) {
+          await emit_liff_debug('liff_id_token_empty', {
             ...base_payload,
             line_user_id: profile.userId,
-            error: serialize_error(error),
           })
         }
 
@@ -312,13 +334,18 @@ export default function LiffBootstrap() {
         let response: Response
 
         try {
-          response = await post_liff_session({
-            id_token,
+          const payload: Record<string, unknown> = {
             line_user_id: profile.userId,
             display_name: profile.displayName ?? null,
             picture_url: profile.pictureUrl ?? null,
             source_channel: 'liff',
-          })
+          }
+
+          if (id_token) {
+            payload.id_token = id_token
+          }
+
+          response = await post_liff_session(payload)
         } catch (error) {
           await emit_liff_debug('liff_auth_api_failed', {
             ...base_payload,
@@ -343,7 +370,14 @@ export default function LiffBootstrap() {
       }
     }
 
-    void run()
+    void run().catch((error) => {
+      console.error('[liff] bootstrap run rejected', error)
+      void emit_liff_debug('liff_bootstrap_failed', {
+        ...base_payload,
+        error: serialize_error(error),
+      })
+      set_is_loading(false)
+    })
   }, [])
 
   return (
