@@ -232,23 +232,48 @@ export default function LiffBootstrap() {
           return
         }
 
+        let init_timeout: number | null = null
+
         try {
-          await emit_liff_debug('liff_init_started', {
+          const init_payload = {
             ...base_payload,
             liff_id,
-          })
-          await liff.init({
-            liffId: liff_id,
-            withLoginOnExternalBrowser: true,
-          } as Parameters<Liff['init']>[0])
+          }
+          init_timeout = window.setTimeout(() => {
+            void emit_liff_debug('liff_init_timeout', init_payload)
+          }, 8000)
+
+          await emit_liff_debug('liff_init_started', init_payload)
+          await liff.init({ liffId: liff_id })
+          window.clearTimeout(init_timeout)
+          init_timeout = null
+
           await emit_liff_debug('liff_init_completed', base_payload)
         } catch (error) {
+          if (init_timeout !== null) {
+            window.clearTimeout(init_timeout)
+          }
+
           await emit_liff_debug('liff_init_failed', {
             ...base_payload,
+            liff_id,
+            error_name: error instanceof Error ? error.name : null,
+            error_message:
+              error instanceof Error ? error.message : String(error),
+            error_stack: error instanceof Error ? error.stack : null,
+            error_code:
+              typeof error === 'object' && error !== null && 'code' in error
+                ? String((error as { code?: unknown }).code)
+                : null,
             error: serialize_error(error),
           })
+          console.error('[liff] init failed', error)
+          set_liff_error(
+            error instanceof Error ? error.message : 'LIFF init failed',
+          )
+          set_is_loading(false)
 
-          throw error
+          return
         }
 
         const is_in_client = liff.isInClient()
