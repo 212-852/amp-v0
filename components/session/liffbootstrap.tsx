@@ -220,6 +220,22 @@ export default function LiffBootstrap() {
 
           liff = mod.default
           await emit_liff_debug('liff_sdk_imported', base_payload)
+
+          let sdk_version: string | null = null
+
+          try {
+            sdk_version = liff.getVersion()
+          } catch {
+            sdk_version = null
+          }
+
+          await emit_liff_debug('liff_origin_checked', {
+            href: window.location.href,
+            origin: window.location.origin,
+            pathname: window.location.pathname,
+            liff_id,
+            sdk_version: sdk_version ?? 'unavailable',
+          })
         } catch (error) {
           await emit_liff_debug('liff_sdk_import_failed', {
             ...base_payload,
