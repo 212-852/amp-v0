@@ -12,8 +12,12 @@ import { control } from '@/lib/config/control'
 import { debug, debug_event } from '@/lib/debug'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
-type liff_id_token_body = {
+type liff_auth_body = {
   id_token?: string | null
+  line_user_id?: string | null
+  display_name?: string | null
+  picture_url?: string | null
+  image_url?: string | null
 }
 
 function get_allowed_user_ids() {
@@ -67,7 +71,7 @@ async function debug_liff_failed(
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as liff_id_token_body
+  const body = (await request.json()) as liff_auth_body
   const raw_token = body.id_token
   const id_token =
     typeof raw_token === 'string'
@@ -75,32 +79,44 @@ export async function POST(request: Request) {
       : raw_token
         ? String(raw_token).trim()
         : ''
+  const profile_line_user_id =
+    typeof body.line_user_id === 'string'
+      ? body.line_user_id.trim()
+      : ''
 
   const cookie_store = await cookies()
   const cookie_visitor_uuid =
     cookie_store.get(visitor_cookie_name)?.value ?? null
 
-  if (!id_token) {
-    await debug_liff_failed('missing_id_token')
+  let line_user_id: string
+  let profile_display_name: string | null = null
+  let profile_image_url: string | null = null
+
+  if (id_token) {
+    const verified = await verify_line_liff_id_token(id_token)
+
+    if (!verified) {
+      await debug_liff_failed('id_token_verify_failed')
+
+      return NextResponse.json(
+        { ok: false, error: 'Invalid id_token' },
+        { status: 401 },
+      )
+    }
+
+    line_user_id = verified.sub
+  } else if (profile_line_user_id) {
+    line_user_id = profile_line_user_id
+    profile_display_name = body.display_name ?? null
+    profile_image_url = body.picture_url ?? body.image_url ?? null
+  } else {
+    await debug_liff_failed('missing_auth_payload')
 
     return NextResponse.json(
-      { ok: false, error: 'Missing id_token' },
+      { ok: false, error: 'Missing id_token or line_user_id' },
       { status: 400 },
     )
   }
-
-  const verified = await verify_line_liff_id_token(id_token)
-
-  if (!verified) {
-    await debug_liff_failed('id_token_verify_failed')
-
-    return NextResponse.json(
-      { ok: false, error: 'Invalid id_token' },
-      { status: 401 },
-    )
-  }
-
-  const line_user_id = verified.sub
 
   if (!is_allowed_line_user(line_user_id)) {
     await debug_liff_failed('test_mode_blocked', {
@@ -129,8 +145,8 @@ export async function POST(request: Request) {
     const result = await resolve_liff_login({
       request,
       line_user_id,
-      display_name: null,
-      image_url: null,
+      display_name: profile_display_name,
+      image_url: profile_image_url,
       browser_locale: null,
       visitor_uuid: cookie_visitor_uuid,
     })

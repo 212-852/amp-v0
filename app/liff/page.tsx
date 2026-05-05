@@ -58,28 +58,36 @@ export default function LiffPage() {
           withLoginOnExternalBrowser: true,
         } as Parameters<typeof liff.init>[0])
 
-        if (!liff.isInClient()) {
-          window.location.replace(`https://liff.line.me/${liff_id}`)
-          skip_loading_off = true
-
-          return
-        }
-
         const id_token = await read_liff_id_token()
 
-        if (!id_token) {
+        let response: Response
+
+        if (id_token) {
+          response = await fetch('/api/auth/line/liff', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ id_token }),
+          })
+        } else if (!liff.isLoggedIn()) {
           liff.login()
           skip_loading_off = true
 
           return
-        }
+        } else {
+          const profile = await liff.getProfile()
 
-        const response = await fetch('/api/auth/line/liff', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ id_token }),
-        })
+          response = await fetch('/api/auth/line/liff', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              line_user_id: profile.userId,
+              display_name: profile.displayName ?? null,
+              picture_url: profile.pictureUrl ?? null,
+            }),
+          })
+        }
 
         if (!response.ok || cancelled) {
           if (!cancelled) {

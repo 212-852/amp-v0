@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import {
-  is_public_asset_path,
-  should_redirect_line_browser_to_liff,
-} from '@/lib/auth/context'
+import { is_public_asset_path } from '@/lib/auth/context'
 import { env } from '@/lib/config/env'
-import { next_public_liff_id } from '@/lib/config/line_env'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
 
 function read_browser_session_cookie_values(
@@ -77,26 +73,6 @@ export function middleware(request: NextRequest) {
         request: { headers },
       }),
     )
-
-  const ua = request.headers.get('user-agent')
-
-  if (
-    !is_local &&
-    host === env.domain.platform &&
-    should_redirect_line_browser_to_liff({
-      pathname,
-      search_params: request.nextUrl.searchParams,
-      user_agent: ua,
-    })
-  ) {
-    const liff_id = next_public_liff_id()
-
-    if (liff_id) {
-      const target = `https://liff.line.me/${liff_id}`
-
-      return NextResponse.redirect(target)
-    }
-  }
 
   if (is_local) {
     return next_with_visitor_cookie()

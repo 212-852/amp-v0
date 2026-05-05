@@ -78,6 +78,43 @@ export default function LiffBootstrap() {
       return
     }
 
+    async function post_liff_session(payload: Record<string, unknown>) {
+      return fetch('/api/auth/line/liff', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      })
+    }
+
+    async function finish_auth_response(response: Response) {
+      const result = await response.json().catch(() => null)
+
+      console.log('[liff] auth result', result)
+      console.log('[liff] auth response status', response.status)
+
+      if (!response.ok) {
+        const msg =
+          result &&
+          typeof result === 'object' &&
+          'error' in result &&
+          typeof (result as { error?: string }).error === 'string'
+            ? (result as { error: string }).error
+            : `HTTP ${response.status}`
+        set_liff_error(msg)
+        console.error('[liff] auth API error', response.status, result)
+      } else if (
+        result &&
+        typeof result === 'object' &&
+        'ok' in result &&
+        result.ok === true
+      ) {
+        window.dispatchEvent(new Event('amp_session_changed'))
+      }
+
+      set_is_loading(false)
+    }
+
     async function run() {
       try {
         await liff.init({
@@ -85,64 +122,55 @@ export default function LiffBootstrap() {
           withLoginOnExternalBrowser: true,
         } as Parameters<typeof liff.init>[0])
 
-        if (!liff.isInClient()) {
-          window.location.replace(`https://liff.line.me/${liff_id}`)
+        const id_token = await read_liff_id_token()
+
+        if (id_token) {
+          const global_gate = globalThis as unknown as {
+            __amp_liff_auth_sent?: boolean
+          }
+
+          if (global_gate.__amp_liff_auth_sent) {
+            set_is_loading(false)
+
+            return
+          }
+
+          global_gate.__amp_liff_auth_sent = true
+
+          const response = await post_liff_session({ id_token })
+
+          await finish_auth_response(response)
 
           return
         }
 
-        let id_token = await read_liff_id_token()
-
-        if (!id_token) {
+        if (!liff.isLoggedIn()) {
           liff.login()
 
           return
         }
 
+        const profile = await liff.getProfile()
+
         const global_gate = globalThis as unknown as {
-          __amp_liff_id_token_sent?: boolean
+          __amp_liff_auth_sent?: boolean
         }
 
-        if (global_gate.__amp_liff_id_token_sent) {
+        if (global_gate.__amp_liff_auth_sent) {
           set_is_loading(false)
 
           return
         }
 
-        global_gate.__amp_liff_id_token_sent = true
+        global_gate.__amp_liff_auth_sent = true
 
-        const response = await fetch('/api/auth/line/liff', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ id_token }),
+        const response = await post_liff_session({
+          line_user_id: profile.userId,
+          display_name: profile.displayName ?? null,
+          picture_url: profile.pictureUrl ?? null,
         })
 
-        const result = await response.json().catch(() => null)
-
-        console.log('[liff] id_token auth result', result)
-        console.log('[liff] auth response status', response.status)
-
-        if (!response.ok) {
-          const msg =
-            result &&
-            typeof result === 'object' &&
-            'error' in result &&
-            typeof (result as { error?: string }).error === 'string'
-              ? (result as { error: string }).error
-              : `HTTP ${response.status}`
-          set_liff_error(msg)
-          console.error('[liff] auth API error', response.status, result)
-        } else if (
-          result &&
-          typeof result === 'object' &&
-          'ok' in result &&
-          result.ok === true
-        ) {
-          window.dispatchEvent(new Event('amp_session_changed'))
-        }
-
-        set_is_loading(false)
+        await finish_auth_response(response)
       } catch (error) {
         console.error('[liff] bootstrap failed', error)
         set_liff_error(
