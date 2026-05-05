@@ -219,32 +219,8 @@ export async function deliver_line_chat_bundles(
     participant_uuid: input.room.participant_uuid,
   }
 
-  await debug_event({
-    category: 'line_webhook',
-    event: 'line_output_started',
-    payload: {
-      ...line_trace_base,
-      reply_token_exists: Boolean(reply_token),
-      bundle_count,
-    },
-  })
-
-  await debug_event({
-    category: 'line_webhook',
-    event: 'line_flex_render_started',
-    payload: {
-      ...line_trace_base,
-      bundle_count,
-      line_message_count: 0,
-      line_reply_message_count: 0,
-      flex_bubble_count: 0,
-      line_flex_bubble_count: 0,
-    },
-  })
-
   let line_messages: line_api_message[]
   let flex_bubble_count = 0
-  let used_flex_carousel = false
 
   try {
     const built = build_seed_carousel_line_messages({
@@ -253,55 +229,18 @@ export async function deliver_line_chat_bundles(
     })
     line_messages = built.messages
     flex_bubble_count = built.flex_bubble_count
-    used_flex_carousel = true
   } catch (flex_error) {
-    await debug_event({
-      category: 'line_webhook',
-      event: 'line_flex_render_failed',
-      payload: {
-        ...line_trace_base,
-        bundle_count,
-        error_message:
-          flex_error instanceof Error
-            ? flex_error.message
-            : String(flex_error),
-      },
-    })
+    console.error(
+      '[line_flex_render_failed]',
+      line_trace_base,
+      flex_error,
+    )
 
     line_messages = build_flex_failure_text_fallback(bundles)
     flex_bubble_count = 0
-    used_flex_carousel = false
   }
 
   const line_message_count = line_messages.length
-
-  if (used_flex_carousel) {
-    await debug_event({
-      category: 'line_webhook',
-      event: 'line_flex_render_succeeded',
-      payload: {
-        ...line_trace_base,
-        bundle_count,
-        line_message_count,
-        line_reply_message_count: line_message_count,
-        flex_bubble_count,
-        line_flex_bubble_count: flex_bubble_count,
-      },
-    })
-  }
-
-  await debug_event({
-    category: 'line_webhook',
-    event: 'line_reply_attempted',
-    payload: {
-      ...line_trace_base,
-      bundle_count,
-      line_message_count,
-      line_reply_message_count: line_message_count,
-      flex_bubble_count,
-      line_flex_bubble_count: flex_bubble_count,
-    },
-  })
 
   try {
     await post_line_reply_messages({
@@ -324,23 +263,15 @@ export async function deliver_line_chat_bundles(
   } catch (reply_error) {
     const err = reply_error as line_reply_error
 
-    await debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_failed',
-      payload: {
-        ...line_trace_base,
-        error_message:
-          reply_error instanceof Error
-            ? reply_error.message
-            : String(reply_error),
-        error_status: err.line_status,
-        error_body: err.line_body,
-        bundle_count,
-        line_message_count,
-        line_reply_message_count: line_message_count,
-        flex_bubble_count,
-        line_flex_bubble_count: flex_bubble_count,
-      },
+    console.error('[line_reply_failed]', line_trace_base, {
+      message:
+        reply_error instanceof Error
+          ? reply_error.message
+          : String(reply_error),
+      error_status: err.line_status,
+      error_body: err.line_body,
+      bundle_count,
+      line_message_count,
     })
   }
 }

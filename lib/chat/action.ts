@@ -6,10 +6,10 @@ import {
   load_archived_messages,
   type archived_message,
 } from './archive'
-import { debug_event } from '@/lib/debug'
 import { resolve_chat_context } from '@/lib/dispatch/context'
 import {
   build_initial_chat_bundles,
+  build_line_followup_ack_bundle,
   build_user_text_bundle,
 } from './message'
 import type { chat_locale } from './message'
@@ -103,18 +103,11 @@ export async function resolve_initial_chat(
     )
   } catch (error) {
     const e = error as { code?: string; message?: string }
-    console.error('[chat_room]', 'room_failed', error)
-
-    await debug_event({
-      category: 'chat_room',
-      event: 'room_failed',
-      payload: {
-        phase: 'load_archived_messages',
-        error,
-        error_code: e.code,
-        error_message: e.message,
-        room_uuid: room_result.room.room_uuid,
-      },
+    console.error('[chat_room]', 'room_failed', 'load_archived_messages', {
+      error,
+      error_code: e.code,
+      error_message: e.message,
+      room_uuid: room_result.room.room_uuid,
     })
 
     return {
@@ -126,7 +119,12 @@ export async function resolve_initial_chat(
   }
 
   if (!should_seed_initial_messages(archived_messages)) {
-    if (input.channel === 'line') {
+    if (
+      input.channel === 'line' &&
+      input.line_reply_token &&
+      input.line_user_id &&
+      input.incoming_line_text
+    ) {
       const archived_incoming = await archive_input_line_text_for_room({
         room: room_result.room,
         locale: input.locale,
@@ -134,18 +132,66 @@ export async function resolve_initial_chat(
         incoming_line_text: input.incoming_line_text,
       })
 
-      if (archived_incoming) {
-        archived_messages = await load_archived_messages(
-          room_result.room.room_uuid,
-        )
+      if (archived_incoming?.is_duplicate) {
+        return {
+          room: room_result.room,
+          is_new_room: room_result.is_new_room,
+          is_seeded: false,
+          messages: await load_archived_messages(
+            room_result.room.room_uuid,
+          ),
+        }
       }
+
+      const ack_bundles = [
+        build_line_followup_ack_bundle({ locale: input.locale }),
+      ]
+      const outgoing = await archive_message_bundles({
+        room_uuid: room_result.room.room_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+        bot_participant_uuid: room_result.room.bot_participant_uuid,
+        channel: 'line',
+        bundles: ack_bundles,
+      })
+
+      await output_chat_bundles({
+        room: room_result.room,
+        channel: 'line',
+        messages: outgoing,
+        line_reply_token: input.line_reply_token,
+        line_user_id: input.line_user_id ?? null,
+      })
+
+      return {
+        room: room_result.room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages: await load_archived_messages(
+          room_result.room.room_uuid,
+        ),
+      }
+    }
+
+    if (
+      input.channel === 'line' &&
+      input.line_user_id &&
+      input.incoming_line_text
+    ) {
+      await archive_input_line_text_for_room({
+        room: room_result.room,
+        locale: input.locale,
+        line_user_id: input.line_user_id,
+        incoming_line_text: input.incoming_line_text,
+      })
     }
 
     return {
       room: room_result.room,
       is_new_room: room_result.is_new_room,
       is_seeded: false,
-      messages: archived_messages,
+      messages: await load_archived_messages(
+        room_result.room.room_uuid,
+      ),
     }
   }
 
@@ -203,18 +249,11 @@ export async function resolve_initial_chat(
     }
   } catch (error) {
     const e = error as { code?: string; message?: string }
-    console.error('[chat_room]', 'room_failed', error)
-
-    await debug_event({
-      category: 'chat_room',
-      event: 'room_failed',
-      payload: {
-        phase: 'seed_initial_messages',
-        error,
-        error_code: e.code,
-        error_message: e.message,
-        room_uuid: room_result.room.room_uuid,
-      },
+    console.error('[chat_room]', 'room_failed', 'seed_initial_messages', {
+      error,
+      error_code: e.code,
+      error_message: e.message,
+      room_uuid: room_result.room.room_uuid,
     })
 
     return {

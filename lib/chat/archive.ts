@@ -260,14 +260,11 @@ export async function archive_incoming_line_text(
       message_uuid: row.message_uuid,
     }
   } catch (error) {
-    await debug_event({
-      category: 'chat_room',
-      event: 'incoming_message_archive_failed',
-      payload: {
-        ...debug_incoming_line_archive_payload(input),
-        error,
-      },
-    })
+    console.error(
+      '[archive_incoming_line_text]',
+      debug_incoming_line_archive_payload(input),
+      error,
+    )
 
     throw error
   }

@@ -6,7 +6,7 @@ export const control = {
     /** Core session/cookie `debug_event` emissions from `lib/auth/session.ts`. */
     session_core: true,
     chat_room: false,
-    identity_promotion: true,
+    identity_promotion: false,
 
     line_auth: true,
     liff_auth: false,

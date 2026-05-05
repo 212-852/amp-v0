@@ -530,6 +530,28 @@ export function build_initial_chat_bundles(input: {
   ]
 }
 
+const line_followup_ack_text: localized_content = {
+  ja: 'メッセージを受け取りました',
+  en: 'We received your message.',
+  es: 'Hemos recibido tu mensaje.',
+}
+
+export function build_line_followup_ack_bundle(input: {
+  locale: chat_locale
+}): text_bundle {
+  return {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'text',
+    sender: 'bot',
+    version: 1,
+    locale: input.locale,
+    content_key: 'line.followup.ack',
+    payload: {
+      text: pick_text(line_followup_ack_text, input.locale),
+    },
+  }
+}
+
 export function build_user_text_bundle(input: {
   text: string
   locale?: chat_locale

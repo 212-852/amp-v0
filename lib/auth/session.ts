@@ -159,7 +159,6 @@ async function emit_session_core_event(
   if (
     event !== 'session_cookie_found' &&
     event !== 'session_cookie_missing' &&
-    event !== 'session_visitor_created' &&
     event !== 'session_resolve_finished'
   ) {
     return

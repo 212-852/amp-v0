@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
-import { debug_event } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
 
 type line_webhook_event = {
@@ -35,23 +34,6 @@ type line_webhook_body = {
 }
 
 const processed_line_event_keys = new Set<string>()
-
-function fire_line_trace_debug(input: {
-  event: string
-  payload: Record<string, unknown>
-}) {
-  void (async () => {
-    try {
-      await debug_event({
-        category: 'line',
-        event: input.event,
-        payload: input.payload,
-      })
-    } catch {
-      // never block webhook response
-    }
-  })()
-}
 
 function verify_line_signature(body: string, signature: string | null) {
   const channel_secret = process.env.LINE_MESSAGING_CHANNEL_SECRET
@@ -104,47 +86,12 @@ function get_line_event_key(event: line_webhook_event) {
   ].join(':')
 }
 
-function append_line_webhook_meta(
-  data: Record<string, unknown>,
-  event: line_webhook_event,
-) {
-  const webhook_event_id = event.webhookEventId
-
-  if (
-    webhook_event_id != null &&
-    String(webhook_event_id).length > 0
-  ) {
-    data.webhook_event_id = webhook_event_id
-  }
-
-  const redelivery = event.deliveryContext?.isRedelivery
-
-  if (typeof redelivery === 'boolean') {
-    data.delivery_context_redelivery = redelivery
-  }
-}
-
 export async function POST(request: Request) {
   const body_text = await request.text()
-
-  await debug_event({
-    category: 'line_webhook',
-    event: 'webhook_reached',
-    payload: {
-      received_at: new Date().toISOString(),
-    },
-  })
 
   const signature = request.headers.get('x-line-signature')
 
   if (!verify_line_signature(body_text, signature)) {
-    fire_line_trace_debug({
-      event: 'line_webhook_signature_invalid',
-      payload: {
-        has_signature: Boolean(signature),
-      },
-    })
-
     return NextResponse.json(
       { error: 'Invalid signature' },
       { status: 401 },
@@ -163,15 +110,6 @@ export async function POST(request: Request) {
   }
 
   const events = body.events ?? []
-
-  await debug_event({
-    category: 'line_webhook',
-    event: 'events_parsed',
-    payload: {
-      event_count: events.length,
-      event_types: events.map((event) => event.type ?? 'unknown'),
-    },
-  })
 
   for (const event of events) {
     const line_user_id = event.source?.userId
@@ -192,46 +130,11 @@ export async function POST(request: Request) {
 
     try {
       if (!is_allowed_line_user(line_user_id)) {
-        fire_line_trace_debug({
-          event: 'line_webhook_test_blocked',
-          payload: {
-            line_user_id,
-            event_type: event.type,
-            source_type: event.source?.type,
-            message_id: event.message?.id,
-            timestamp: event.timestamp,
-          },
-        })
-
         continue
       }
 
       if (!line_user_id) {
-        fire_line_trace_debug({
-          event: 'line_webhook_missing_user_id',
-          payload: {
-            event_type: event.type,
-            source_type: event.source?.type,
-            destination: body.destination,
-          },
-        })
-
         continue
-      }
-
-      if (event.type === 'message') {
-        await debug_event({
-          category: 'line_webhook',
-          event: 'message_received',
-          payload: {
-            line_user_id,
-            message_type: event.message?.type ?? 'unknown',
-            text:
-              event.message?.type === 'text'
-                ? event.message.text
-                : undefined,
-          },
-        })
       }
 
       const profile_locale = await resolve_dispatch_locale({
@@ -253,7 +156,7 @@ export async function POST(request: Request) {
           event.source?.locale ?? event.source?.language ?? null,
         line_user_id,
       })
-      const initial_chat = await resolve_initial_chat({
+      await resolve_initial_chat({
         visitor_uuid: access.visitor_uuid,
         user_uuid: access.user_uuid,
         channel: 'line',
@@ -281,63 +184,6 @@ export async function POST(request: Request) {
                   event.deliveryContext?.isRedelivery ?? null,
               }
             : null,
-      })
-      const initial_carousel_card_count = initial_chat.messages.reduce(
-        (count, message) => {
-          if (message.bundle.bundle_type !== 'initial_carousel') {
-            return count
-          }
-
-          return count + message.bundle.cards.length
-        },
-        0,
-      )
-
-      await debug_event({
-        category: 'line_webhook',
-        event: 'room_resolved',
-        payload: {
-          line_user_id,
-          user_uuid: access.user_uuid,
-          visitor_uuid: access.visitor_uuid,
-          room_uuid: initial_chat.room.room_uuid,
-          participant_uuid: initial_chat.room.participant_uuid,
-          bot_participant_uuid: initial_chat.room.bot_participant_uuid,
-          was_created: initial_chat.is_new_room,
-        },
-      })
-
-      const passed_data: Record<string, unknown> = {
-        user_uuid: access.user_uuid,
-        visitor_uuid: access.visitor_uuid,
-        is_new_user: access.is_new_user,
-        is_new_visitor: access.is_new_visitor,
-        chat_room_uuid: initial_chat.room.room_uuid,
-        chat_seeded: initial_chat.is_seeded,
-        chat_message_count: initial_chat.messages.length,
-        initial_carousel_card_count,
-        locale: resolved_locale.locale,
-        locale_source: resolved_locale.source,
-
-        line_user_id,
-        event_type: event.type,
-        source_type: event.source?.type,
-        message_type: event.message?.type,
-        message_id: event.message?.id,
-        message_text:
-          event.message?.type === 'text'
-            ? event.message.text
-            : undefined,
-        reply_token_exists: Boolean(event.replyToken),
-        timestamp: event.timestamp,
-        destination: body.destination,
-      }
-
-      append_line_webhook_meta(passed_data, event)
-
-      fire_line_trace_debug({
-        event: 'line_webhook_passed',
-        payload: passed_data,
       })
     } catch {
       // resolve_auth_access or downstream must not fail the webhook
