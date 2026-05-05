@@ -321,10 +321,32 @@ export default function LiffBootstrap() {
         let init_timeout: number | null = null
 
         try {
+          const location_search = window.location.search
+          const document_referrer = document.referrer
+          const window_location_href = window.location.href
+
           const init_payload = {
             ...base_payload,
             liff_id,
+            location_search,
+            document_referrer,
+            window_location_href,
           }
+
+          const search_looks_like_liff_or_oauth =
+            /liff|openid|[?&]code=|[?&]state=/i.test(location_search)
+
+          await emit_liff_debug('liff_pre_init_context', {
+            ...base_payload,
+            liff_id,
+            location_search,
+            document_referrer,
+            window_location_href,
+            search_looks_like_liff_or_oauth,
+            possibly_line_in_app_not_liff_launch:
+              !search_looks_like_liff_or_oauth && document_referrer === '',
+          })
+
           init_timeout = window.setTimeout(() => {
             void emit_liff_debug('liff_init_timeout', init_payload)
           }, 8000)
