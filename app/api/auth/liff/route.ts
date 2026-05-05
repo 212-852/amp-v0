@@ -26,6 +26,41 @@ type liff_auth_body = {
   source_channel?: string | null
 }
 
+function pick_identity_uuid(row: Record<string, unknown> | null): string | null {
+  if (!row) {
+    return null
+  }
+
+  if (typeof row.identity_uuid === 'string') {
+    return row.identity_uuid
+  }
+
+  if (typeof row.id === 'string') {
+    return row.id
+  }
+
+  return null
+}
+
+async function fetch_line_identity_uuid(input: {
+  user_uuid: string
+  line_user_id: string
+}): Promise<string | null> {
+  const result = await supabase
+    .from('identities')
+    .select('*')
+    .eq('user_uuid', input.user_uuid)
+    .eq('provider', 'line')
+    .eq('provider_id', input.line_user_id)
+    .maybeSingle()
+
+  if (result.error || !result.data) {
+    return null
+  }
+
+  return pick_identity_uuid(result.data as Record<string, unknown>)
+}
+
 function get_allowed_user_ids() {
   return (
     process.env.LINE_REPLY_ALLOWED_USER_IDS
@@ -192,14 +227,6 @@ export async function POST(request: Request) {
   const current_visitor_uuid =
     cookie_visitor_uuid ?? body.visitor_uuid ?? null
 
-  if (current_visitor_uuid) {
-    await debug_liff_event('liff_cookie_visitor_found', {
-      visitor_uuid: current_visitor_uuid,
-      from_cookie: Boolean(cookie_visitor_uuid),
-      from_body: !cookie_visitor_uuid && Boolean(body.visitor_uuid),
-    })
-  }
-
   if (!line_user_id) {
     await debug_liff_failed('missing_line_user_id')
 
@@ -221,18 +248,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    await debug_liff_event('liff_auth_api_started', {
+    await debug_liff_event('liff_auth_route_started', {
       visitor_uuid: current_visitor_uuid,
       line_user_id,
-      source_channel: 'liff',
     })
-    await debug_liff_event('liff_profile_resolved', {
-      line_user_id,
-      visitor_uuid: current_visitor_uuid,
-      display_name: body.display_name ?? null,
-      has_picture_url: Boolean(body.picture_url || body.image_url),
-      locale: body.locale ?? null,
-    })
+
+    if (cookie_visitor_uuid) {
+      await debug_liff_event('liff_cookie_visitor_found', {
+        visitor_uuid: cookie_visitor_uuid,
+        line_user_id,
+      })
+    }
 
     const initial_locale = await resolve_dispatch_locale({
       source_channel: 'liff',
@@ -245,19 +271,6 @@ export async function POST(request: Request) {
       locale: initial_locale.locale,
     })
 
-    if (cookie_visitor_uuid) {
-      await debug_liff_event('visitor_cookie_reused', {
-        visitor_uuid: resolved_session_visitor_uuid,
-        user_uuid: null,
-        source_channel: 'liff',
-      })
-      await debug_liff_event('visitor_create_skipped_cookie_exists', {
-        visitor_uuid: resolved_session_visitor_uuid,
-        user_uuid: null,
-        source_channel: 'liff',
-      })
-    }
-
     const access = await resolve_auth_access({
       provider: 'line',
       provider_id: line_user_id,
@@ -266,6 +279,21 @@ export async function POST(request: Request) {
       image_url: body.picture_url ?? body.image_url ?? null,
       locale: initial_locale.locale,
     })
+
+    if (access.is_new_user) {
+      await debug_liff_event('line_identity_created', {
+        line_user_id,
+        user_uuid: access.user_uuid,
+        visitor_uuid: resolved_session_visitor_uuid,
+      })
+    } else {
+      await debug_liff_event('line_identity_found', {
+        line_user_id,
+        user_uuid: access.user_uuid,
+        visitor_uuid: resolved_session_visitor_uuid,
+      })
+    }
+
     await update_liff_user_profile({
       user_uuid: access.user_uuid,
       display_name: body.display_name ?? null,
@@ -288,48 +316,26 @@ export async function POST(request: Request) {
       user_uuid: access.user_uuid,
     })
 
-    if (!access.is_new_user) {
-      await debug_liff_event('line_identity_found', {
-        line_user_id,
-        user_uuid: access.user_uuid,
-        visitor_uuid: resolved_visitor_uuid,
-      })
-      await debug_liff_event('liff_identity_reused', {
-        line_user_id,
-        user_uuid: access.user_uuid,
-        visitor_uuid: resolved_visitor_uuid,
-      })
-    } else {
-      await debug_liff_event('line_identity_created', {
-        line_user_id,
-        user_uuid: access.user_uuid,
-        visitor_uuid: resolved_visitor_uuid,
-      })
-    }
-
-    await debug_liff_event('liff_visitor_promoted_to_user', {
-      user_uuid: access.user_uuid,
-      visitor_uuid: resolved_visitor_uuid,
-      old_visitor_uuid: resolved_session_visitor_uuid,
-      promoted: promoted.promoted,
-      existing_room_uuid: promoted.existing_room_uuid,
-      participant_uuid: promoted.participant_uuid,
-    })
     await debug_liff_event('visitor_promoted_to_user', {
       visitor_uuid: resolved_visitor_uuid,
       user_uuid: access.user_uuid,
-      source_channel: 'liff',
+      line_user_id,
+      promoted: promoted.promoted,
+    })
+
+    const identity_uuid = await fetch_line_identity_uuid({
+      user_uuid: access.user_uuid,
+      line_user_id,
     })
 
     await debug_liff_event('liff_auth_completed', {
       user_uuid: access.user_uuid,
       visitor_uuid: resolved_visitor_uuid,
-      auth_visitor_uuid: access.visitor_uuid,
-      is_new_user: access.is_new_user,
-      is_new_visitor: access.is_new_visitor,
       line_user_id,
+      identity_uuid,
       locale: resolved_locale.locale,
       locale_source: resolved_locale.source,
+      is_new_user: access.is_new_user,
     })
 
     const session_payload = {
@@ -348,6 +354,7 @@ export async function POST(request: Request) {
       ok: true,
       user_uuid: access.user_uuid,
       visitor_uuid: resolved_visitor_uuid,
+      identity_uuid,
       is_new_user: access.is_new_user,
       is_new_visitor: access.is_new_visitor,
       locale: resolved_locale.locale,
@@ -361,9 +368,12 @@ export async function POST(request: Request) {
     response.cookies.set(browser_channel_cookie_name, 'liff', cookie_opts)
 
     return response
-  } catch {
-    await debug_liff_failed('resolve_auth_access_failed', {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+
+    await debug_liff_failed('exception', {
       line_user_id,
+      message,
     })
 
     return NextResponse.json(
