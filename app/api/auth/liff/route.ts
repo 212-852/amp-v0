@@ -20,8 +20,10 @@ type liff_auth_body = {
   display_name?: string | null
   image_url?: string | null
   picture_url?: string | null
+  status_message?: string | null
   locale?: string | null
   visitor_uuid?: string | null
+  source_channel?: string | null
 }
 
 function get_allowed_user_ids() {
@@ -159,6 +161,28 @@ async function update_liff_visitor(input: {
   }
 }
 
+async function update_liff_user_profile(input: {
+  user_uuid: string
+  display_name?: string | null
+  image_url?: string | null
+}) {
+  if (!input.display_name && !input.image_url) {
+    return
+  }
+
+  const updated = await supabase
+    .from('users')
+    .update({
+      display_name: input.display_name ?? null,
+      image_url: input.image_url ?? null,
+    })
+    .eq('user_uuid', input.user_uuid)
+
+  if (updated.error) {
+    throw updated.error
+  }
+}
+
 export async function POST(request: Request) {
   const body = (await request.json()) as liff_auth_body
   const line_user_id = body.line_user_id
@@ -197,6 +221,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    await debug_liff_event('liff_auth_api_started', {
+      visitor_uuid: current_visitor_uuid,
+      line_user_id,
+      source_channel: 'liff',
+    })
     await debug_liff_event('liff_profile_resolved', {
       line_user_id,
       visitor_uuid: current_visitor_uuid,
@@ -237,6 +266,11 @@ export async function POST(request: Request) {
       image_url: body.picture_url ?? body.image_url ?? null,
       locale: initial_locale.locale,
     })
+    await update_liff_user_profile({
+      user_uuid: access.user_uuid,
+      display_name: body.display_name ?? null,
+      image_url: body.picture_url ?? body.image_url ?? null,
+    })
     const resolved_locale = await resolve_dispatch_locale({
       source_channel: 'liff',
       stored_user_locale: access.locale,
@@ -255,7 +289,18 @@ export async function POST(request: Request) {
     })
 
     if (!access.is_new_user) {
+      await debug_liff_event('line_identity_found', {
+        line_user_id,
+        user_uuid: access.user_uuid,
+        visitor_uuid: resolved_visitor_uuid,
+      })
       await debug_liff_event('liff_identity_reused', {
+        line_user_id,
+        user_uuid: access.user_uuid,
+        visitor_uuid: resolved_visitor_uuid,
+      })
+    } else {
+      await debug_liff_event('line_identity_created', {
         line_user_id,
         user_uuid: access.user_uuid,
         visitor_uuid: resolved_visitor_uuid,
@@ -293,6 +338,8 @@ export async function POST(request: Request) {
       locale: resolved_locale.locale,
       role: 'user',
       tier: 'member',
+      display_name: body.display_name ?? null,
+      image_url: body.picture_url ?? body.image_url ?? null,
       line_connected: true,
       connected_providers: ['line'],
     }
@@ -304,6 +351,7 @@ export async function POST(request: Request) {
       is_new_user: access.is_new_user,
       is_new_visitor: access.is_new_visitor,
       locale: resolved_locale.locale,
+      provider: 'line',
       session: session_payload,
     })
 

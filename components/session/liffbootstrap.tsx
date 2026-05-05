@@ -1,159 +1,100 @@
 'use client'
 
-import { usePathname, useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import liff from '@line/liff'
+import { usePathname } from 'next/navigation'
+import { useEffect, useRef } from 'react'
 
-type bootstrap_liff_profile = {
-  userId: string
-  displayName?: string
-  pictureUrl?: string
-}
-
-type bootstrap_liff_client = {
-  init: (input: { liffId: string }) => Promise<void>
-  isLoggedIn: () => boolean
-  login: (input?: { redirectUri?: string }) => void
-  getProfile: () => Promise<bootstrap_liff_profile>
-  getLanguage: () => string
-}
-
-type session_response = {
-  visitor_uuid?: string | null
-  line_connected?: boolean
-}
-
-function is_line_browser() {
-  const ua = navigator.userAgent.toLowerCase()
-
-  return ua.includes('line/') || ua.includes('liff')
-}
-
-function get_window_liff() {
-  return (window as unknown as { liff?: bootstrap_liff_client }).liff
+function is_liff_url() {
+  return window.location.href.includes('liff.line.me')
 }
 
 function should_skip_path(pathname: string | null) {
   return (
     pathname?.startsWith('/admin') ||
     pathname?.startsWith('/driver') ||
-    pathname?.startsWith('/liff') ||
     pathname?.startsWith('/api')
   )
 }
 
-function load_liff_sdk() {
-  return new Promise<bootstrap_liff_client>((resolve, reject) => {
-    const existing_liff = get_window_liff()
-
-    if (existing_liff) {
-      resolve(existing_liff)
-      return
-    }
-
-    const script = document.createElement('script')
-    script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js'
-    script.async = true
-    script.onload = () => {
-      const loaded_liff = get_window_liff()
-
-      if (loaded_liff) {
-        resolve(loaded_liff)
-        return
-      }
-
-      reject(new Error('LIFF SDK was not loaded'))
-    }
-    script.onerror = () => reject(new Error('LIFF SDK load failed'))
-
-    document.head.appendChild(script)
-  })
-}
-
 async function ensure_browser_session() {
-  const response = await fetch('/api/session', {
+  await fetch('/api/session', {
     method: 'GET',
     credentials: 'include',
   })
-
-  if (!response.ok) {
-    return null
-  }
-
-  return (await response.json()) as session_response
 }
 
 export default function LiffBootstrap() {
   const pathname = usePathname()
-  const router = useRouter()
+  const started_ref = useRef(false)
 
   useEffect(() => {
-    if (should_skip_path(pathname) || !is_line_browser()) {
+    if (started_ref.current || should_skip_path(pathname)) {
       return
     }
 
-    const liff_id = process.env.NEXT_PUBLIC_LINE_LIFF_ID
+    started_ref.current = true
 
-    if (!liff_id) {
-      return
-    }
+    async function run() {
+      const liff_id = process.env.NEXT_PUBLIC_LINE_LIFF_ID
 
-    let cancelled = false
-    const resolved_liff_id = liff_id
+      if (!liff_id) {
+        return
+      }
 
-    async function run_liff_bootstrap() {
-      try {
-        const session = await ensure_browser_session()
+      console.info('[DEBUG] LIFF', {
+        event: 'liff_bootstrap_started',
+      })
 
-        if (cancelled || session?.line_connected) {
-          return
-        }
+      await liff.init({ liffId: liff_id })
 
-        const liff = await load_liff_sdk()
+      console.info('[DEBUG] LIFF', {
+        event: 'liff_initialized',
+      })
 
-        if (cancelled) {
-          return
-        }
+      if (!liff.isInClient() && !is_liff_url()) {
+        return
+      }
 
-        await liff.init({ liffId: resolved_liff_id })
+      await ensure_browser_session()
 
-        if (!liff.isLoggedIn()) {
-          liff.login()
-          return
-        }
-
-        const profile = await liff.getProfile()
-        const locale = liff.getLanguage()
-
-        const response = await fetch('/api/auth/liff', {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            line_user_id: profile.userId,
-            display_name: profile.displayName ?? null,
-            picture_url: profile.pictureUrl ?? null,
-            image_url: profile.pictureUrl ?? null,
-            locale,
-            visitor_uuid: session?.visitor_uuid ?? null,
-          }),
+      if (!liff.isLoggedIn()) {
+        console.info('[DEBUG] LIFF', {
+          event: 'liff_login_started',
         })
+        liff.login()
+        return
+      }
 
-        if (!cancelled && response.ok) {
-          router.refresh()
-        }
-      } catch {
-        // Keep guest access when LIFF bootstrap cannot complete.
+      const profile = await liff.getProfile()
+      const locale = liff.getLanguage()
+
+      console.info('[DEBUG] LIFF', {
+        event: 'liff_profile_resolved',
+      })
+
+      const response = await fetch('/api/auth/liff', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          line_user_id: profile.userId,
+          display_name: profile.displayName,
+          picture_url: profile.pictureUrl ?? null,
+          status_message: profile.statusMessage ?? null,
+          locale,
+          source_channel: 'liff',
+        }),
+      })
+
+      if (response.ok) {
+        window.dispatchEvent(new Event('amp_session_changed'))
       }
     }
 
-    void run_liff_bootstrap()
-
-    return () => {
-      cancelled = true
-    }
-  }, [pathname, router])
+    void run().catch(console.error)
+  }, [pathname])
 
   return null
 }

@@ -1,5 +1,7 @@
 'use client'
 
+/* eslint-disable react-hooks/rules-of-hooks */
+
 import { useCallback, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 
@@ -62,9 +64,17 @@ export function use_session_profile() {
       void refresh()
     }
 
-    window.addEventListener('focus', on_focus)
+    function on_session_changed() {
+      void refresh()
+    }
 
-    return () => window.removeEventListener('focus', on_focus)
+    window.addEventListener('focus', on_focus)
+    window.addEventListener('amp_session_changed', on_session_changed)
+
+    return () => {
+      window.removeEventListener('focus', on_focus)
+      window.removeEventListener('amp_session_changed', on_session_changed)
+    }
   }, [refresh])
 
   return { session, refresh }
