@@ -52,14 +52,15 @@ export default function LiffBootstrap() {
       console.log('[liff] isInClient', liff.isInClient())
       console.log('[liff] isLoggedIn', liff.isLoggedIn())
 
+      const is_in_client = liff.isInClient()
       const is_inside_liff =
-        liff.isInClient() || is_liff_url() || is_line_browser() || has_liff_params()
+        is_in_client || is_liff_url() || is_line_browser() || has_liff_params()
 
       if (!is_inside_liff && !liff.isLoggedIn()) {
         return
       }
 
-      if (!liff.isLoggedIn()) {
+      if (!is_in_client && !liff.isLoggedIn()) {
         liff.login()
         return
       }
