@@ -3,20 +3,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bell, Globe2 } from 'lucide-react'
 import Link from 'next/link'
-import { createPortal } from 'react-dom'
 import { usePathname } from 'next/navigation'
 
 import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
 import OverlayRoot from '@/components/overlay/root'
 import Breadcrumb from '@/components/shared/breadcrumb'
-import Loading from '@/components/shared/loading'
 import { build_breadcrumb } from '@/lib/breadcrumb'
 import {
   type locale_key,
 } from '@/lib/locale/action'
 import {
-  apply_locale_from_session,
   get_locale,
   set_locale as set_locale_state,
   subscribe_locale,
@@ -65,7 +62,7 @@ export default function UserHeader() {
   const pathname = usePathname()
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
-  const [session, set_session] = useState<session_response>({
+  const [session] = useState<session_response>({
     locale: 'ja',
     role: 'guest',
     tier: 'guest',
@@ -75,7 +72,6 @@ export default function UserHeader() {
   })
   const [connect_open, set_connect_open] = useState(false)
   const [locale_open, set_locale_open] = useState(false)
-  const [session_ready, set_session_ready] = useState(false)
   const render_locale = mounted ? locale : 'ja'
   const is_member = session.tier === 'member'
   const status_label = is_member
@@ -103,66 +99,16 @@ export default function UserHeader() {
   }
 
   useEffect(() => {
-    let cancelled = false
     const unsubscribe_locale = subscribe_locale(set_locale)
     const mounted_timer = window.setTimeout(() => {
       set_mounted(true)
       set_locale(get_locale())
     }, 0)
-    fetch('/api/session', {
-      method: 'GET',
-      credentials: 'include',
-    })
-      .then((response) => response.json() as Promise<session_response>)
-      .then((session) => {
-        if (cancelled) {
-          return
-        }
-
-        set_session(session)
-
-        apply_locale_from_session(session.locale)
-
-        const already_redirected = sessionStorage.getItem(
-          'amp_line_auth_redirected',
-        )
-
-        if (
-          session.requires_line_auth &&
-          session.line_auth_method === 'line_login' &&
-          !already_redirected
-        ) {
-          sessionStorage.setItem(
-            'amp_line_auth_redirected',
-            'true',
-          )
-          window.location.href = '/api/auth/line'
-          return
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) {
-          set_session_ready(true)
-        }
-      })
-
     return () => {
-      cancelled = true
       window.clearTimeout(mounted_timer)
       unsubscribe_locale()
     }
   }, [])
-
-  if (!session_ready && pathname !== '/liff') {
-    const loading = <Loading full_screen text="LOADING..." />
-
-    if (typeof document === 'undefined') {
-      return loading
-    }
-
-    return createPortal(loading, document.body)
-  }
 
   return (
     <>

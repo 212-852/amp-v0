@@ -21,7 +21,7 @@ type chat_context_input = {
 }
 
 export type chat_request_context = {
-  visitor_uuid: string
+  visitor_uuid: string | null
   user_uuid: string | null
   channel: chat_channel
   locale: chat_locale
@@ -105,7 +105,9 @@ export async function resolve_chat_context(
     },
   )
 
-  const user_state = await resolve_user_state(browser_session.visitor_uuid)
+  const user_state = browser_session.visitor_uuid
+    ? await resolve_user_state(browser_session.visitor_uuid)
+    : { user_uuid: null, locale: null }
   const selected_locale =
     input.explicit_locale ??
     cookie_store.get(locale_cookie_name)?.value ??

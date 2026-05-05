@@ -1,15 +1,10 @@
 import 'server-only'
 
-import { cookies } from 'next/headers'
-
 import {
   type browser_access_platform,
   type browser_session_caller,
   type browser_session_source_channel,
-  get_browser_session_cookie_options,
   track_session_resolution,
-  visitor_cookie_max_age,
-  visitor_cookie_name,
 } from '@/lib/auth/session'
 
 export {
@@ -20,8 +15,8 @@ export {
 export type session_source_channel = browser_session_source_channel
 
 export type visitor_context = {
-  visitor_uuid: string
-  session_uuid: string
+  visitor_uuid: string | null
+  session_uuid: string | null
   is_new_visitor: boolean
   is_new_session: boolean
   cookie_exists: boolean
@@ -32,16 +27,6 @@ type visitor_context_options = {
   locale?: string | null
   user_agent?: string | null
   access_platform?: browser_access_platform
-}
-
-export async function bind_visitor_session(visitor_uuid: string) {
-  const cookie_store = await cookies()
-
-  cookie_store.set(
-    visitor_cookie_name,
-    visitor_uuid,
-    get_browser_session_cookie_options(visitor_cookie_max_age),
-  )
 }
 
 export async function resolve_visitor_context(

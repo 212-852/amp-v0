@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import {
-  get_browser_session_cookie_options,
   read_browser_session_cookie_values,
-  session_cookie_max_age,
   session_cookie_name,
-  visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
 import { env } from '@/lib/config/env'
@@ -55,22 +52,6 @@ function create_response(
   }
 
   const response = response_builder(request_headers)
-
-  if (existing.visitor_uuid) {
-    response.cookies.set(
-      visitor_cookie_name,
-      existing.visitor_uuid,
-      get_browser_session_cookie_options(visitor_cookie_max_age),
-    )
-  }
-
-  if (existing.session_uuid) {
-    response.cookies.set(
-      session_cookie_name,
-      existing.session_uuid,
-      get_browser_session_cookie_options(session_cookie_max_age),
-    )
-  }
 
   return response
 }

@@ -145,6 +145,26 @@ export async function load_user_home_chat() {
   const chat_context = await resolve_chat_context({
     channel: 'web',
   })
+  const visitor_uuid = chat_context.visitor_uuid
 
-  return resolve_initial_chat(chat_context)
+  if (!visitor_uuid) {
+    return {
+      room: {
+        room_uuid: '',
+        participant_uuid: '',
+        bot_participant_uuid: '',
+        user_uuid: null,
+        visitor_uuid: '',
+        channel: 'web' as const,
+      },
+      is_new_room: false,
+      is_seeded: false,
+      messages: [],
+    }
+  }
+
+  return resolve_initial_chat({
+    ...chat_context,
+    visitor_uuid,
+  })
 }

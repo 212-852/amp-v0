@@ -44,13 +44,6 @@ export type existing_browser_session_cookies = {
   session_uuid: string | null
 }
 
-export type browser_session_cookie_values = {
-  visitor_uuid: string
-  session_uuid: string
-  cookie_exists: boolean
-  session_exists: boolean
-}
-
 export type browser_session_caller =
   | 'page'
   | 'api_session'
@@ -79,19 +72,20 @@ export type browser_session_input = {
   access_platform?: browser_access_platform
 }
 
-export type resolve_session_options = {
-  source_channel?: browser_session_source_channel
-  caller?: browser_session_caller
-  locale?: string | null
-  user_agent?: string | null
-  access_platform?: browser_access_platform
-}
-
 export type browser_session_result = {
   visitor_uuid: string
   session_uuid: string
   is_new_visitor: boolean
   is_new_session: boolean
+  cookie_exists: boolean
+  session_exists: boolean
+}
+
+export type read_session_result = {
+  visitor_uuid: string | null
+  session_uuid: string | null
+  is_new_visitor: false
+  is_new_session: false
   cookie_exists: boolean
   session_exists: boolean
 }
@@ -121,34 +115,6 @@ async function get_supabase() {
   const database = await import('@/lib/db/supabase')
 
   return database.supabase
-}
-
-function infer_access_platform_from_ua(
-  user_agent: string | null | undefined,
-): browser_access_platform {
-  const normalized_user_agent = user_agent?.toLowerCase() ?? ''
-
-  if (
-    normalized_user_agent.includes('iphone') ||
-    normalized_user_agent.includes('ipad') ||
-    normalized_user_agent.includes('ipod')
-  ) {
-    return 'ios'
-  }
-
-  if (normalized_user_agent.includes('android')) {
-    return 'android'
-  }
-
-  if (normalized_user_agent.includes('mac os')) {
-    return 'mac'
-  }
-
-  if (normalized_user_agent.includes('windows')) {
-    return 'windows'
-  }
-
-  return 'unknown'
 }
 
 function infer_source_channel_from_ua(
@@ -774,24 +740,10 @@ export function read_browser_session_cookie_values(
   }
 }
 
-export function resolve_browser_session_cookie_values(
-  visitor_cookie: string | null | undefined,
-  session_cookie: string | null | undefined,
-): browser_session_cookie_values {
-  const existing = read_browser_session_cookie_values(
-    visitor_cookie,
-    session_cookie,
-  )
-
-  return {
-    visitor_uuid: existing.visitor_uuid ?? mint_visitor_uuid(),
-    session_uuid: existing.session_uuid ?? mint_session_uuid(),
-    cookie_exists: Boolean(existing.visitor_uuid),
-    session_exists: Boolean(existing.session_uuid),
-  }
-}
-
-export async function resolve_browser_session(
+/**
+ * DB + mint only. Called from `ensure_session` (api_session) exclusively.
+ */
+async function ensure_session_rows(
   input: browser_session_input,
 ): Promise<browser_session_result> {
   const visitor_uuid = input.visitor_uuid ?? mint_visitor_uuid()
@@ -826,177 +778,109 @@ export async function resolve_browser_session(
   }
 }
 
-async function set_session_cookie_safe(input: {
-  cookie_store: Awaited<
-    ReturnType<typeof import('next/headers').cookies>
-  >
-  cookie_key: string
-  value: string
-  max_age: number
-  source_channel: browser_session_source_channel
-  resolved_visitor_uuid: string
-}) {
-  await emit_session_core_event('session_cookie_set_started', {
-    caller: 'unknown',
-    cookie_key: input.cookie_key,
+/**
+ * Request-level cache: cookies().get only. No DB writes, no cookies().set.
+ */
+export const read_session = cache(async (): Promise<read_session_result> => {
+  const { cookies, headers } = await import('next/headers')
+  const cookie_store = await cookies()
+  const header_store = await headers()
+  const user_agent = header_store.get('user-agent')
+  const source_channel = infer_source_channel_from_ua(user_agent)
+
+  const current_visitor_uuid =
+    cookie_store.get(visitor_cookie_name)?.value ?? null
+  const current_session_uuid =
+    cookie_store.get(session_cookie_name)?.value ?? null
+  const cookie_exists = Boolean(current_visitor_uuid)
+  const session_exists = Boolean(current_session_uuid)
+
+  await emit_session_core_event(
+    cookie_exists ? 'session_cookie_found' : 'session_cookie_missing',
+    {
+      caller: 'unknown',
+      cookie_exists,
+      cookie_visitor_uuid: current_visitor_uuid,
+      resolved_visitor_uuid: current_visitor_uuid,
+      user_uuid: null,
+      source_channel,
+      created: false,
+      reused: cookie_exists,
+      error_code: null,
+      error_message: null,
+    },
+  )
+
+  return {
+    visitor_uuid: current_visitor_uuid,
+    session_uuid: current_session_uuid,
+    is_new_visitor: false,
+    is_new_session: false,
+    cookie_exists,
+    session_exists,
+  }
+})
+
+/**
+ * Route-handler only (`app/api/session/route.ts`): DB rows + mint when cookies absent.
+ * Does not call cookies().set.
+ */
+export async function ensure_session(input: browser_session_input) {
+  const caller = input.caller ?? 'unknown'
+  const source_channel = input.source_channel ?? 'web'
+
+  if (caller !== 'api_session') {
+    throw new Error('Session creation is only allowed from api_session')
+  }
+
+  const session = await ensure_session_rows(input)
+  const created = session.is_new_visitor || session.is_new_session
+
+  await emit_session_core_event(created ? 'session_created' : 'session_reused', {
+    caller: 'api_session',
     cookie_exists: true,
-    cookie_visitor_uuid:
-      input.cookie_key === visitor_cookie_name ? input.value : null,
-    resolved_visitor_uuid: input.resolved_visitor_uuid,
+    cookie_visitor_uuid: session.visitor_uuid,
+    resolved_visitor_uuid: session.visitor_uuid,
     user_uuid: null,
-    source_channel: input.source_channel,
-    created: false,
-    reused: false,
+    source_channel,
+    created,
+    reused: !created,
     error_code: null,
     error_message: null,
   })
 
-  try {
-    input.cookie_store.set(
-      input.cookie_key,
-      input.value,
-      get_browser_session_cookie_options(input.max_age),
-    )
+  return session
+}
 
-    await emit_session_core_event('session_cookie_set_succeeded', {
-      caller: 'unknown',
-      cookie_key: input.cookie_key,
-      cookie_exists: true,
-      cookie_visitor_uuid:
-        input.cookie_key === visitor_cookie_name ? input.value : null,
-      resolved_visitor_uuid: input.resolved_visitor_uuid,
-      user_uuid: null,
-      source_channel: input.source_channel,
-      created: false,
-      reused: true,
-      error_code: null,
-      error_message: null,
-    })
-  } catch (error) {
-    const err = error as { code?: string; message?: string }
-
-    await emit_session_core_event('session_cookie_set_failed', {
-      caller: 'unknown',
-      cookie_key: input.cookie_key,
-      cookie_exists: true,
-      cookie_visitor_uuid: null,
-      resolved_visitor_uuid: input.resolved_visitor_uuid,
-      user_uuid: null,
-      source_channel: input.source_channel,
-      created: false,
-      reused: false,
-      error_code: err.code ?? 'cookie_set_error',
-      error_message: err.message ?? String(error),
-    })
-
-    throw error
-  }
+export async function emit_session_cookie_write_event(
+  event: 'session_cookie_set_started' | 'session_cookie_set_succeeded',
+  input: {
+    caller: browser_session_caller
+    cookie_key: string
+    visitor_uuid: string
+    user_uuid?: string | null
+    source_channel: browser_session_source_channel
+  },
+) {
+  await emit_session_core_event(event, {
+    caller: input.caller,
+    cookie_key: input.cookie_key,
+    cookie_exists: true,
+    cookie_visitor_uuid:
+      input.cookie_key === visitor_cookie_name ? input.visitor_uuid : null,
+    resolved_visitor_uuid: input.visitor_uuid,
+    user_uuid: input.user_uuid ?? null,
+    source_channel: input.source_channel,
+    created: false,
+    reused: true,
+    error_code: null,
+    error_message: null,
+  })
 }
 
 /**
- * Request-level cache: read cookies, reuse visitor/session, mint only if missing.
- * Prevents parallel mint when multiple code paths run in one request.
- */
-export const resolve_session = cache(async (): Promise<browser_session_result> => {
-    const { cookies, headers } = await import('next/headers')
-    const cookie_store = await cookies()
-    const header_store = await headers()
-    const user_agent = header_store.get('user-agent')
-    const locale =
-      header_store.get('accept-language')?.split(',')[0] ?? null
-    const source_channel = infer_source_channel_from_ua(user_agent)
-    const access_platform = infer_access_platform_from_ua(user_agent)
-
-    const current_visitor_uuid =
-      cookie_store.get(visitor_cookie_name)?.value ?? null
-    const current_session_uuid =
-      cookie_store.get(session_cookie_name)?.value ?? null
-    const cookie_exists = Boolean(current_visitor_uuid)
-
-    await emit_session_core_event(
-      cookie_exists ? 'session_cookie_found' : 'session_cookie_missing',
-      {
-        caller: 'unknown',
-        cookie_exists,
-        cookie_visitor_uuid: current_visitor_uuid,
-        resolved_visitor_uuid: current_visitor_uuid,
-        user_uuid: null,
-        source_channel,
-        created: false,
-        reused: cookie_exists,
-        error_code: null,
-        error_message: null,
-      },
-    )
-
-    const session = await resolve_browser_session({
-      visitor_uuid: current_visitor_uuid,
-      session_uuid: current_session_uuid,
-      caller: 'unknown',
-      source_channel,
-      locale,
-      user_agent,
-      access_platform,
-    })
-
-    if (current_visitor_uuid !== session.visitor_uuid) {
-      await set_session_cookie_safe({
-        cookie_store,
-        cookie_key: visitor_cookie_name,
-        value: session.visitor_uuid,
-        max_age: visitor_cookie_max_age,
-        source_channel,
-        resolved_visitor_uuid: session.visitor_uuid,
-      })
-    }
-
-    if (current_session_uuid !== session.session_uuid) {
-      await set_session_cookie_safe({
-        cookie_store,
-        cookie_key: session_cookie_name,
-        value: session.session_uuid,
-        max_age: session_cookie_max_age,
-        source_channel,
-        resolved_visitor_uuid: session.visitor_uuid,
-      })
-    }
-
-    const created = session.is_new_visitor || session.is_new_session
-
-    if (created) {
-      await emit_session_core_event('session_created', {
-        caller: 'unknown',
-        cookie_exists: true,
-        cookie_visitor_uuid: session.visitor_uuid,
-        resolved_visitor_uuid: session.visitor_uuid,
-        user_uuid: null,
-        source_channel,
-        created: true,
-        reused: false,
-        error_code: null,
-        error_message: null,
-      })
-    } else {
-      await emit_session_core_event('session_reused', {
-        caller: 'unknown',
-        cookie_exists: true,
-        cookie_visitor_uuid: session.visitor_uuid,
-        resolved_visitor_uuid: session.visitor_uuid,
-        user_uuid: null,
-        source_channel,
-        created: false,
-        reused: true,
-        error_code: null,
-        error_message: null,
-      })
-    }
-
-    return session
-})
-
-/**
- * Same as `resolve_session` plus caller-labeled `session_resolve_*` debug events.
- * All server entry points should use this (or `resolve_session` directly if no trace).
+ * Same as `read_session` plus caller-labeled debug events.
+ * Safe for Server Components.
  */
 export async function track_session_resolution(
   caller: browser_session_caller,
@@ -1004,7 +888,7 @@ export async function track_session_resolution(
   _locale?: string | null,
   _user_agent?: string | null,
   _access_platform?: browser_access_platform,
-): Promise<browser_session_result> {
+): Promise<read_session_result> {
   void _locale
   void _user_agent
   void _access_platform
@@ -1027,8 +911,10 @@ export async function track_session_resolution(
   })
 
   try {
-    const session = await resolve_session()
-    const user_uuid = await resolve_visitor_user_uuid(session.visitor_uuid)
+    const session = await read_session()
+    const user_uuid = session.visitor_uuid
+      ? await resolve_visitor_user_uuid(session.visitor_uuid)
+      : null
 
     await emit_session_core_event('session_resolve_finished', {
       caller,
@@ -1037,8 +923,8 @@ export async function track_session_resolution(
       cookie_visitor_uuid: pre_v,
       resolved_visitor_uuid: session.visitor_uuid,
       user_uuid,
-      created: session.is_new_visitor || session.is_new_session,
-      reused: !(session.is_new_visitor || session.is_new_session),
+      created: false,
+      reused: Boolean(session.visitor_uuid),
       error_code: null,
       error_message: null,
     })

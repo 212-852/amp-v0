@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { debug } from '@/lib/debug'
-import { bind_visitor_session } from '@/lib/visitor/context'
 
 type email_otp_type = 'email' | 'magiclink'
 
@@ -151,8 +150,6 @@ export async function GET(request: Request) {
       image_url: null,
       locale: null,
     })
-
-    await bind_visitor_session(access.visitor_uuid)
 
     await debug({
       category: 'auth',

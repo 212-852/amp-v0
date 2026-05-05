@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { control } from '@/lib/config/control'
 import { notify } from '@/lib/notify'
 
 type debug_payload = {
@@ -7,6 +8,14 @@ type debug_payload = {
   event: string
   message?: string
   data?: Record<string, unknown>
+}
+
+function allow_discord_debug_category(category: string) {
+  if (!control.debug.discord_debug_session_only) {
+    return true
+  }
+
+  return category === 'session'
 }
 
 function get_dev_mentions() {
@@ -33,6 +42,10 @@ export async function debug_event(input: {
   event: string
   payload?: Record<string, unknown>
 }) {
+  if (!allow_discord_debug_category(input.category)) {
+    return
+  }
+
   try {
     await notify({
       event: 'debug_trace',
@@ -46,6 +59,10 @@ export async function debug_event(input: {
 }
 
 export async function debug(payload: debug_payload) {
+  if (!allow_discord_debug_category(payload.category)) {
+    return
+  }
+
   const webhook_url = process.env.DISCORD_DEBUG_WEBHOOK_URL
 
   if (!webhook_url) {

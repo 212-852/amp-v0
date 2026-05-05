@@ -11,7 +11,6 @@ import {
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
-import { bind_visitor_session } from '@/lib/visitor/context'
 import { line_login_state_cookie_name } from '../route'
 
 type line_token_response = {
@@ -204,8 +203,6 @@ export async function GET(request: Request) {
     })
     const resolved_visitor_uuid =
       promoted.visitor_uuid || access.visitor_uuid
-
-    await bind_visitor_session(resolved_visitor_uuid)
 
     if (control.debug.line_auth) {
       await debug({

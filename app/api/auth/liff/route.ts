@@ -10,7 +10,6 @@ import {
 import { control } from '@/lib/config/control'
 import { debug } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
-import { bind_visitor_session } from '@/lib/visitor/context'
 
 type liff_auth_body = {
   line_user_id?: string
@@ -109,8 +108,6 @@ export async function POST(request: Request) {
     })
     const resolved_visitor_uuid =
       promoted.visitor_uuid || access.visitor_uuid
-
-    await bind_visitor_session(resolved_visitor_uuid)
 
     if (control.debug.liff_auth) {
       await debug({
