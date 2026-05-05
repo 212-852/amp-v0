@@ -3,26 +3,16 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import {
+  exchange_line_code_for_token,
+  fetch_line_oauth_profile,
+} from '@/lib/auth/line_oauth'
+import {
   get_browser_session_cookie_options,
   visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
-import {
-  line_login_channel_id,
-  line_login_channel_secret,
-} from '@/lib/config/line_env'
 import { debug } from '@/lib/debug'
 import { line_login_state_cookie_name } from '../route'
-
-type line_token_response = {
-  access_token?: string
-}
-
-type line_profile_response = {
-  userId?: string
-  displayName?: string
-  pictureUrl?: string
-}
 
 function get_app_origin_from_callback_env() {
   const callback_url = process.env.LINE_LOGIN_CALLBACK_URL
@@ -58,68 +48,6 @@ async function debug_line_login_failed(
   })
 }
 
-async function exchange_line_login_token(code: string) {
-  const client_id = line_login_channel_id()
-  const client_secret = line_login_channel_secret()
-  const redirect_uri = process.env.LINE_LOGIN_CALLBACK_URL?.trim()
-
-  if (!client_id || !client_secret || !redirect_uri) {
-    await debug_line_login_failed('missing_line_login_env', {
-      has_channel_id: Boolean(client_id),
-      has_channel_secret: Boolean(client_secret),
-      has_callback_url: Boolean(redirect_uri),
-    })
-
-    return null
-  }
-
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri,
-    client_id,
-    client_secret,
-  })
-
-  const response = await fetch('https://api.line.me/oauth2/v2.1/token', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-    },
-    body,
-  })
-
-  if (!response.ok) {
-    await debug_line_login_failed('line_token_request_failed', {
-      status: response.status,
-    })
-
-    return null
-  }
-
-  const token = (await response.json()) as line_token_response
-
-  return token.access_token ?? null
-}
-
-async function get_line_profile(access_token: string) {
-  const response = await fetch('https://api.line.me/v2/profile', {
-    headers: {
-      authorization: `Bearer ${access_token}`,
-    },
-  })
-
-  if (!response.ok) {
-    await debug_line_login_failed('line_profile_request_failed', {
-      status: response.status,
-    })
-
-    return null
-  }
-
-  return (await response.json()) as line_profile_response
-}
-
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
@@ -152,13 +80,15 @@ export async function GET(request: Request) {
   }
 
   try {
-    const access_token = await exchange_line_login_token(code)
+    const access_token = await exchange_line_code_for_token(code)
 
     if (!access_token) {
+      await debug_line_login_failed('line_token_exchange_failed')
+
       return redirect_home()
     }
 
-    const profile = await get_line_profile(access_token)
+    const profile = await fetch_line_oauth_profile(access_token)
     const line_user_id = profile?.userId
 
     if (!line_user_id) {

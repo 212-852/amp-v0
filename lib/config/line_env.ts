@@ -1,5 +1,8 @@
 /**
- * LINE Login / LIFF (LIFF id is public via NEXT_PUBLIC_*).
+ * LINE Login / LIFF (LIFF id is public via NEXT_PUBLIC_LIFF_ID).
+ *
+ * - Normal LINE Login OAuth: `lib/auth/line_oauth.ts` + LINE_LOGIN_* env (authorize / token exchange).
+ * - LIFF: `lib/auth/liff_login.ts` + POST `/api/auth/liff` only (no LINE_LOGIN_CALLBACK_URL, no access.line.me).
  *
  * Messaging API (webhook, outbound reply):
  * - LINE_MESSAGING_CHANNEL_SECRET (signature verification only)

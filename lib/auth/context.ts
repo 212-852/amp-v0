@@ -34,8 +34,7 @@ export function is_liff_oauth_return(search_params: URLSearchParams): boolean {
   return (
     search_params.has('code') ||
     search_params.has('liff.state') ||
-    search_params.has('liffClientId') ||
-    search_params.has('state')
+    search_params.has('liffClientId')
   )
 }
 

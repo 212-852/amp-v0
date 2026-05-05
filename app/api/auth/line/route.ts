@@ -3,14 +3,13 @@ import { randomUUID } from 'crypto'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
+import { build_line_auth_url } from '@/lib/auth/line_oauth'
 import { line_login_channel_id } from '@/lib/config/line_env'
 
 export const line_login_state_cookie_name = 'line_login_state'
 
 /**
- * Starts normal LINE Login (OAuth). LIFF app entry uses `LiffBootstrap` + `/api/auth/liff`, not this route.
- * Register callback URL in LINE Developers as `LINE_LOGIN_CALLBACK_URL` (e.g. `/api/auth/line/callback`).
- * Register LIFF endpoint separately as the app root `https://app.da-nya.com/` (not this callback).
+ * Normal LINE Login (OAuth) start only. LIFF uses `LiffBootstrap` + `POST /api/auth/liff` (see `lib/auth/liff_login.ts`).
  */
 export async function GET() {
   const client_id = line_login_channel_id()
@@ -34,13 +33,11 @@ export async function GET() {
     maxAge: 60 * 10,
   })
 
-  const authorize = new URL('https://access.line.me/oauth2/v2.1/authorize')
-
-  authorize.searchParams.set('response_type', 'code')
-  authorize.searchParams.set('client_id', client_id)
-  authorize.searchParams.set('redirect_uri', callback_url)
-  authorize.searchParams.set('state', state)
-  authorize.searchParams.set('scope', 'openid profile')
+  const authorize = build_line_auth_url({
+    client_id,
+    redirect_uri: callback_url,
+    state,
+  })
 
   return NextResponse.redirect(authorize)
 }
