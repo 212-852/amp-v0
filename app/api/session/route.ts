@@ -2,19 +2,14 @@ import { cookies, headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import {
-  emit_session_cookie_write_event,
   ensure_session,
   get_browser_session_cookie_options,
-  session_cookie_max_age,
-  session_cookie_name,
   visitor_cookie_max_age,
   visitor_cookie_name,
   type browser_session_result,
 } from '@/lib/auth/session'
 import { resolve_initial_chat } from '@/lib/chat/action'
-import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
-import { debug } from '@/lib/debug'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
 type normalized_role = 'user' | 'driver' | 'admin' | 'guest'
@@ -152,7 +147,6 @@ function format_session_error(error: unknown) {
 
 function create_session_payload(input: {
   visitor_uuid: string | null
-  session_uuid: string | null
   is_new_visitor: boolean
   is_new_session: boolean
   locale: locale_key
@@ -169,7 +163,6 @@ function create_session_payload(input: {
   const session = input.visitor_uuid
     ? {
         visitor_uuid: input.visitor_uuid,
-        session_uuid: input.session_uuid,
         locale: input.locale,
         role: input.role,
         tier: input.tier,
@@ -184,7 +177,6 @@ function create_session_payload(input: {
     ok: true,
     session,
     visitor_uuid: input.visitor_uuid,
-    session_uuid: input.session_uuid,
     is_new_visitor: input.is_new_visitor,
     is_new_session: input.is_new_session,
     locale: input.locale,
@@ -309,7 +301,6 @@ async function resolve_session_payload() {
     : 'web'
   const visitor = await ensure_session({
     visitor_uuid: cookie_store.get(visitor_cookie_name)?.value ?? null,
-    session_uuid: cookie_store.get(session_cookie_name)?.value ?? null,
     caller: 'api_session',
     source_channel: session_src,
     locale,
@@ -337,41 +328,9 @@ async function resolve_session_payload() {
   const requires_line_auth = is_line_webview && !line_connected
   const line_auth_method = requires_line_auth ? 'line_login' : null
 
-  if (control.debug.session_route) {
-    await debug({
-      category: 'session',
-      event: visitor.is_new_visitor
-        ? 'visitor_created'
-        : 'visitor_restored',
-      data: {
-        visitor_uuid: visitor.visitor_uuid,
-        session_uuid: visitor.session_uuid,
-        is_new_visitor: visitor.is_new_visitor,
-        is_new_session: visitor.is_new_session,
-        locale: resolved_locale,
-        accept_language,
-        user_agent,
-        role,
-        tier,
-        display_name,
-        line_connected,
-        connected_providers,
-        chat_room_uuid: chat?.room_uuid ?? null,
-        chat_seeded: chat?.is_seeded ?? false,
-        chat_message_count: chat?.message_count ?? 0,
-        initial_carousel_card_count:
-          chat?.initial_carousel_card_count ?? 0,
-        is_line_webview,
-        requires_line_auth,
-        line_auth_method,
-      },
-    })
-  }
-
   return {
     payload: create_session_payload({
       visitor_uuid: visitor.visitor_uuid,
-      session_uuid: visitor.session_uuid,
       is_new_visitor: visitor.is_new_visitor,
       is_new_session: visitor.is_new_session,
       locale: resolved_locale,
@@ -386,50 +345,18 @@ async function resolve_session_payload() {
       line_auth_method,
     }),
     visitor,
-    source_channel: session_src,
   }
 }
 
 async function set_session_response_cookies(input: {
   response: NextResponse
   visitor: browser_session_result
-  source_channel: 'web' | 'liff'
 }) {
-  await emit_session_cookie_write_event('session_cookie_set_started', {
-    caller: 'api_session',
-    cookie_key: visitor_cookie_name,
-    visitor_uuid: input.visitor.visitor_uuid,
-    source_channel: input.source_channel,
-  })
   input.response.cookies.set(
     visitor_cookie_name,
     input.visitor.visitor_uuid,
     get_browser_session_cookie_options(visitor_cookie_max_age),
   )
-  await emit_session_cookie_write_event('session_cookie_set_succeeded', {
-    caller: 'api_session',
-    cookie_key: visitor_cookie_name,
-    visitor_uuid: input.visitor.visitor_uuid,
-    source_channel: input.source_channel,
-  })
-
-  await emit_session_cookie_write_event('session_cookie_set_started', {
-    caller: 'api_session',
-    cookie_key: session_cookie_name,
-    visitor_uuid: input.visitor.visitor_uuid,
-    source_channel: input.source_channel,
-  })
-  input.response.cookies.set(
-    session_cookie_name,
-    input.visitor.session_uuid,
-    get_browser_session_cookie_options(session_cookie_max_age),
-  )
-  await emit_session_cookie_write_event('session_cookie_set_succeeded', {
-    caller: 'api_session',
-    cookie_key: session_cookie_name,
-    visitor_uuid: input.visitor.visitor_uuid,
-    source_channel: input.source_channel,
-  })
 }
 
 export async function GET() {
@@ -440,7 +367,6 @@ export async function GET() {
     await set_session_response_cookies({
       response,
       visitor: session.visitor,
-      source_channel: session.source_channel,
     })
 
     return response
@@ -453,7 +379,6 @@ export async function GET() {
     return NextResponse.json(
       create_session_payload({
         visitor_uuid: null,
-        session_uuid: null,
         is_new_visitor: false,
         is_new_session: false,
         locale: 'ja',

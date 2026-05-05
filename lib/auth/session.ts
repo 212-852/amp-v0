@@ -1,15 +1,11 @@
 import { cache } from 'react'
 
 import { control } from '@/lib/config/control'
-import {
-  session_cookie_name,
-  visitor_cookie_name,
-} from '@/lib/visitor/cookie'
+import { visitor_cookie_name } from '@/lib/visitor/cookie'
 
-export { session_cookie_name, visitor_cookie_name }
+export { visitor_cookie_name }
 
 export const visitor_cookie_max_age = 60 * 60 * 24 * 365
-export const session_cookie_max_age = 60 * 60 * 24
 
 function new_uuid(): string {
   return globalThis.crypto.randomUUID()
@@ -19,13 +15,6 @@ function new_uuid(): string {
  * Only the auth/session layer may mint browser visitor_uuid (server: visitor/context).
  */
 export function mint_visitor_uuid(): string {
-  return new_uuid()
-}
-
-/**
- * Only the auth/session layer may mint browser session_uuid (server: visitor/context).
- */
-export function mint_session_uuid(): string {
   return new_uuid()
 }
 
@@ -41,7 +30,6 @@ export function get_browser_session_cookie_options(maxAge: number) {
 
 export type existing_browser_session_cookies = {
   visitor_uuid: string | null
-  session_uuid: string | null
 }
 
 export type browser_session_caller =
@@ -64,7 +52,6 @@ export type browser_access_platform =
 
 export type browser_session_input = {
   visitor_uuid: string | null
-  session_uuid: string | null
   caller?: browser_session_caller
   source_channel?: browser_session_source_channel
   locale?: string | null
@@ -74,7 +61,6 @@ export type browser_session_input = {
 
 export type browser_session_result = {
   visitor_uuid: string
-  session_uuid: string
   is_new_visitor: boolean
   is_new_session: boolean
   cookie_exists: boolean
@@ -83,7 +69,6 @@ export type browser_session_result = {
 
 export type read_session_result = {
   visitor_uuid: string | null
-  session_uuid: string | null
   is_new_visitor: false
   is_new_session: false
   cookie_exists: boolean
@@ -170,6 +155,15 @@ async function emit_session_core_event(
     return
   }
 
+  if (
+    event !== 'session_cookie_found' &&
+    event !== 'session_cookie_missing' &&
+    event !== 'session_visitor_created' &&
+    event !== 'session_resolve_finished'
+  ) {
+    return
+  }
+
   const { debug_event } = await import('@/lib/debug')
 
   const payload: session_core_debug_payload = {
@@ -215,7 +209,7 @@ async function emit_identity_promotion_debug(
   const { debug_event } = await import('@/lib/debug')
 
   await debug_event({
-    category: 'session',
+    category: 'identity',
     event,
     payload: {
       old_visitor_uuid: payload.old_visitor_uuid,
@@ -256,7 +250,6 @@ async function emit_visitor_conflict_debug(input: {
     | 'session_visitor_reused_after_conflict'
   caller?: browser_session_caller
   visitor_uuid: string | null
-  session_uuid: string | null
   user_uuid: string | null
   source_channel?: browser_session_source_channel
   error_code?: string | null
@@ -406,7 +399,6 @@ async function create_user_visitor(input: {
   await emit_visitor_conflict_debug({
     event: 'session_visitor_create_conflict',
     visitor_uuid: reused_visitor_uuid,
-    session_uuid: null,
     user_uuid: input.user_uuid,
     error_code: '23505',
     error_message: 'visitor insert unique violation',
@@ -415,7 +407,6 @@ async function create_user_visitor(input: {
   await emit_visitor_conflict_debug({
     event: 'session_visitor_reused_after_conflict',
     visitor_uuid: reused_visitor_uuid,
-    session_uuid: null,
     user_uuid: input.user_uuid,
   })
 
@@ -605,7 +596,6 @@ async function ensure_browser_visitor(input: {
     event: 'session_visitor_create_conflict',
     caller: input.caller,
     visitor_uuid: input.visitor_uuid,
-    session_uuid: null,
     user_uuid: null,
     source_channel: input.source_channel,
     error_code: '23505',
@@ -621,7 +611,6 @@ async function ensure_browser_visitor(input: {
     event: 'session_visitor_reused_after_conflict',
     caller: input.caller,
     visitor_uuid: reused_visitor_uuid,
-    session_uuid: null,
     user_uuid: null,
     source_channel: input.source_channel,
     error_code: null,
@@ -732,11 +721,9 @@ async function ensure_browser_session(input: {
  */
 export function read_browser_session_cookie_values(
   visitor_cookie: string | null | undefined,
-  session_cookie: string | null | undefined,
 ): existing_browser_session_cookies {
   return {
     visitor_uuid: visitor_cookie ?? null,
-    session_uuid: session_cookie ?? null,
   }
 }
 
@@ -747,9 +734,9 @@ async function ensure_session_rows(
   input: browser_session_input,
 ): Promise<browser_session_result> {
   const visitor_uuid = input.visitor_uuid ?? mint_visitor_uuid()
-  const session_uuid = input.session_uuid ?? mint_session_uuid()
+  const session_uuid = visitor_uuid
   const cookie_exists = Boolean(input.visitor_uuid)
-  const session_exists = Boolean(input.session_uuid)
+  const session_exists = cookie_exists
   const source_channel = input.source_channel ?? 'web'
   const supabase = await get_supabase()
   const is_new_visitor = await ensure_browser_visitor({
@@ -770,7 +757,6 @@ async function ensure_session_rows(
 
   return {
     visitor_uuid,
-    session_uuid,
     is_new_visitor,
     is_new_session,
     cookie_exists,
@@ -790,10 +776,8 @@ export const read_session = cache(async (): Promise<read_session_result> => {
 
   const current_visitor_uuid =
     cookie_store.get(visitor_cookie_name)?.value ?? null
-  const current_session_uuid =
-    cookie_store.get(session_cookie_name)?.value ?? null
   const cookie_exists = Boolean(current_visitor_uuid)
-  const session_exists = Boolean(current_session_uuid)
+  const session_exists = cookie_exists
 
   await emit_session_core_event(
     cookie_exists ? 'session_cookie_found' : 'session_cookie_missing',
@@ -813,7 +797,6 @@ export const read_session = cache(async (): Promise<read_session_result> => {
 
   return {
     visitor_uuid: current_visitor_uuid,
-    session_uuid: current_session_uuid,
     is_new_visitor: false,
     is_new_session: false,
     cookie_exists,
@@ -850,32 +833,6 @@ export async function ensure_session(input: browser_session_input) {
   })
 
   return session
-}
-
-export async function emit_session_cookie_write_event(
-  event: 'session_cookie_set_started' | 'session_cookie_set_succeeded',
-  input: {
-    caller: browser_session_caller
-    cookie_key: string
-    visitor_uuid: string
-    user_uuid?: string | null
-    source_channel: browser_session_source_channel
-  },
-) {
-  await emit_session_core_event(event, {
-    caller: input.caller,
-    cookie_key: input.cookie_key,
-    cookie_exists: true,
-    cookie_visitor_uuid:
-      input.cookie_key === visitor_cookie_name ? input.visitor_uuid : null,
-    resolved_visitor_uuid: input.visitor_uuid,
-    user_uuid: input.user_uuid ?? null,
-    source_channel: input.source_channel,
-    created: false,
-    reused: true,
-    error_code: null,
-    error_message: null,
-  })
 }
 
 /**
@@ -952,7 +909,6 @@ export async function track_session_resolution(
 
 export async function promote_browser_visitor_to_user(input: {
   old_visitor_uuid: string | null
-  session_uuid?: string | null
   user_uuid: string
 }): Promise<identity_promotion_result> {
   const supabase = await get_supabase()
@@ -1042,7 +998,7 @@ export async function promote_browser_visitor_to_user(input: {
     participant_uuid: guest_participant?.participant_uuid ?? null,
   })
 
-  let session_update = supabase
+  const session_update = supabase
     .from('sessions')
     .update({
       visitor_uuid: old_visitor_uuid,
@@ -1050,12 +1006,7 @@ export async function promote_browser_visitor_to_user(input: {
       updated_at: new Date().toISOString(),
       last_seen_at: new Date().toISOString(),
     })
-
-  if (input.session_uuid) {
-    session_update = session_update.eq('session_uuid', input.session_uuid)
-  } else {
-    session_update = session_update.eq('visitor_uuid', old_visitor_uuid)
-  }
+    .eq('visitor_uuid', old_visitor_uuid)
 
   const session_result = await session_update
 

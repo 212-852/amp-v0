@@ -250,7 +250,6 @@ async function find_user_participant_by_user(user_uuid: string) {
     .from('participants')
     .select(PARTICIPANT_DB_SELECT)
     .eq('role', 'user')
-    .eq('status', 'active')
     .eq('user_uuid', user_uuid)
     .order('updated_at', { ascending: false })
     .limit(1)
@@ -268,7 +267,6 @@ async function find_user_participant_by_visitor(visitor_uuid: string) {
     .from('participants')
     .select(PARTICIPANT_DB_SELECT)
     .eq('role', 'user')
-    .eq('status', 'active')
     .eq('visitor_uuid', visitor_uuid)
     .order('updated_at', { ascending: false })
     .limit(1)
@@ -295,6 +293,16 @@ async function find_canonical_user_participant(
   return find_user_participant_by_visitor(input.visitor_uuid)
 }
 
+async function find_source_participant(
+  input: resolve_room_input,
+): Promise<participant_row | null> {
+  if (input.user_uuid) {
+    return find_user_participant_by_user(input.user_uuid)
+  }
+
+  return find_user_participant_by_visitor(input.visitor_uuid)
+}
+
 async function load_room(room_uuid: string) {
   const result = await supabase
     .from('rooms')
@@ -310,7 +318,14 @@ async function load_room(room_uuid: string) {
 }
 
 async function delete_orphan_direct_room(room_uuid: string) {
-  await supabase.from('rooms').delete().eq('room_uuid', room_uuid)
+  const result = await supabase
+    .from('rooms')
+    .delete()
+    .eq('room_uuid', room_uuid)
+
+  if (result.error) {
+    throw result.error
+  }
 }
 
 type direct_room_insert_result = {
@@ -835,18 +850,7 @@ async function try_insert_participant_and_direct_room(
     },
   })
 
-  await debug_event({
-    category: 'chat_room',
-    event: 'orphan_room_cleanup_attempted',
-    payload: {
-      ...identity,
-      room_uuid: room.room_uuid,
-    },
-  })
-
-  await delete_orphan_direct_room(room.room_uuid)
-
-  const existing = await find_canonical_user_participant(input)
+  const existing = await find_source_participant(input)
 
   if (!existing) {
     throw participant_result.error
@@ -859,6 +863,26 @@ async function try_insert_participant_and_direct_room(
       ...identity,
       participant_uuid: existing.participant_uuid,
       room_uuid: existing.room_uuid,
+    },
+  })
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'orphan_room_cleanup_attempted',
+    payload: {
+      ...identity,
+      room_uuid: room.room_uuid,
+    },
+  })
+
+  await delete_orphan_direct_room(room.room_uuid)
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'orphan_room_cleanup_succeeded',
+    payload: {
+      ...identity,
+      room_uuid: room.room_uuid,
     },
   })
 
@@ -1083,6 +1107,16 @@ async function finish_with_bot(
 
   try {
     bot_participant = await resolve_bot_participant(room.room_uuid)
+
+    await debug_event({
+      category: 'chat_room',
+      event: 'bot_participant_ensured',
+      payload: {
+        ...identity,
+        room_uuid: room.room_uuid,
+        bot_participant_uuid: bot_participant.participant_uuid,
+      },
+    })
   } catch (error) {
     const err_fields = supabase_error_fields(error)
     await debug_chat_room('room_failed', {
@@ -1241,7 +1275,7 @@ export async function resolve_chat_room(
     const merged_participant = await merge_identity_rooms(input)
     const canonical_participant =
       merged_participant ??
-      (await find_canonical_user_participant(input))
+      (await find_source_participant(input))
 
     if (canonical_participant) {
       if (control.debug.chat_room) {

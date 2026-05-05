@@ -12,6 +12,7 @@ type deliver_line_chat_bundles_input = {
   room: chat_room
   messages: archived_message[]
   line_reply_token?: string | null
+  line_user_id?: string | null
 }
 
 type line_api_message = Record<string, unknown>
@@ -211,12 +212,18 @@ export async function deliver_line_chat_bundles(
 
   const bundles = input.messages.map((row) => row.bundle)
   const bundle_count = bundles.length
+  const line_trace_base = {
+    line_user_id: input.line_user_id ?? null,
+    user_uuid: input.room.user_uuid,
+    room_uuid: input.room.room_uuid,
+    participant_uuid: input.room.participant_uuid,
+  }
 
   await debug_event({
     category: 'line_webhook',
     event: 'line_output_started',
     payload: {
-      room_uuid: input.room.room_uuid,
+      ...line_trace_base,
       reply_token_exists: Boolean(reply_token),
       bundle_count,
     },
@@ -226,7 +233,7 @@ export async function deliver_line_chat_bundles(
     category: 'line_webhook',
     event: 'line_flex_render_started',
     payload: {
-      room_uuid: input.room.room_uuid,
+      ...line_trace_base,
       bundle_count,
       line_message_count: 0,
       line_reply_message_count: 0,
@@ -252,7 +259,7 @@ export async function deliver_line_chat_bundles(
       category: 'line_webhook',
       event: 'line_flex_render_failed',
       payload: {
-        room_uuid: input.room.room_uuid,
+        ...line_trace_base,
         bundle_count,
         error_message:
           flex_error instanceof Error
@@ -273,7 +280,7 @@ export async function deliver_line_chat_bundles(
       category: 'line_webhook',
       event: 'line_flex_render_succeeded',
       payload: {
-        room_uuid: input.room.room_uuid,
+        ...line_trace_base,
         bundle_count,
         line_message_count,
         line_reply_message_count: line_message_count,
@@ -287,7 +294,7 @@ export async function deliver_line_chat_bundles(
     category: 'line_webhook',
     event: 'line_reply_attempted',
     payload: {
-      room_uuid: input.room.room_uuid,
+      ...line_trace_base,
       bundle_count,
       line_message_count,
       line_reply_message_count: line_message_count,
@@ -306,7 +313,7 @@ export async function deliver_line_chat_bundles(
       category: 'line_webhook',
       event: 'line_reply_succeeded',
       payload: {
-        room_uuid: input.room.room_uuid,
+        ...line_trace_base,
         bundle_count,
         line_message_count,
         line_reply_message_count: line_message_count,
@@ -321,7 +328,7 @@ export async function deliver_line_chat_bundles(
       category: 'line_webhook',
       event: 'line_reply_failed',
       payload: {
-        room_uuid: input.room.room_uuid,
+        ...line_trace_base,
         error_message:
           reply_error instanceof Error
             ? reply_error.message

@@ -3,8 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { build_line_login_oauth_state } from '@/lib/auth/line/state'
 import { visitor_cookie_name } from '@/lib/auth/session'
-import { control } from '@/lib/config/control'
-import { debug } from '@/lib/debug'
+import { debug_event } from '@/lib/debug'
 
 export const line_login_state_cookie_name = 'line_login_state'
 
@@ -13,16 +12,14 @@ export async function GET() {
   const callback_url = process.env.LINE_LOGIN_CALLBACK_URL
 
   if (!callback_url || !channel_id) {
-    if (control.debug.line_auth) {
-      await debug({
-        category: 'line',
-        event: 'line_login_redirect_failed',
-        data: {
-          has_callback_url: Boolean(callback_url),
-          has_channel_id: Boolean(channel_id),
-        },
-      })
-    }
+    await debug_event({
+      category: 'line',
+      event: 'line_login_redirect_failed',
+      payload: {
+        has_callback_url: Boolean(callback_url),
+        has_channel_id: Boolean(channel_id),
+      },
+    })
 
     return NextResponse.json(
       { error: 'LINE login is not configured' },

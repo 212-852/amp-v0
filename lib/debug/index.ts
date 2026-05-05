@@ -11,11 +11,17 @@ type debug_payload = {
 }
 
 function allow_discord_debug_category(category: string) {
-  if (!control.debug.discord_debug_session_only) {
+  if (!control.debug.use_discord_category_allowlist) {
     return true
   }
 
-  return category === 'session'
+  const list = control.debug.discord_category_allowlist
+
+  if (list.length > 0) {
+    return (list as readonly string[]).includes(category)
+  }
+
+  return true
 }
 
 function get_dev_mentions() {

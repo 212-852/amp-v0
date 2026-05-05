@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
+import { debug_event } from '@/lib/debug'
 import type { chat_channel } from './room'
 import type { bundle_sender, message_bundle } from './message'
 
@@ -102,6 +103,14 @@ function resolve_participant_uuid(
   return input.participant_uuid
 }
 
+function archive_direction_for_sender(sender: bundle_sender): 'incoming' | 'outgoing' {
+  if (sender === 'user') {
+    return 'incoming'
+  }
+
+  return 'outgoing'
+}
+
 export async function archive_message_bundles(
   input: {
     room_uuid: string
@@ -141,8 +150,29 @@ export async function archive_message_bundles(
     throw result.error
   }
 
-  return ((result.data ?? []) as archive_row[])
-    .map((row, index) =>
-      normalize_archive(row, existing_messages.length + index),
-    )
+  const inserted = (result.data ?? []) as archive_row[]
+
+  for (let i = 0; i < inserted.length; i++) {
+    const row = inserted[i]
+    const bundle = input.bundles[i]
+    const direction = archive_direction_for_sender(bundle.sender)
+
+    await debug_event({
+      category: 'chat_room',
+      event:
+        direction === 'incoming'
+          ? 'incoming_message_archived'
+          : 'outgoing_message_archived',
+      payload: {
+        room_uuid: input.room_uuid,
+        message_uuid: row.message_uuid,
+        direction,
+        channel: input.channel,
+      },
+    })
+  }
+
+  return inserted.map((row, index) =>
+    normalize_archive(row, existing_messages.length + index),
+  )
 }

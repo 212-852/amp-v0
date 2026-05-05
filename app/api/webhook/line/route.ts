@@ -3,8 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
-import { control } from '@/lib/config/control'
-import { debug, debug_event } from '@/lib/debug'
+import { debug_event } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
 
 type line_webhook_event = {
@@ -37,16 +36,17 @@ type line_webhook_body = {
 
 const processed_line_event_keys = new Set<string>()
 
-function fire_line_auth_debug(
-  payload: Parameters<typeof debug>[0],
-) {
-  if (!control.debug.line_auth) {
-    return
-  }
-
+function fire_line_trace_debug(input: {
+  event: string
+  payload: Record<string, unknown>
+}) {
   void (async () => {
     try {
-      await debug(payload)
+      await debug_event({
+        category: 'line',
+        event: input.event,
+        payload: input.payload,
+      })
     } catch {
       // never block webhook response
     }
@@ -138,10 +138,9 @@ export async function POST(request: Request) {
   const signature = request.headers.get('x-line-signature')
 
   if (!verify_line_signature(body_text, signature)) {
-    fire_line_auth_debug({
-      category: 'line',
+    fire_line_trace_debug({
       event: 'line_webhook_signature_invalid',
-      data: {
+      payload: {
         has_signature: Boolean(signature),
       },
     })
@@ -190,10 +189,9 @@ export async function POST(request: Request) {
 
     try {
       if (!is_allowed_line_user(line_user_id)) {
-        fire_line_auth_debug({
-          category: 'line',
+        fire_line_trace_debug({
           event: 'line_webhook_test_blocked',
-          data: {
+          payload: {
             line_user_id,
             event_type: event.type,
             source_type: event.source?.type,
@@ -206,10 +204,9 @@ export async function POST(request: Request) {
       }
 
       if (!line_user_id) {
-        fire_line_auth_debug({
-          category: 'line',
+        fire_line_trace_debug({
           event: 'line_webhook_missing_user_id',
-          data: {
+          payload: {
             event_type: event.type,
             source_type: event.source?.type,
             destination: body.destination,
@@ -225,7 +222,7 @@ export async function POST(request: Request) {
           event: 'message_received',
           payload: {
             line_user_id,
-            message_type: event.message?.type,
+            message_type: event.message?.type ?? 'unknown',
             text:
               event.message?.type === 'text'
                 ? event.message.text
@@ -239,7 +236,6 @@ export async function POST(request: Request) {
         line_user_id,
         webhook_source_locale:
           event.source?.locale ?? event.source?.language ?? null,
-        debug: false,
       })
       const access = await resolve_auth_access({
         provider: 'line',
@@ -265,6 +261,7 @@ export async function POST(request: Request) {
           line_user_id,
         line_reply_token:
           event.type === 'message' ? (event.replyToken ?? null) : null,
+        line_user_id,
       })
       const initial_carousel_card_count = initial_chat.messages.reduce(
         (count, message) => {
@@ -281,8 +278,12 @@ export async function POST(request: Request) {
         category: 'line_webhook',
         event: 'room_resolved',
         payload: {
+          line_user_id,
+          user_uuid: access.user_uuid,
+          visitor_uuid: access.visitor_uuid,
           room_uuid: initial_chat.room.room_uuid,
           participant_uuid: initial_chat.room.participant_uuid,
+          bot_participant_uuid: initial_chat.room.bot_participant_uuid,
           was_created: initial_chat.is_new_room,
         },
       })
@@ -315,10 +316,9 @@ export async function POST(request: Request) {
 
       append_line_webhook_meta(passed_data, event)
 
-      fire_line_auth_debug({
-        category: 'line',
+      fire_line_trace_debug({
         event: 'line_webhook_passed',
-        data: passed_data,
+        payload: passed_data,
       })
     } catch {
       // resolve_auth_access or downstream must not fail the webhook

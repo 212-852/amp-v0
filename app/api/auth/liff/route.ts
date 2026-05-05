@@ -4,7 +4,6 @@ import { cookies } from 'next/headers'
 import { resolve_auth_access } from '@/lib/auth/access'
 import {
   promote_browser_visitor_to_user,
-  session_cookie_name,
   visitor_cookie_name,
 } from '@/lib/auth/session'
 import { control } from '@/lib/config/control'
@@ -59,8 +58,6 @@ export async function POST(request: Request) {
   const cookie_store = await cookies()
   const current_visitor_uuid =
     cookie_store.get(visitor_cookie_name)?.value ?? null
-  const current_session_uuid =
-    cookie_store.get(session_cookie_name)?.value ?? null
 
   if (!line_user_id) {
     await debug_liff_failed('missing_line_user_id')
@@ -103,7 +100,6 @@ export async function POST(request: Request) {
     })
     const promoted = await promote_browser_visitor_to_user({
       old_visitor_uuid: current_visitor_uuid,
-      session_uuid: current_session_uuid,
       user_uuid: access.user_uuid,
     })
     const resolved_visitor_uuid =

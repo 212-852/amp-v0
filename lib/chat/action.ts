@@ -24,6 +24,7 @@ type resolve_initial_chat_input = {
   locale: chat_locale
   external_room_id?: string | null
   line_reply_token?: string | null
+  line_user_id?: string | null
 }
 
 export type initial_chat_result = {
@@ -108,6 +109,7 @@ export async function resolve_initial_chat(
       channel: input.channel,
       messages: seeded_messages,
       line_reply_token: input.line_reply_token ?? null,
+      line_user_id: input.line_user_id ?? null,
     })
 
     return {

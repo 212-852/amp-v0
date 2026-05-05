@@ -7,16 +7,12 @@ import {
   track_session_resolution,
 } from '@/lib/auth/session'
 
-export {
-  session_cookie_name,
-  visitor_cookie_name,
-} from '@/lib/visitor/cookie'
+export { visitor_cookie_name } from '@/lib/visitor/cookie'
 
 export type session_source_channel = browser_session_source_channel
 
 export type visitor_context = {
   visitor_uuid: string | null
-  session_uuid: string | null
   is_new_visitor: boolean
   is_new_session: boolean
   cookie_exists: boolean

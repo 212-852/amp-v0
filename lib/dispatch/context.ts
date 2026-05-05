@@ -17,6 +17,18 @@ type locale_source =
   | 'webhook_source'
   | 'fallback'
 
+function locale_source_for_debug(source: locale_source): string {
+  if (source === 'browser_selected') {
+    return 'browser'
+  }
+
+  if (source === 'webhook_source') {
+    return 'webhook'
+  }
+
+  return source
+}
+
 type line_profile_locale = {
   language?: string | null
 }
@@ -113,10 +125,9 @@ export async function resolve_dispatch_locale(input: {
       category: 'locale',
       event: 'locale_resolved',
       payload: {
-        source_channel: input.source_channel,
         raw_locale: resolved.raw_locale ?? null,
         normalized_locale: locale,
-        source: resolved.source,
+        source: locale_source_for_debug(resolved.source),
       },
     })
   }

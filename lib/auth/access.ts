@@ -3,6 +3,7 @@ import 'server-only'
 import { resolve_user_visitor } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
+import { debug_event } from '@/lib/debug'
 import { notify } from '@/lib/notify'
 
 export type auth_provider = 'line' | 'google' | 'email'
@@ -28,6 +29,17 @@ export async function resolve_auth_access(
   input: access_input,
 ): Promise<access_result> {
   const input_locale = normalize_locale(input.locale)
+
+  if (input.provider === 'line') {
+    await debug_event({
+      category: 'identity',
+      event: 'line_identity_lookup_started',
+      payload: {
+        line_user_id: input.provider_id,
+      },
+    })
+  }
+
   const existing_identity = await supabase
     .from('identities')
     .select('user_uuid')
@@ -73,6 +85,18 @@ export async function resolve_auth_access(
       user_uuid,
       visitor_uuid: input.visitor_uuid,
     })
+
+    if (input.provider === 'line') {
+      await debug_event({
+        category: 'identity',
+        event: 'line_identity_found',
+        payload: {
+          line_user_id: input.provider_id,
+          user_uuid,
+          visitor_uuid: visitor.visitor_uuid,
+        },
+      })
+    }
 
     return {
       user_uuid,
@@ -128,6 +152,18 @@ export async function resolve_auth_access(
     is_new_user: true,
     is_new_visitor: visitor.is_new_visitor,
   })
+
+  if (input.provider === 'line') {
+    await debug_event({
+      category: 'identity',
+      event: 'line_identity_created',
+      payload: {
+        line_user_id: input.provider_id,
+        user_uuid,
+        visitor_uuid: visitor.visitor_uuid,
+      },
+    })
+  }
 
   return {
     user_uuid,
