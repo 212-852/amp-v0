@@ -1,14 +1,21 @@
 import { cookies, headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
+import { is_line_in_app_browser } from '@/lib/auth/context'
 import {
   ensure_session,
   get_browser_session_cookie_options,
+  infer_source_channel_from_ua,
   visitor_cookie_max_age,
   visitor_cookie_name,
   type browser_session_result,
+  type browser_session_source_channel,
 } from '@/lib/auth/session'
+import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
+import { control } from '@/lib/config/control'
 import { resolve_initial_chat } from '@/lib/chat/action'
+import type { chat_channel } from '@/lib/chat/room'
+import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
@@ -22,7 +29,28 @@ type session_chat_state = {
   initial_carousel_card_count: number
 } | null
 
-type session_source_channel = 'web' | 'liff'
+function resolve_session_source_channel(
+  browser_channel_cookie: string | null,
+  user_agent: string | null,
+): browser_session_source_channel {
+  const raw = browser_channel_cookie?.trim().toLowerCase()
+
+  if (raw === 'liff' || raw === 'pwa') {
+    return raw
+  }
+
+  return infer_source_channel_from_ua(user_agent)
+}
+
+function session_source_to_chat_channel(
+  src: browser_session_source_channel,
+): chat_channel {
+  if (src === 'web') {
+    return 'web'
+  }
+
+  return src
+}
 
 function get_browser_locale(accept_language: string | null) {
   return normalize_locale(accept_language?.split(',')[0])
@@ -71,6 +99,7 @@ function normalize_client_session_shape(
     user_uuid: string | null
     locale: locale_key | null
     display_name: string | null
+    image_url: string | null
     line_connected: boolean
     connected_providers: connected_provider[]
   },
@@ -167,12 +196,14 @@ function create_session_payload(input: {
   role: normalized_role
   tier: normalized_tier
   display_name: string | null
+  image_url: string | null
   line_connected: boolean
   connected_providers: connected_provider[]
   chat: session_chat_state
   is_line_webview: boolean
   requires_line_auth: boolean
   line_auth_method: string | null
+  source_channel: browser_session_source_channel
 }) {
   const session = input.visitor_uuid
     ? {
@@ -181,9 +212,11 @@ function create_session_payload(input: {
         role: input.role,
         tier: input.tier,
         display_name: input.display_name,
+        image_url: input.image_url,
         line_connected: input.line_connected,
         connected_providers: input.connected_providers,
         chat: input.chat,
+        source_channel: input.source_channel,
       }
     : null
 
@@ -197,19 +230,21 @@ function create_session_payload(input: {
     role: input.role,
     tier: input.tier,
     display_name: input.display_name,
+    image_url: input.image_url,
     line_connected: input.line_connected,
     connected_providers: input.connected_providers,
     chat: input.chat,
     is_line_webview: input.is_line_webview,
     requires_line_auth: input.requires_line_auth,
     line_auth_method: input.line_auth_method,
+    source_channel: input.source_channel,
   }
 }
 
 async function resolve_session_chat(input: {
   visitor_uuid: string
   user_uuid: string | null
-  channel: 'web' | 'liff'
+  channel: chat_channel
   locale: locale_key
 }): Promise<session_chat_state> {
   try {
@@ -261,6 +296,7 @@ async function resolve_session_state(visitor_uuid: string) {
       user_uuid: null,
       locale: null as locale_key | null,
       display_name: null as string | null,
+      image_url: null as string | null,
       line_connected: false,
       connected_providers: [] as connected_provider[],
     }
@@ -268,7 +304,7 @@ async function resolve_session_state(visitor_uuid: string) {
 
   const user_result = await supabase
     .from('users')
-    .select('role, tier, locale, display_name')
+    .select('role, tier, locale, display_name, image_url')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -295,6 +331,7 @@ async function resolve_session_state(visitor_uuid: string) {
     user_uuid,
     locale: user_result.data?.locale ?? null,
     display_name: user_result.data?.display_name ?? null,
+    image_url: user_result.data?.image_url ?? null,
     line_connected: connected_providers.includes('line'),
     connected_providers,
   }
@@ -308,12 +345,14 @@ async function resolve_session_payload() {
   const accept_language = header_store.get('accept-language')
   const client_ip = get_client_ip(header_store)
   const locale = get_browser_locale(accept_language)
-  const is_line_webview =
-    user_agent?.toLowerCase().includes('line/') ?? false
+  const is_line_webview = is_line_in_app_browser(user_agent)
+  const browser_channel_cookie =
+    cookie_store.get(browser_channel_cookie_name)?.value ?? null
+  const session_src = resolve_session_source_channel(
+    browser_channel_cookie,
+    user_agent,
+  )
 
-  const session_src: session_source_channel = is_line_webview
-    ? 'liff'
-    : 'web'
   const visitor = await ensure_session({
     visitor_uuid: cookie_store.get(visitor_cookie_name)?.value ?? null,
     caller: 'api_session',
@@ -329,7 +368,7 @@ async function resolve_session_payload() {
   const resolved_locale = normalize_locale(
     normalized_session.locale ?? locale,
   )
-  const chat_channel = is_line_webview ? 'liff' : 'web'
+  const chat_channel = session_source_to_chat_channel(session_src)
   const chat = await resolve_session_chat({
     visitor_uuid: visitor.visitor_uuid,
     user_uuid: session_state.user_uuid,
@@ -341,8 +380,21 @@ async function resolve_session_payload() {
   const line_connected = normalized_session.line_connected
   const connected_providers = normalized_session.connected_providers
   const display_name = normalized_session.display_name
+  const image_url = normalized_session.image_url
   const requires_line_auth = is_line_webview && !line_connected
   const line_auth_method = requires_line_auth ? 'line_login' : null
+
+  if (control.debug.liff_auth && display_name) {
+    await debug_event({
+      category: 'liff',
+      event: 'header_profile_loaded',
+      payload: {
+        display_name,
+        has_image_url: Boolean(image_url),
+        line_connected,
+      },
+    })
+  }
 
   return {
     payload: create_session_payload({
@@ -353,12 +405,14 @@ async function resolve_session_payload() {
       role,
       tier,
       display_name,
+      image_url,
       line_connected,
       connected_providers,
       chat,
       is_line_webview,
       requires_line_auth,
       line_auth_method,
+      source_channel: session_src,
     }),
     visitor,
   }
@@ -401,12 +455,14 @@ export async function GET() {
         role: 'guest',
         tier: 'guest',
         display_name: null,
+        image_url: null,
         line_connected: false,
         connected_providers: [],
         chat: null,
         is_line_webview: false,
         requires_line_auth: false,
         line_auth_method: null,
+        source_channel: 'web',
       }),
     )
   }

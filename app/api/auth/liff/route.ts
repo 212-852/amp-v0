@@ -2,19 +2,25 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import { supabase } from '@/lib/db/supabase'
 import {
+  get_browser_session_cookie_options,
   promote_browser_visitor_to_user,
+  visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
 import { control } from '@/lib/config/control'
-import { debug } from '@/lib/debug'
+import { debug, debug_event } from '@/lib/debug'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
+import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
 type liff_auth_body = {
   line_user_id?: string
   display_name?: string | null
   image_url?: string | null
+  picture_url?: string | null
   locale?: string | null
+  visitor_uuid?: string | null
 }
 
 function get_allowed_user_ids() {
@@ -32,6 +38,21 @@ function is_allowed_line_user(line_user_id: string) {
   }
 
   return get_allowed_user_ids().includes(line_user_id)
+}
+
+async function debug_liff_event(
+  event: string,
+  payload?: Record<string, unknown>,
+) {
+  if (!control.debug.liff_auth) {
+    return
+  }
+
+  await debug_event({
+    category: 'liff',
+    event,
+    payload: payload ?? {},
+  })
 }
 
 async function debug_liff_failed(
@@ -57,7 +78,7 @@ export async function POST(request: Request) {
   const line_user_id = body.line_user_id
   const cookie_store = await cookies()
   const current_visitor_uuid =
-    cookie_store.get(visitor_cookie_name)?.value ?? null
+    cookie_store.get(visitor_cookie_name)?.value ?? body.visitor_uuid ?? null
 
   if (!line_user_id) {
     await debug_liff_failed('missing_line_user_id')
@@ -80,6 +101,14 @@ export async function POST(request: Request) {
   }
 
   try {
+    await debug_liff_event('liff_profile_resolved', {
+      line_user_id,
+      visitor_uuid: current_visitor_uuid,
+      display_name: body.display_name ?? null,
+      has_picture_url: Boolean(body.picture_url || body.image_url),
+      locale: body.locale ?? null,
+    })
+
     const initial_locale = await resolve_dispatch_locale({
       source_channel: 'liff',
       browser_selected_locale: body.locale ?? null,
@@ -90,7 +119,7 @@ export async function POST(request: Request) {
       provider_id: line_user_id,
       visitor_uuid: current_visitor_uuid,
       display_name: body.display_name ?? null,
-      image_url: body.image_url ?? null,
+      image_url: body.picture_url ?? body.image_url ?? null,
       locale: initial_locale.locale,
     })
     const resolved_locale = await resolve_dispatch_locale({
@@ -105,24 +134,26 @@ export async function POST(request: Request) {
     const resolved_visitor_uuid =
       promoted.visitor_uuid || access.visitor_uuid
 
-    if (control.debug.liff_auth) {
-      await debug({
-        category: 'liff',
-        event: 'liff_auth_passed',
-        data: {
-          user_uuid: access.user_uuid,
-          visitor_uuid: resolved_visitor_uuid,
-          auth_visitor_uuid: access.visitor_uuid,
-          is_new_user: access.is_new_user,
-          is_new_visitor: access.is_new_visitor,
-          line_user_id,
-          locale: resolved_locale.locale,
-          locale_source: resolved_locale.source,
-        },
+    await supabase
+      .from('visitors')
+      .update({
+        access_channel: 'liff',
+        updated_at: new Date().toISOString(),
       })
-    }
+      .eq('visitor_uuid', resolved_visitor_uuid)
 
-    return NextResponse.json({
+    await debug_liff_event('liff_auth_completed', {
+      user_uuid: access.user_uuid,
+      visitor_uuid: resolved_visitor_uuid,
+      auth_visitor_uuid: access.visitor_uuid,
+      is_new_user: access.is_new_user,
+      is_new_visitor: access.is_new_visitor,
+      line_user_id,
+      locale: resolved_locale.locale,
+      locale_source: resolved_locale.source,
+    })
+
+    const response = NextResponse.json({
       ok: true,
       user_uuid: access.user_uuid,
       visitor_uuid: resolved_visitor_uuid,
@@ -130,6 +161,13 @@ export async function POST(request: Request) {
       is_new_visitor: access.is_new_visitor,
       locale: resolved_locale.locale,
     })
+
+    const cookie_opts = get_browser_session_cookie_options(visitor_cookie_max_age)
+
+    response.cookies.set(visitor_cookie_name, resolved_visitor_uuid, cookie_opts)
+    response.cookies.set(browser_channel_cookie_name, 'liff', cookie_opts)
+
+    return response
   } catch {
     await debug_liff_failed('resolve_auth_access_failed', {
       line_user_id,

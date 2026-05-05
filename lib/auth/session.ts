@@ -41,7 +41,11 @@ export type browser_session_caller =
   | 'chat_room'
   | 'unknown'
 
-export type browser_session_source_channel = 'web' | 'liff' | 'pwa'
+export type browser_session_source_channel =
+  | 'web'
+  | 'liff'
+  | 'pwa'
+  | 'line'
 
 export type browser_access_platform =
   | 'ios'
@@ -103,16 +107,38 @@ async function get_supabase() {
   return database.supabase
 }
 
-function infer_source_channel_from_ua(
+export function infer_source_channel_from_ua(
   user_agent: string | null | undefined,
 ): browser_session_source_channel {
   const ua = user_agent?.toLowerCase() ?? ''
 
-  if (ua.includes('line/')) {
+  if (ua.includes('line/') || ua.includes('liff')) {
     return 'liff'
   }
 
   return 'web'
+}
+
+function merge_visitor_access_channel(
+  stored_access_channel: string | null | undefined,
+  incoming: browser_session_source_channel,
+): browser_session_source_channel {
+  const rank: Record<string, number> = {
+    web: 1,
+    pwa: 2,
+    line: 3,
+    liff: 4,
+  }
+
+  const stored_key = (stored_access_channel ?? 'web').toLowerCase()
+  const incoming_rank = rank[incoming] ?? 0
+  const stored_rank = rank[stored_key] ?? 0
+
+  if (incoming_rank >= stored_rank) {
+    return incoming
+  }
+
+  return stored_key as browser_session_source_channel
 }
 
 async function resolve_visitor_user_uuid(
@@ -225,7 +251,7 @@ async function find_visitor_row(
 ) {
   return supabase
     .from('visitors')
-    .select('visitor_uuid')
+    .select('visitor_uuid, access_channel')
     .eq('visitor_uuid', visitor_uuid)
     .maybeSingle()
 }
@@ -509,13 +535,6 @@ async function ensure_browser_visitor(input: {
   access_platform?: browser_access_platform
   ip?: string | null
 }) {
-  const access_patch = build_visitor_access_patch({
-    source_channel: input.source_channel,
-    locale: input.locale,
-    user_agent: input.user_agent,
-    access_platform: input.access_platform,
-    ip: input.ip,
-  })
   await emit_session_core_event('session_visitor_lookup_started', {
     caller: input.caller,
     cookie_exists: true,
@@ -539,13 +558,25 @@ async function ensure_browser_visitor(input: {
   }
 
   if (existing_visitor.data?.visitor_uuid) {
+    const merged_source_channel = merge_visitor_access_channel(
+      existing_visitor.data.access_channel,
+      input.source_channel,
+    )
+    const access_patch = build_visitor_access_patch({
+      source_channel: merged_source_channel,
+      locale: input.locale,
+      user_agent: input.user_agent,
+      access_platform: input.access_platform,
+      ip: input.ip,
+    })
+
     await emit_session_core_event('session_visitor_lookup_found', {
       caller: input.caller,
       cookie_exists: true,
       cookie_visitor_uuid: input.visitor_uuid,
       resolved_visitor_uuid: input.visitor_uuid,
       user_uuid: null,
-      source_channel: input.source_channel,
+      source_channel: merged_source_channel,
       created: false,
       reused: true,
       error_code: null,
@@ -563,6 +594,14 @@ async function ensure_browser_visitor(input: {
 
     return false
   }
+
+  const access_patch = build_visitor_access_patch({
+    source_channel: input.source_channel,
+    locale: input.locale,
+    user_agent: input.user_agent,
+    access_platform: input.access_platform,
+    ip: input.ip,
+  })
 
   await emit_session_core_event('session_visitor_lookup_empty', {
     caller: input.caller,

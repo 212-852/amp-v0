@@ -1,6 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+import Image from 'next/image'
 import { Bell, Globe2 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -9,6 +14,7 @@ import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
 import OverlayRoot from '@/components/overlay/root'
 import Breadcrumb from '@/components/shared/breadcrumb'
+import { use_session_profile } from '@/components/session/use_session_profile'
 import { build_breadcrumb } from '@/lib/breadcrumb'
 import {
   type locale_key,
@@ -47,40 +53,25 @@ const content = {
   },
 }
 
-type session_response = {
-  locale?: locale_key
-  role?: 'user' | 'driver' | 'admin' | 'guest'
-  tier?: 'guest' | 'member' | 'vip'
-  display_name?: string | null
-  line_connected?: boolean
-  connected_providers?: Array<'line' | 'google' | 'email'>
-  requires_line_auth?: boolean
-  line_auth_method?: string | null
-}
-
 export default function UserHeader() {
   const pathname = usePathname()
+  const { session } = use_session_profile()
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
-  const [session] = useState<session_response>({
-    locale: 'ja',
-    role: 'guest',
-    tier: 'guest',
-    display_name: null,
-    line_connected: false,
-    connected_providers: [],
-  })
   const [connect_open, set_connect_open] = useState(false)
   const [locale_open, set_locale_open] = useState(false)
   const render_locale = mounted ? locale : 'ja'
-  const is_member = session.tier === 'member'
+
+  const tier = session?.tier ?? 'guest'
+  const is_member = tier === 'member'
   const status_label = is_member
     ? content.member[render_locale]
     : content.guest[render_locale]
+
   const connected_for_modal =
-    (session.connected_providers?.length ?? 0) > 0
-      ? (session.connected_providers ?? [])
-      : session.line_connected
+    (session?.connected_providers?.length ?? 0) > 0
+      ? (session?.connected_providers ?? [])
+      : session?.line_connected
         ? (['line'] as Array<'line' | 'google' | 'email'>)
         : []
   const has_linked_provider =
@@ -109,6 +100,9 @@ export default function UserHeader() {
       unsubscribe_locale()
     }
   }, [])
+
+  const profile_image_url = session?.image_url ?? null
+  const profile_display_name = session?.display_name ?? null
 
   return (
     <>
@@ -160,9 +154,22 @@ export default function UserHeader() {
               </button>
             </div>
 
-            {session.display_name ? (
-              <div className="mt-1 max-w-[180px] truncate text-right text-[11px] font-medium tracking-[0.01em] text-[#8a7568]">
-                {session.display_name}
+            {(profile_display_name || profile_image_url) ? (
+              <div className="mt-1 flex max-w-[200px] items-center justify-end gap-2">
+                {profile_image_url ? (
+                  <Image
+                    src={profile_image_url}
+                    alt=""
+                    width={32}
+                    height={32}
+                    className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-black/10"
+                  />
+                ) : null}
+                {profile_display_name ? (
+                  <div className="min-w-0 truncate text-right text-[11px] font-medium tracking-[0.01em] text-[#8a7568]">
+                    {profile_display_name}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

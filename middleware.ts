@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import {
-  read_browser_session_cookie_values,
-  visitor_cookie_name,
-} from '@/lib/auth/session'
+  is_public_asset_path,
+  should_redirect_line_browser_to_liff,
+} from '@/lib/auth/context'
 import { env } from '@/lib/config/env'
+import { visitor_cookie_name } from '@/lib/visitor/cookie'
+
+function read_browser_session_cookie_values(
+  visitor_cookie: string | null | undefined,
+) {
+  return {
+    visitor_uuid: visitor_cookie ?? null,
+  }
+}
 
 const is_local_host = (host: string) => {
   return host.startsWith('localhost') || host.startsWith('127.0.0.1')
@@ -46,20 +55,6 @@ function create_response(
   return response
 }
 
-function is_public_asset_path(pathname: string) {
-  if (
-    pathname.startsWith('/images/') ||
-    pathname.startsWith('/assets/') ||
-    pathname.startsWith('/fonts/')
-  ) {
-    return true
-  }
-
-  return /\.(?:avif|css|gif|ico|jpeg|jpg|js|json|map|png|svg|txt|webmanifest|webp|woff2?)$/i.test(
-    pathname,
-  )
-}
-
 export function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? ''
   const pathname = request.nextUrl.pathname
@@ -81,6 +76,35 @@ export function middleware(request: NextRequest) {
         request: { headers },
       }),
     )
+
+  const ua = request.headers.get('user-agent')
+
+  if (
+    !is_local &&
+    host === env.domain.platform &&
+    should_redirect_line_browser_to_liff({
+      pathname,
+      search_params: request.nextUrl.searchParams,
+      user_agent: ua,
+    })
+  ) {
+    const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
+
+    if (liff_id) {
+      const path_and_query =
+        `${pathname}${request.nextUrl.search}` || '/'
+      const redirect_param = encodeURIComponent(path_and_query)
+      const target = `https://liff.line.me/${liff_id}?redirect=${redirect_param}`
+
+      console.info('[line_browser_detected]', {
+        pathname,
+        ua_preview: ua?.slice(0, 80) ?? null,
+      })
+      console.info('[redirect_to_liff]', { target })
+
+      return NextResponse.redirect(target)
+    }
+  }
 
   if (is_local) {
     return next_with_visitor_cookie()

@@ -13,9 +13,10 @@ export default async function AdminPage() {
   }
 
   const display_name = access.allowed ? access.display_name : null
+  const image_url = access.allowed ? access.image_url : null
 
   return (
-    <AdminShell display_name={display_name}>
+    <AdminShell display_name={display_name} image_url={image_url}>
       <div aria-hidden="true" />
     </AdminShell>
   )

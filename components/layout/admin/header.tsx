@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import {
   Bell,
   ChevronDown,
@@ -8,6 +9,7 @@ import {
 
 type AdminHeaderProps = {
   display_name: string | null
+  image_url?: string | null
 }
 
 const icon_button_class =
@@ -15,6 +17,7 @@ const icon_button_class =
 
 export default function AdminHeader({
   display_name,
+  image_url,
 }: AdminHeaderProps) {
   const profile_name = display_name?.trim() || 'Admin'
 
@@ -22,11 +25,21 @@ export default function AdminHeader({
     <header className="border-b border-black/[0.06] bg-white px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] shadow-[0_1px_0_rgba(0,0,0,0.03)]">
       <div className="flex min-h-[64px] items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]">
-            <UserRound
-              className="h-6 w-6 text-neutral-600"
-              strokeWidth={2}
-            />
+          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]">
+            {image_url ? (
+              <Image
+                src={image_url}
+                alt=""
+                width={48}
+                height={48}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <UserRound
+                className="h-6 w-6 text-neutral-600"
+                strokeWidth={2}
+              />
+            )}
           </div>
           <div className="min-w-0">
             <div className="truncate text-[15px] font-semibold leading-tight text-black">

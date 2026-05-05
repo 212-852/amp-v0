@@ -12,7 +12,7 @@ type liff_profile = {
 type liff_client = {
   init: (input: { liffId: string }) => Promise<void>
   isLoggedIn: () => boolean
-  login: () => void
+  login: (input?: { redirectUri?: string }) => void
   getProfile: () => Promise<liff_profile>
   getLanguage: () => string
 }

@@ -7,13 +7,13 @@ export const control = {
     session_core: true,
     chat_room: false,
     locale: false,
-    identity: false,
+    identity: true,
     line: false,
     line_webhook: false,
     identity_promotion: false,
 
     line_auth: true,
-    liff_auth: false,
+    liff_auth: true,
 
     /**
      * Temporary LINE flow trace: when true, only `discord_category_allowlist` reaches Discord.
@@ -21,6 +21,8 @@ export const control = {
     use_discord_category_allowlist: true,
     discord_category_allowlist: [
       'session',
+      'liff',
+      'identity',
     ],
   },
 

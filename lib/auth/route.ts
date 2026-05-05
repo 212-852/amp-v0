@@ -9,6 +9,7 @@ export type admin_route_access =
       user_uuid: string
       visitor_uuid: string
       display_name: string | null
+      image_url: string | null
     }
   | {
       allowed: false
@@ -26,6 +27,7 @@ type visitor_user_row = {
 type admin_user_row = {
   role: string | null
   display_name: string | null
+  image_url: string | null
 }
 
 export async function resolve_admin_route_access(): Promise<admin_route_access> {
@@ -79,7 +81,7 @@ export async function resolve_admin_route_access(): Promise<admin_route_access> 
 
   const user_result = await supabase
     .from('users')
-    .select('role, display_name')
+    .select('role, display_name, image_url')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -101,5 +103,6 @@ export async function resolve_admin_route_access(): Promise<admin_route_access> 
     user_uuid,
     visitor_uuid,
     display_name: user.display_name,
+    image_url: user.image_url ?? null,
   }
 }
