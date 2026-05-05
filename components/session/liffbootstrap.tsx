@@ -91,7 +91,7 @@ export default function LiffBootstrap() {
       return
     }
 
-    const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
+    const liff_id = process.env.NEXT_PUBLIC_LINE_LIFF_ID
 
     if (!liff_id) {
       return
@@ -117,9 +117,7 @@ export default function LiffBootstrap() {
         await liff.init({ liffId: resolved_liff_id })
 
         if (!liff.isLoggedIn()) {
-          liff.login({
-            redirectUri: window.location.href,
-          })
+          liff.login()
           return
         }
 

@@ -60,7 +60,7 @@ export default function LiffPage() {
       let deferred_line_login = false
 
       try {
-        const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
+        const liff_id = process.env.NEXT_PUBLIC_LINE_LIFF_ID
 
         if (!liff_id) {
           set_status('missing_liff_id')

@@ -88,13 +88,10 @@ export function middleware(request: NextRequest) {
       user_agent: ua,
     })
   ) {
-    const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
+    const liff_id = process.env.NEXT_PUBLIC_LINE_LIFF_ID
 
     if (liff_id) {
-      const path_and_query =
-        `${pathname}${request.nextUrl.search}` || '/'
-      const redirect_param = encodeURIComponent(path_and_query)
-      const target = `https://liff.line.me/${liff_id}?redirect_path=${redirect_param}`
+      const target = `https://liff.line.me/${liff_id}`
 
       return NextResponse.redirect(target)
     }
