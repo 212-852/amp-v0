@@ -17,11 +17,6 @@ export const control = {
     use_discord_category_allowlist: true,
     discord_category_allowlist: [
       'session',
-      'line',
-      'line_webhook',
-      'locale',
-      'identity',
-      'chat_room',
     ],
   },
 
