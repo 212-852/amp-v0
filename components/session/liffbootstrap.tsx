@@ -7,6 +7,12 @@ import Loading from '@/components/shared/loading'
 
 type liff_debug_payload = Record<string, unknown>
 
+/** LINE Developers LIFF id for production (client bundle; must match env). */
+const EXPECTED_LIFF_ID = '2006953406-vj2gYoAb'
+
+/** LINE LIFF Endpoint URL registered in LINE Developers (trailing slash). */
+const EXPECTED_LIFF_ENDPOINT_ORIGIN = 'https://app.da-nya.com'
+
 function should_skip_path(pathname: string) {
   return (
     pathname.startsWith('/admin') ||
@@ -125,6 +131,22 @@ export default function LiffBootstrap() {
       is_liff_url,
     }
 
+    const global_started = globalThis as unknown as {
+      __amp_liff_started?: boolean
+    }
+
+    if (global_started.__amp_liff_started) {
+      void emit_liff_debug('liff_bootstrap_duplicate_skipped', {
+        ...base_payload,
+        liff_id,
+        reason: 'window.__amp_liff_started',
+      })
+
+      return
+    }
+
+    global_started.__amp_liff_started = true
+
     async function post_liff_session(payload: Record<string, unknown>) {
       return fetch('/api/auth/line/liff', {
         method: 'POST',
@@ -191,6 +213,8 @@ export default function LiffBootstrap() {
     }
 
     async function run() {
+      let liff_init_completed_ok = false
+
       try {
         set_is_loading(true)
         set_liff_error(null)
@@ -211,6 +235,12 @@ export default function LiffBootstrap() {
         await emit_liff_debug('liff_environment_detected', {
           ...base_payload,
           liff_id,
+          liff_id_matches_expected: liff_id === EXPECTED_LIFF_ID,
+          expected_liff_id: EXPECTED_LIFF_ID,
+          page_origin: window.location.origin,
+          liff_endpoint_origin_expected: EXPECTED_LIFF_ENDPOINT_ORIGIN,
+          origin_matches_liff_endpoint:
+            window.location.origin === EXPECTED_LIFF_ENDPOINT_ORIGIN,
         })
 
         let liff: Liff
@@ -306,6 +336,7 @@ export default function LiffBootstrap() {
           window.sessionStorage.removeItem('amp_liff_bootstrap')
 
           await emit_liff_debug('liff_init_completed', base_payload)
+          liff_init_completed_ok = true
         } catch (error) {
           if (init_timeout !== null) {
             window.clearTimeout(init_timeout)
@@ -402,6 +433,17 @@ export default function LiffBootstrap() {
             ...base_payload,
             line_user_id: profile.userId,
           })
+        }
+
+        if (!liff_init_completed_ok) {
+          await emit_liff_debug('liff_auth_api_blocked', {
+            ...base_payload,
+            liff_id,
+            reason: 'init_not_completed',
+          })
+          set_is_loading(false)
+
+          return
         }
 
         const global_gate = globalThis as unknown as {
