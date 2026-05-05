@@ -1,201 +1,182 @@
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-import { resolve_liff_login } from '@/lib/auth/liff_login'
+import { resolve_auth_access } from '@/lib/auth/access'
 import {
+  ensure_session,
   get_browser_session_cookie_options,
   visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
-import { control } from '@/lib/config/control'
-import { debug, debug_event } from '@/lib/debug'
+import { supabase } from '@/lib/db/supabase'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
 type liff_auth_body = {
   line_user_id?: string
   display_name?: string | null
-  image_url?: string | null
   picture_url?: string | null
   status_message?: string | null
-  locale?: string | null
-  visitor_uuid?: string | null
   source_channel?: string | null
 }
 
-function get_allowed_user_ids() {
-  return (
-    process.env.LINE_REPLY_ALLOWED_USER_IDS
-      ?.split(',')
-      .map((id) => id.trim())
-      .filter(Boolean) ?? []
-  )
-}
+function get_client_ip(headers: Headers) {
+  const forwarded = headers.get('x-forwarded-for')
 
-function is_allowed_line_user(line_user_id: string) {
-  if (process.env.LINE_REPLY_TEST_MODE !== 'true') {
-    return true
+  if (forwarded) {
+    const first = forwarded.split(',')[0]?.trim()
+
+    if (first) {
+      return first
+    }
   }
 
-  return get_allowed_user_ids().includes(line_user_id)
+  return headers.get('x-real-ip')
 }
 
-async function debug_liff_event(
-  event: string,
-  payload?: Record<string, unknown>,
-) {
-  if (!control.debug.liff_auth) {
-    return
+function get_access_platform(user_agent: string | null) {
+  const normalized_user_agent = user_agent?.toLowerCase() ?? ''
+
+  if (
+    normalized_user_agent.includes('iphone') ||
+    normalized_user_agent.includes('ipad') ||
+    normalized_user_agent.includes('ipod')
+  ) {
+    return 'ios' as const
   }
 
-  await debug_event({
-    category: 'liff',
-    event,
-    payload: payload ?? {},
+  if (normalized_user_agent.includes('android')) {
+    return 'android' as const
+  }
+
+  if (normalized_user_agent.includes('mac os')) {
+    return 'mac' as const
+  }
+
+  if (normalized_user_agent.includes('windows')) {
+    return 'windows' as const
+  }
+
+  return 'unknown' as const
+}
+
+async function ensure_liff_visitor(input: {
+  request: Request
+  visitor_uuid: string | null
+}) {
+  const headers = input.request.headers
+
+  return ensure_session({
+    visitor_uuid: input.visitor_uuid,
+    caller: 'api_session',
+    source_channel: 'liff',
+    user_agent: headers.get('user-agent'),
+    access_platform: get_access_platform(headers.get('user-agent')),
+    ip: get_client_ip(headers),
   })
 }
 
-async function debug_liff_failed(
-  reason: string,
-  data?: Record<string, unknown>,
-) {
-  if (!control.debug.liff_auth) {
+async function update_liff_visitor(input: {
+  visitor_uuid: string
+  user_uuid: string
+}) {
+  const now = new Date().toISOString()
+  const updated = await supabase
+    .from('visitors')
+    .update({
+      user_uuid: input.user_uuid,
+      access_channel: 'liff',
+      last_seen_at: now,
+      updated_at: now,
+    })
+    .eq('visitor_uuid', input.visitor_uuid)
+
+  if (updated.error) {
+    throw updated.error
+  }
+}
+
+async function update_liff_user_profile(input: {
+  user_uuid: string
+  display_name: string | null
+  picture_url: string | null
+}) {
+  if (!input.display_name && !input.picture_url) {
     return
   }
 
-  await debug({
-    category: 'liff',
-    event: 'liff_auth_failed',
-    data: {
-      reason,
-      ...data,
-    },
-  })
+  const updated = await supabase
+    .from('users')
+    .update({
+      display_name: input.display_name,
+      image_url: input.picture_url,
+    })
+    .eq('user_uuid', input.user_uuid)
+
+  if (updated.error) {
+    throw updated.error
+  }
 }
 
 export async function POST(request: Request) {
   const body = (await request.json()) as liff_auth_body
-  const line_user_id = body.line_user_id
-  const cookie_store = await cookies()
-  const cookie_visitor_uuid =
-    cookie_store.get(visitor_cookie_name)?.value ?? null
-  const current_visitor_uuid =
-    cookie_visitor_uuid ?? body.visitor_uuid ?? null
+  const line_user_id = body.line_user_id?.trim()
 
   if (!line_user_id) {
-    await debug_liff_failed('missing_line_user_id')
-
     return NextResponse.json(
       { ok: false, error: 'Missing line_user_id' },
       { status: 400 },
     )
   }
 
-  if (!is_allowed_line_user(line_user_id)) {
-    await debug_liff_failed('test_mode_blocked', {
-      line_user_id,
-    })
-
-    return NextResponse.json(
-      { ok: false, error: 'LINE user is not allowed' },
-      { status: 403 },
-    )
-  }
-
   try {
-    await debug_liff_event('liff_auth_route_started', {
-      visitor_uuid: current_visitor_uuid,
-      line_user_id,
-    })
-
-    if (cookie_visitor_uuid) {
-      await debug_liff_event('liff_cookie_visitor_found', {
-        visitor_uuid: cookie_visitor_uuid,
-        line_user_id,
-      })
-    }
-
-    const image_url = body.picture_url ?? body.image_url ?? null
-
-    const result = await resolve_liff_login({
+    const cookie_store = await cookies()
+    const cookie_visitor_uuid =
+      cookie_store.get(visitor_cookie_name)?.value ?? null
+    const visitor = await ensure_liff_visitor({
       request,
-      line_user_id,
-      display_name: body.display_name ?? null,
-      image_url,
-      browser_locale: body.locale ?? null,
-      visitor_uuid: current_visitor_uuid,
+      visitor_uuid: cookie_visitor_uuid,
+    })
+    const display_name = body.display_name ?? null
+    const picture_url = body.picture_url ?? null
+    const access = await resolve_auth_access({
+      provider: 'line',
+      provider_id: line_user_id,
+      visitor_uuid: visitor.visitor_uuid,
+      display_name,
+      image_url: picture_url,
+      locale: null,
     })
 
-    const { access, resolved_visitor_uuid, resolved_locale, identity_uuid } =
-      result
-
-    if (access.is_new_user) {
-      await debug_liff_event('line_identity_created', {
-        line_user_id,
-        user_uuid: access.user_uuid,
-        visitor_uuid: result.resolved_session_visitor_uuid,
-      })
-    } else {
-      await debug_liff_event('line_identity_found', {
-        line_user_id,
-        user_uuid: access.user_uuid,
-        visitor_uuid: result.resolved_session_visitor_uuid,
-      })
-    }
-
-    await debug_liff_event('visitor_promoted_to_user', {
-      visitor_uuid: resolved_visitor_uuid,
+    await update_liff_user_profile({
       user_uuid: access.user_uuid,
-      line_user_id,
-      promoted: result.promoted.promoted,
+      display_name,
+      picture_url,
     })
 
-    await debug_liff_event('liff_auth_completed', {
+    await update_liff_visitor({
+      visitor_uuid: visitor.visitor_uuid,
       user_uuid: access.user_uuid,
-      visitor_uuid: resolved_visitor_uuid,
-      line_user_id,
-      identity_uuid,
-      locale: resolved_locale.locale,
-      locale_source: resolved_locale.source,
-      is_new_user: access.is_new_user,
     })
 
-    const session_payload = {
-      visitor_uuid: resolved_visitor_uuid,
-      user_uuid: access.user_uuid,
-      locale: resolved_locale.locale,
-      role: 'user',
-      tier: 'member',
-      display_name: body.display_name ?? null,
-      image_url,
-      line_connected: true,
-      connected_providers: ['line'],
-    }
-
+    const cookie_options =
+      get_browser_session_cookie_options(visitor_cookie_max_age)
     const response = NextResponse.json({
       ok: true,
       user_uuid: access.user_uuid,
-      visitor_uuid: resolved_visitor_uuid,
-      identity_uuid,
-      is_new_user: access.is_new_user,
-      is_new_visitor: access.is_new_visitor,
-      locale: resolved_locale.locale,
+      visitor_uuid: visitor.visitor_uuid,
       provider: 'line',
-      session: session_payload,
     })
 
-    const cookie_opts = get_browser_session_cookie_options(visitor_cookie_max_age)
-
-    response.cookies.set(visitor_cookie_name, resolved_visitor_uuid, cookie_opts)
-    response.cookies.set(browser_channel_cookie_name, 'liff', cookie_opts)
+    response.cookies.set(
+      visitor_cookie_name,
+      visitor.visitor_uuid,
+      cookie_options,
+    )
+    response.cookies.set(browser_channel_cookie_name, 'liff', cookie_options)
 
     return response
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-
-    await debug_liff_failed('exception', {
-      line_user_id,
-      message,
-    })
+    console.error('[liff_auth_error]', error)
 
     return NextResponse.json(
       { ok: false, error: 'LIFF auth failed' },

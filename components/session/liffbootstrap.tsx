@@ -1,50 +1,45 @@
 'use client'
 
 import liff from '@line/liff'
-import { useEffect, useRef } from 'react'
-
-function should_skip_path(pathname: string) {
-  return (
-    pathname.startsWith('/admin') ||
-    pathname.startsWith('/driver') ||
-    pathname.startsWith('/api')
-  )
-}
-
-function is_line_browser() {
-  return navigator.userAgent.toLowerCase().includes('line/')
-}
-
-function is_liff_url() {
-  return window.location.href.includes('liff.line.me')
-}
-
-function has_liff_params() {
-  const params = new URLSearchParams(window.location.search)
-
-  return params.has('liff.state') || params.has('liffClientId')
-}
+import {
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 export default function LiffBootstrap() {
   const started_ref = useRef(false)
+  const [is_loading, set_is_loading] = useState(false)
 
   useEffect(() => {
-    if (started_ref.current || should_skip_path(window.location.pathname)) {
+    if (started_ref.current) {
       return
     }
 
     started_ref.current = true
 
     async function run() {
-      console.log('[liff] bootstrap mounted')
-
       const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
-
-      console.log('[liff] liff_id', liff_id ?? null)
 
       if (!liff_id) {
         return
       }
+
+      const href = window.location.href
+      const user_agent = navigator.userAgent
+      const is_line_browser = user_agent.includes('Line/')
+      const is_liff_url = href.includes('liff.line.me')
+
+      if (!is_line_browser && !is_liff_url) {
+        return
+      }
+
+      set_is_loading(true)
+
+      console.log('[liff] bootstrap started')
+      console.log('[liff] liff_id', liff_id)
+      console.log('[liff] href', href)
+      console.log('[liff] ua', user_agent)
 
       await liff.init({ liffId: liff_id })
 
@@ -52,23 +47,15 @@ export default function LiffBootstrap() {
       console.log('[liff] isInClient', liff.isInClient())
       console.log('[liff] isLoggedIn', liff.isLoggedIn())
 
-      const is_in_client = liff.isInClient()
-      const is_line = is_line_browser()
-      const is_inside_liff =
-        is_in_client || is_liff_url() || is_line || has_liff_params()
-
-      if (!is_inside_liff && !liff.isLoggedIn()) {
-        return
-      }
-
-      if (!is_in_client && !is_line && !liff.isLoggedIn()) {
+      if (!liff.isInClient() && !liff.isLoggedIn()) {
+        console.log('[liff] login started')
         liff.login()
         return
       }
 
       const profile = await liff.getProfile()
 
-      console.log('[liff] profile', profile)
+      console.log('[liff] profile resolved', profile)
 
       const response = await fetch('/api/auth/liff', {
         method: 'POST',
@@ -82,17 +69,30 @@ export default function LiffBootstrap() {
           source_channel: 'liff',
         }),
       })
-      const result = await response.json().catch(() => null)
 
-      console.log('[liff] auth api result', result)
+      const result = await response.json()
 
-      if (response.ok) {
-        window.dispatchEvent(new Event('amp_session_changed'))
-      }
+      console.log('[liff] auth result', result)
+
+      window.dispatchEvent(new Event('amp_session_changed'))
+      set_is_loading(false)
     }
 
-    void run().catch(console.error)
+    run().catch((error) => {
+      console.error('[liff] bootstrap failed', error)
+      set_is_loading(false)
+    })
   }, [])
 
-  return null
+  if (!is_loading) {
+    return null
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#f6e5cf]">
+      <div className="rounded-[28px] bg-white px-6 py-5 text-sm font-semibold text-[#3a2a21] shadow-[0_20px_60px_rgba(0,0,0,0.12)]">
+        Loading...
+      </div>
+    </div>
+  )
 }

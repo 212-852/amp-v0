@@ -123,24 +123,14 @@ export default function ConnectModal({
   const is_email_loading = email_status === 'sending'
   const has_connected_provider = connected_providers.length > 0
 
-  function is_line_or_liff_webview() {
-    if (typeof window === 'undefined') {
-      return false
-    }
-
-    const ua = navigator.userAgent.toLowerCase()
-
-    return ua.includes('line/') || window.location.href.includes('liff.line.me')
-  }
-
   function open_line_login() {
-    if (is_line_or_liff_webview()) {
-      window.location.assign('/')
+    const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
 
+    if (!liff_id) {
       return
     }
 
-    window.location.href = '/api/auth/line'
+    window.location.href = `https://liff.line.me/${liff_id}`
   }
 
   function open_google_login() {
