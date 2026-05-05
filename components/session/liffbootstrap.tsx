@@ -232,6 +232,46 @@ export default function LiffBootstrap() {
           return
         }
 
+        const pre_init_is_in_client = liff.isInClient()
+
+        await emit_liff_debug(
+          pre_init_is_in_client
+            ? 'liff_in_client_true'
+            : 'liff_in_client_false',
+          {
+            ...base_payload,
+            liff_id,
+            phase: 'before_init',
+            is_in_client: pre_init_is_in_client,
+          },
+        )
+
+        if (is_line_browser && !pre_init_is_in_client) {
+          const bootstrap_key = 'amp_liff_bootstrap'
+          const redirect_url = `https://liff.line.me/${liff_id}`
+          const has_bootstrap_flag =
+            window.sessionStorage.getItem(bootstrap_key) === '1'
+
+          if (has_bootstrap_flag) {
+            await emit_liff_debug('liff_container_redirect_skipped', {
+              ...base_payload,
+              liff_id,
+              redirect_url,
+              reason: 'bootstrap_flag_exists',
+            })
+          } else {
+            window.sessionStorage.setItem(bootstrap_key, '1')
+            await emit_liff_debug('liff_container_redirect_started', {
+              ...base_payload,
+              liff_id,
+              redirect_url,
+            })
+            window.location.replace(redirect_url)
+
+            return
+          }
+        }
+
         let init_timeout: number | null = null
 
         try {
@@ -247,6 +287,7 @@ export default function LiffBootstrap() {
           await liff.init({ liffId: liff_id })
           window.clearTimeout(init_timeout)
           init_timeout = null
+          window.sessionStorage.removeItem('amp_liff_bootstrap')
 
           await emit_liff_debug('liff_init_completed', base_payload)
         } catch (error) {
@@ -281,6 +322,15 @@ export default function LiffBootstrap() {
           ...base_payload,
           is_in_client,
         })
+        await emit_liff_debug(
+          is_in_client ? 'liff_in_client_true' : 'liff_in_client_false',
+          {
+            ...base_payload,
+            liff_id,
+            phase: 'after_init',
+            is_in_client,
+          },
+        )
 
         const is_logged_in = liff.isLoggedIn()
         await emit_liff_debug('liff_login_state_checked', {
