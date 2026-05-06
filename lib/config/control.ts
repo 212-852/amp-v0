@@ -15,6 +15,7 @@ export const control = {
 
     line_auth: false,
     liff_auth: false,
+    auth_route: true,
 
     /**
      * Temporary LINE flow trace: when true, only `discord_category_allowlist` reaches Discord.
@@ -25,6 +26,7 @@ export const control = {
       'liff',
       'identity',
       'line_webhook',
+      'auth_route',
     ],
   },
 

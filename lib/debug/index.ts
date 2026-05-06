@@ -31,6 +31,10 @@ function allow_discord_debug_category(category: string) {
     return false
   }
 
+  if (category === 'auth_route' && !control.debug.auth_route) {
+    return false
+  }
+
   if (!control.debug.use_discord_category_allowlist) {
     return true
   }

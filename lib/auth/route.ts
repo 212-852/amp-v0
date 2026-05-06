@@ -1,6 +1,9 @@
 import 'server-only'
 
+import { redirect } from 'next/navigation'
+
 import { supabase } from '@/lib/db/supabase'
+import { debug_event } from '@/lib/debug'
 import { read_session } from './session'
 
 export type admin_route_access =
@@ -10,14 +13,17 @@ export type admin_route_access =
       visitor_uuid: string
       display_name: string | null
       image_url: string | null
+      role: 'admin'
     }
   | {
       allowed: false
       reason:
         | 'session_missing'
         | 'user_missing'
-        | 'line_identity_missing'
         | 'admin_role_missing'
+      pathname: string
+      user_uuid: string | null
+      role: string | null
     }
 
 type visitor_user_row = {
@@ -30,14 +36,36 @@ type admin_user_row = {
   image_url: string | null
 }
 
-export async function resolve_admin_route_access(): Promise<admin_route_access> {
+type session_user = {
+  visitor_uuid: string | null
+  user_uuid: string | null
+  role: string | null
+  display_name: string | null
+  image_url: string | null
+}
+
+async function emit_auth_route_debug(
+  event: 'admin_access_allowed' | 'admin_access_denied',
+  payload: Record<string, unknown>,
+) {
+  await debug_event({
+    category: 'auth_route',
+    event,
+    payload,
+  })
+}
+
+export async function get_session_user(): Promise<session_user> {
   const session = await read_session()
   const visitor_uuid = session.visitor_uuid
 
   if (!visitor_uuid) {
     return {
-      allowed: false,
-      reason: 'session_missing',
+      visitor_uuid: null,
+      user_uuid: null,
+      role: null,
+      display_name: null,
+      image_url: null,
     }
   }
 
@@ -56,26 +84,11 @@ export async function resolve_admin_route_access(): Promise<admin_route_access> 
 
   if (!user_uuid) {
     return {
-      allowed: false,
-      reason: 'user_missing',
-    }
-  }
-
-  const identity_result = await supabase
-    .from('identities')
-    .select('user_uuid')
-    .eq('user_uuid', user_uuid)
-    .eq('provider', 'line')
-    .maybeSingle()
-
-  if (identity_result.error) {
-    throw identity_result.error
-  }
-
-  if (!identity_result.data?.user_uuid) {
-    return {
-      allowed: false,
-      reason: 'line_identity_missing',
+      visitor_uuid,
+      user_uuid: null,
+      role: null,
+      display_name: null,
+      image_url: null,
     }
   }
 
@@ -91,18 +104,109 @@ export async function resolve_admin_route_access(): Promise<admin_route_access> 
 
   const user = user_result.data as admin_user_row | null
 
-  if (user?.role !== 'admin') {
-    return {
-      allowed: false,
-      reason: 'admin_role_missing',
+  return {
+    visitor_uuid,
+    user_uuid,
+    role: user?.role ?? null,
+    display_name: user?.display_name ?? null,
+    image_url: user?.image_url ?? null,
+  }
+}
+
+export function can_access_admin(input: {
+  role: string | null
+}): input is { role: 'admin' } {
+  return input.role === 'admin'
+}
+
+export async function resolve_admin_route_access(
+  pathname = '/admin',
+): Promise<admin_route_access> {
+  const user = await get_session_user()
+
+  if (!user.visitor_uuid) {
+    const denied = {
+      allowed: false as const,
+      reason: 'session_missing' as const,
+      pathname,
+      user_uuid: null,
+      role: null,
     }
+
+    await emit_auth_route_debug('admin_access_denied', denied)
+
+    return denied
   }
 
-  return {
-    allowed: true,
-    user_uuid,
-    visitor_uuid,
+  if (!user.user_uuid) {
+    const denied = {
+      allowed: false as const,
+      reason: 'user_missing' as const,
+      pathname,
+      user_uuid: null,
+      role: null,
+    }
+
+    await emit_auth_route_debug('admin_access_denied', denied)
+
+    return denied
+  }
+
+  if (!can_access_admin(user)) {
+    const denied = {
+      allowed: false as const,
+      reason: 'admin_role_missing' as const,
+      pathname,
+      user_uuid: user.user_uuid,
+      role: user.role,
+    }
+
+    await emit_auth_route_debug('admin_access_denied', denied)
+
+    return denied
+  }
+
+  const allowed = {
+    allowed: true as const,
+    user_uuid: user.user_uuid,
+    visitor_uuid: user.visitor_uuid,
+    role: 'admin' as const,
     display_name: user.display_name,
     image_url: user.image_url ?? null,
   }
+
+  await emit_auth_route_debug('admin_access_allowed', {
+    pathname,
+    user_uuid: allowed.user_uuid,
+    role: allowed.role,
+  })
+
+  return allowed
+}
+
+export async function resolve_route_access(input: {
+  pathname: string
+}) {
+  if (input.pathname.startsWith('/admin')) {
+    return resolve_admin_route_access(input.pathname)
+  }
+
+  return {
+    allowed: true as const,
+    pathname: input.pathname,
+  }
+}
+
+export async function require_admin_route_access(pathname = '/admin') {
+  if (!pathname.startsWith('/admin')) {
+    redirect('/')
+  }
+
+  const access = await resolve_admin_route_access(pathname)
+
+  if (!access.allowed) {
+    redirect('/')
+  }
+
+  return access
 }
