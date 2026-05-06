@@ -17,13 +17,17 @@ export default async function AdminLayout({
       role={access.role}
       tier={access.tier}
     >
-      <AdminHeader
-        display_name={access.display_name}
-        image_url={access.image_url}
-        role={access.role}
-        tier={access.tier}
-      />
-      <main className="min-h-0 flex-1 overflow-y-auto px-6 py-6 pb-[calc(200px+env(safe-area-inset-bottom,0px))]">
+      <div className="fixed left-0 right-0 top-0 z-[120] w-screen bg-white">
+        <div className="mx-auto w-full max-w-[480px]">
+          <AdminHeader
+            display_name={access.display_name}
+            image_url={access.image_url}
+            role={access.role}
+            tier={access.tier}
+          />
+        </div>
+      </div>
+      <main className="min-h-0 flex-1 overflow-y-auto px-6 pt-[calc(env(safe-area-inset-top,0px)+108px)] pb-[calc(200px+env(safe-area-inset-bottom,0px))]">
         {children}
       </main>
       <AdminAssistant display_name={access.display_name} />

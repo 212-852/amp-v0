@@ -42,8 +42,10 @@ export default function UserShell({ children }: UserShellProps) {
   return (
     <div className="min-h-[100dvh] bg-[#f6e5cf]">
       <div className="relative mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col overflow-x-hidden bg-[#f6e5cf]">
-        <div className="fixed inset-x-0 top-0 z-50 mx-auto w-full max-w-[430px]">
-          <UserHeader />
+        <div className="fixed left-0 right-0 top-0 z-50 w-screen">
+          <div className="mx-auto w-full max-w-[430px]">
+            <UserHeader />
+          </div>
         </div>
 
         <main

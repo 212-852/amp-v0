@@ -211,7 +211,8 @@ export default function UserFooter() {
         />
       </OverlayRoot>
 
-      <footer className="fixed bottom-0 left-0 right-0 z-50 bg-transparent pb-[env(safe-area-inset-bottom,0px)]">
+      <footer className="fixed bottom-0 left-0 right-0 z-50 w-screen bg-transparent pb-[env(safe-area-inset-bottom,0px)]">
+        <div className="mx-auto w-full max-w-[430px]">
         <div className="relative bg-transparent pb-1 pt-6">
 
         {/* top curve */}
@@ -477,6 +478,7 @@ export default function UserFooter() {
             </div>
           </div>
         </div>
+      </div>
       </div>
       </footer>
     </>

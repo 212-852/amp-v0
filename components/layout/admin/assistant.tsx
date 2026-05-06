@@ -125,7 +125,7 @@ export default function AdminAssistant({
       </style>
 
       <div
-        className="pointer-events-none fixed inset-x-0 z-[110] flex justify-center"
+        className="pointer-events-none fixed left-0 right-0 z-[110] flex w-screen justify-center"
         style={{
           bottom: 0,
         }}
