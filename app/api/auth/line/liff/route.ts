@@ -10,6 +10,7 @@ import {
 } from '@/lib/auth/session'
 import { control } from '@/lib/config/control'
 import { debug_event } from '@/lib/debug'
+import { notify_new_user_created } from '@/lib/notify/new_user_created'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
 type liff_auth_body = {
@@ -275,6 +276,18 @@ export async function POST(request: Request) {
       line_user_id,
       promoted: result.promoted.promoted,
     })
+
+    if (access.is_new_user) {
+      await notify_new_user_created({
+        provider: 'line',
+        user_uuid: access.user_uuid,
+        visitor_uuid: resolved_visitor_uuid,
+        display_name: profile_display_name,
+        locale: resolved_locale.locale ?? access.locale,
+        is_new_user: access.is_new_user,
+        is_new_visitor: access.is_new_visitor,
+      })
+    }
 
     await debug_liff_event('liff_auth_completed', {
       user_uuid: access.user_uuid,

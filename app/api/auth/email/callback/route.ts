@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import { notify_new_user_created } from '@/lib/notify/new_user_created'
 import { debug } from '@/lib/debug'
 
 type email_otp_type = 'email' | 'magiclink'
@@ -150,6 +151,18 @@ export async function GET(request: Request) {
       image_url: null,
       locale: null,
     })
+
+    if (access.is_new_user) {
+      await notify_new_user_created({
+        provider: 'email',
+        user_uuid: access.user_uuid,
+        visitor_uuid: access.visitor_uuid,
+        display_name: null,
+        locale: access.locale,
+        is_new_user: access.is_new_user,
+        is_new_visitor: access.is_new_visitor,
+      })
+    }
 
     await debug({
       category: 'auth',

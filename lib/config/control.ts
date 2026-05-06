@@ -27,7 +27,7 @@ export const control = {
   },
 
   notify: {
-    new_user_created: false,
+    new_user_created: true,
     /** Required for `debug_event` -> notify path. */
     debug_trace: true,
   },

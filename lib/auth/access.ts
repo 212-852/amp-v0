@@ -5,7 +5,6 @@ import { resolve_user_visitor } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
 import { debug_event } from '@/lib/debug'
-import { notify } from '@/lib/notify'
 
 export type auth_provider = 'line' | 'google' | 'email'
 
@@ -142,17 +141,6 @@ export async function resolve_auth_access(
   if (created_identity.error) {
     throw created_identity.error
   }
-
-  await notify({
-    event: 'new_user_created',
-    provider: input.provider,
-    user_uuid,
-    visitor_uuid: visitor.visitor_uuid,
-    display_name: input.display_name ?? null,
-    locale: created_user.data.locale ?? null,
-    is_new_user: true,
-    is_new_visitor: visitor.is_new_visitor,
-  })
 
   if (control.debug.identity && input.provider === 'line') {
     await debug_event({

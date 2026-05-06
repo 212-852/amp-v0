@@ -12,6 +12,7 @@ import {
   visitor_cookie_name,
 } from '@/lib/auth/session'
 import { debug } from '@/lib/debug'
+import { notify_new_user_created } from '@/lib/notify/new_user_created'
 import { line_login_state_cookie_name } from '../route'
 
 function get_app_origin_from_callback_env() {
@@ -107,6 +108,18 @@ export async function GET(request: Request) {
       image_url: profile.pictureUrl ?? null,
       locale: null,
     })
+
+    if (access.is_new_user) {
+      await notify_new_user_created({
+        provider: 'line',
+        user_uuid: access.user_uuid,
+        visitor_uuid: access.visitor_uuid,
+        display_name: profile.displayName ?? null,
+        locale: access.locale,
+        is_new_user: access.is_new_user,
+        is_new_visitor: access.is_new_visitor,
+      })
+    }
 
     await debug({
       category: 'auth',
