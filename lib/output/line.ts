@@ -166,6 +166,15 @@ type line_reply_error = Error & {
   line_body?: string
 }
 
+function serialize_error(error: unknown) {
+  return {
+    name: error instanceof Error ? error.name : null,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : null,
+    error,
+  }
+}
+
 async function post_line_reply_messages(input: {
   reply_token: string
   messages: line_api_message[]
@@ -282,6 +291,16 @@ export async function deliver_line_chat_bundles(
         flex_bubble_count,
       },
     })
+    await debug_event({
+      category: 'line_webhook',
+      event: 'line_reply_started',
+      payload: {
+        ...line_trace_base,
+        bundle_count,
+        line_message_count,
+        flex_bubble_count,
+      },
+    })
   }
 
   try {
@@ -304,14 +323,25 @@ export async function deliver_line_chat_bundles(
         },
       })
     }
+    if (control.debug.line_webhook) {
+      await debug_event({
+        category: 'line_webhook',
+        event: 'line_reply_completed',
+        payload: {
+          ...line_trace_base,
+          bundle_count,
+          line_message_count,
+          line_reply_message_count: line_message_count,
+          flex_bubble_count,
+          line_flex_bubble_count: flex_bubble_count,
+        },
+      })
+    }
   } catch (reply_error) {
     const err = reply_error as line_reply_error
 
     console.error('[line_reply_failed]', line_trace_base, {
-      message:
-        reply_error instanceof Error
-          ? reply_error.message
-          : String(reply_error),
+      error: serialize_error(reply_error),
       error_status: err.line_status,
       error_body: err.line_body,
       bundle_count,
@@ -326,10 +356,9 @@ export async function deliver_line_chat_bundles(
           ...line_trace_base,
           bundle_count,
           line_message_count,
+          error: serialize_error(reply_error),
           error_message:
-            reply_error instanceof Error
-              ? reply_error.message
-              : String(reply_error),
+            reply_error instanceof Error ? reply_error.message : null,
           line_status: err.line_status ?? null,
           line_body_preview: err.line_body ?? null,
         },

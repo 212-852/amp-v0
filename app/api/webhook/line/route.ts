@@ -105,6 +105,15 @@ function get_line_event_key(event: line_webhook_event) {
   ].join(':')
 }
 
+function serialize_error(error: unknown) {
+  return {
+    name: error instanceof Error ? error.name : null,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : null,
+    error,
+  }
+}
+
 export async function POST(request: Request) {
   const body_text = await request.text()
 
@@ -196,13 +205,47 @@ export async function POST(request: Request) {
       const line_display_name = msg_profile?.displayName?.trim() || null
       const line_image_url = msg_profile?.pictureUrl?.trim() || null
 
-      const access = await resolve_auth_access({
-        provider: 'line',
-        provider_id: line_user_id,
+      await line_webhook_debug('line_identity_lookup_completed', {
+        line_user_id,
         locale: profile_locale.locale,
-        display_name: line_display_name,
-        image_url: line_image_url,
+        has_display_name: Boolean(line_display_name),
+        has_image_url: Boolean(line_image_url),
       })
+
+      await line_webhook_debug('line_identity_create_started', {
+        line_user_id,
+        locale: profile_locale.locale,
+        has_display_name: Boolean(line_display_name),
+        has_image_url: Boolean(line_image_url),
+      })
+
+      let access: Awaited<ReturnType<typeof resolve_auth_access>>
+
+      try {
+        access = await resolve_auth_access({
+          provider: 'line',
+          provider_id: line_user_id,
+          locale: profile_locale.locale,
+          display_name: line_display_name,
+          image_url: line_image_url,
+        })
+
+        await line_webhook_debug('line_identity_create_completed', {
+          line_user_id,
+          user_uuid: access.user_uuid,
+          visitor_uuid: access.visitor_uuid,
+          is_new_user: access.is_new_user,
+          is_new_visitor: access.is_new_visitor,
+        })
+      } catch (identity_error) {
+        await line_webhook_debug('line_identity_create_failed', {
+          line_user_id,
+          locale: profile_locale.locale,
+          error: serialize_error(identity_error),
+        })
+
+        throw identity_error
+      }
 
       if (access.is_new_user) {
         await line_webhook_debug('line_identity_created', {
@@ -237,10 +280,7 @@ export async function POST(request: Request) {
             line_user_id,
             user_uuid: access.user_uuid,
             visitor_uuid: access.visitor_uuid,
-            error:
-              notify_error instanceof Error
-                ? notify_error.message
-                : String(notify_error),
+            error: serialize_error(notify_error),
           })
         }
       }
@@ -286,7 +326,7 @@ export async function POST(request: Request) {
         line_user_id: line_user_id ?? null,
         event_type: event.type ?? null,
         message_id: event.message?.id ?? null,
-        error: error instanceof Error ? error.message : String(error),
+        error: serialize_error(error),
       })
     }
   }

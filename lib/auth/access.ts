@@ -47,18 +47,39 @@ async function sync_line_messaging_profile_to_visitor(input: {
   }
 }
 
+function serialize_error(error: unknown) {
+  return {
+    name: error instanceof Error ? error.name : null,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : null,
+    error,
+  }
+}
+
+async function debug_line_identity(
+  event: string,
+  payload: Record<string, unknown>,
+) {
+  if (!control.debug.identity) {
+    return
+  }
+
+  await debug_event({
+    category: 'identity',
+    event,
+    payload,
+  })
+}
+
 export async function resolve_auth_access(
   input: access_input,
 ): Promise<access_result> {
   const input_locale = normalize_locale(input.locale)
 
-  if (control.debug.identity && input.provider === 'line') {
-    await debug_event({
-      category: 'identity',
-      event: 'line_identity_lookup_started',
-      payload: {
-        line_user_id: input.provider_id,
-      },
+  if (input.provider === 'line') {
+    await debug_line_identity('line_identity_lookup_started', {
+      line_user_id: input.provider_id,
+      locale: input_locale,
     })
   }
 
@@ -70,7 +91,22 @@ export async function resolve_auth_access(
     .maybeSingle()
 
   if (existing_identity.error) {
+    if (input.provider === 'line') {
+      await debug_line_identity('line_identity_lookup_completed', {
+        line_user_id: input.provider_id,
+        ok: false,
+        error: serialize_error(existing_identity.error),
+      })
+    }
+
     throw existing_identity.error
+  }
+
+  if (input.provider === 'line') {
+    await debug_line_identity('line_identity_lookup_completed', {
+      line_user_id: input.provider_id,
+      found: Boolean(existing_identity.data?.user_uuid),
+    })
   }
 
   if (existing_identity.data?.user_uuid) {
@@ -138,15 +174,11 @@ export async function resolve_auth_access(
       })
     }
 
-    if (control.debug.identity && input.provider === 'line') {
-      await debug_event({
-        category: 'identity',
-        event: 'line_identity_found',
-        payload: {
-          line_user_id: input.provider_id,
-          user_uuid,
-          visitor_uuid: visitor.visitor_uuid,
-        },
+    if (input.provider === 'line') {
+      await debug_line_identity('line_identity_found', {
+        line_user_id: input.provider_id,
+        user_uuid,
+        visitor_uuid: visitor.visitor_uuid,
       })
     }
 
@@ -157,6 +189,15 @@ export async function resolve_auth_access(
       is_new_user: false,
       is_new_visitor: visitor.is_new_visitor,
     }
+  }
+
+  if (input.provider === 'line') {
+    await debug_line_identity('line_identity_create_started', {
+      line_user_id: input.provider_id,
+      locale: input_locale,
+      has_display_name: Boolean(input.display_name),
+      has_image_url: Boolean(input.image_url),
+    })
   }
 
   const created_user = await supabase
@@ -172,15 +213,38 @@ export async function resolve_auth_access(
     .single()
 
   if (created_user.error) {
+    if (input.provider === 'line') {
+      await debug_line_identity('line_identity_create_failed', {
+        line_user_id: input.provider_id,
+        step: 'user_insert',
+        error: serialize_error(created_user.error),
+      })
+    }
+
     throw created_user.error
   }
 
   const user_uuid = created_user.data.user_uuid
 
-  const visitor = await resolve_user_visitor({
-    user_uuid,
-    visitor_uuid: input.visitor_uuid,
-  })
+  let visitor: Awaited<ReturnType<typeof resolve_user_visitor>>
+
+  try {
+    visitor = await resolve_user_visitor({
+      user_uuid,
+      visitor_uuid: input.visitor_uuid,
+    })
+  } catch (error) {
+    if (input.provider === 'line') {
+      await debug_line_identity('line_identity_create_failed', {
+        line_user_id: input.provider_id,
+        user_uuid,
+        step: 'visitor_resolve',
+        error: serialize_error(error),
+      })
+    }
+
+    throw error
+  }
 
   const created_identity = await supabase
     .from('identities')
@@ -191,26 +255,49 @@ export async function resolve_auth_access(
     })
 
   if (created_identity.error) {
+    if (input.provider === 'line') {
+      await debug_line_identity('line_identity_create_failed', {
+        line_user_id: input.provider_id,
+        user_uuid,
+        visitor_uuid: visitor.visitor_uuid,
+        step: 'identity_insert',
+        error: serialize_error(created_identity.error),
+      })
+    }
+
     throw created_identity.error
   }
 
   if (input.provider === 'line') {
-    await sync_line_messaging_profile_to_visitor({
-      visitor_uuid: visitor.visitor_uuid,
-      user_uuid,
-      display_name: input.display_name,
-    })
-  }
-
-  if (control.debug.identity && input.provider === 'line') {
-    await debug_event({
-      category: 'identity',
-      event: 'line_identity_created',
-      payload: {
+    try {
+      await sync_line_messaging_profile_to_visitor({
+        visitor_uuid: visitor.visitor_uuid,
+        user_uuid,
+        display_name: input.display_name,
+      })
+    } catch (error) {
+      await debug_line_identity('line_identity_create_failed', {
         line_user_id: input.provider_id,
         user_uuid,
         visitor_uuid: visitor.visitor_uuid,
-      },
+        step: 'visitor_profile_sync',
+        error: serialize_error(error),
+      })
+
+      throw error
+    }
+  }
+
+  if (input.provider === 'line') {
+    await debug_line_identity('line_identity_create_completed', {
+      line_user_id: input.provider_id,
+      user_uuid,
+      visitor_uuid: visitor.visitor_uuid,
+    })
+    await debug_line_identity('line_identity_created', {
+      line_user_id: input.provider_id,
+      user_uuid,
+      visitor_uuid: visitor.visitor_uuid,
     })
   }
 
