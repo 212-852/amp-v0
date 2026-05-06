@@ -4,17 +4,17 @@ export const control = {
     session_route: false,
     visitor_context: false,
     /** Core session/cookie `debug_event` emissions from `lib/auth/session.ts`. */
-    session_core: true,
+    session_core: false,
     chat_room: false,
     locale: false,
-    identity: true,
+    identity: false,
     line: false,
     /** Temporary: LINE Messaging webhook trace (see `app/api/webhook/line/route.ts`). */
-    line_webhook: true,
+    line_webhook: false,
     identity_promotion: false,
 
-    line_auth: true,
-    liff_auth: true,
+    line_auth: false,
+    liff_auth: false,
 
     /**
      * Temporary LINE flow trace: when true, only `discord_category_allowlist` reaches Discord.
