@@ -4,7 +4,7 @@ export const control = {
     session_route: false,
     visitor_context: false,
     /** Core session/cookie `debug_event` emissions from `lib/auth/session.ts`. */
-    session_core: false,
+    session_core: true,
     chat_room: false,
     locale: false,
     identity: false,

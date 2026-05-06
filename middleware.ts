@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { is_public_asset_path } from '@/lib/auth/context'
+import {
+  get_browser_session_cookie_options,
+  mint_visitor_uuid,
+  visitor_cookie_max_age,
+} from '@/lib/auth/session'
 import { env } from '@/lib/config/env'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
 
@@ -38,16 +43,35 @@ function create_response(
   const existing = read_browser_session_cookie_values(
     request.cookies.get(visitor_cookie_name)?.value,
   )
+  const should_create_guest_visitor =
+    !existing.visitor_uuid &&
+    (request.nextUrl.pathname === '/' ||
+      request.nextUrl.pathname === '/user')
+  const visitor_uuid =
+    existing.visitor_uuid ??
+    (should_create_guest_visitor ? mint_visitor_uuid() : null)
 
-  if (existing.visitor_uuid) {
+  if (visitor_uuid) {
     append_request_cookie(
       request_headers,
       visitor_cookie_name,
-      existing.visitor_uuid,
+      visitor_uuid,
     )
   }
 
+  if (should_create_guest_visitor) {
+    request_headers.set('x-amp-visitor-cookie-created', '1')
+  }
+
   const response = response_builder(request_headers)
+
+  if (should_create_guest_visitor && visitor_uuid) {
+    response.cookies.set(
+      visitor_cookie_name,
+      visitor_uuid,
+      get_browser_session_cookie_options(visitor_cookie_max_age),
+    )
+  }
 
   return response
 }

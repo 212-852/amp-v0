@@ -62,6 +62,7 @@ export type browser_session_input = {
   user_agent?: string | null
   access_platform?: browser_access_platform
   ip?: string | null
+  cookie_created?: boolean
 }
 
 export type browser_session_result = {
@@ -186,7 +187,11 @@ async function emit_session_core_event(
   if (
     event !== 'session_cookie_found' &&
     event !== 'session_cookie_missing' &&
-    event !== 'session_resolve_finished'
+    event !== 'session_resolve_finished' &&
+    event !== 'visitor_create_started' &&
+    event !== 'visitor_create_completed' &&
+    event !== 'visitor_create_failed' &&
+    event !== 'visitor_cookie_set'
   ) {
     return
   }
@@ -617,7 +622,7 @@ async function ensure_browser_visitor(input: {
     error_message: null,
   })
 
-  await emit_session_core_event('session_visitor_create_started', {
+  await emit_session_core_event('visitor_create_started', {
     caller: input.caller,
     cookie_exists: true,
     cookie_visitor_uuid: input.visitor_uuid,
@@ -641,7 +646,7 @@ async function ensure_browser_visitor(input: {
     .single()
 
   if (!created_visitor.error) {
-    await emit_session_core_event('session_visitor_created', {
+    await emit_session_core_event('visitor_create_completed', {
       caller: input.caller,
       cookie_exists: true,
       cookie_visitor_uuid: input.visitor_uuid,
@@ -658,6 +663,19 @@ async function ensure_browser_visitor(input: {
   }
 
   if (!is_unique_violation(created_visitor.error)) {
+    await emit_session_core_event('visitor_create_failed', {
+      caller: input.caller,
+      cookie_exists: true,
+      cookie_visitor_uuid: input.visitor_uuid,
+      resolved_visitor_uuid: input.visitor_uuid,
+      user_uuid: null,
+      source_channel: input.source_channel,
+      created: false,
+      reused: false,
+      error_code: created_visitor.error.code ?? 'error',
+      error_message: created_visitor.error.message,
+    })
+
     throw created_visitor.error
   }
 
@@ -707,10 +725,26 @@ async function ensure_session_rows(
   input: browser_session_input,
 ): Promise<browser_session_result> {
   const visitor_uuid = input.visitor_uuid ?? mint_visitor_uuid()
-  const cookie_exists = Boolean(input.visitor_uuid)
+  const cookie_exists = Boolean(input.visitor_uuid) && !input.cookie_created
   const session_exists = cookie_exists
   const source_channel = input.source_channel ?? 'web'
   const supabase = await get_supabase()
+
+  if (input.cookie_created) {
+    await emit_session_core_event('visitor_cookie_set', {
+      caller: input.caller,
+      cookie_exists: false,
+      cookie_visitor_uuid: visitor_uuid,
+      resolved_visitor_uuid: visitor_uuid,
+      user_uuid: null,
+      source_channel,
+      created: true,
+      reused: false,
+      error_code: null,
+      error_message: null,
+    })
+  }
+
   const is_new_visitor = await ensure_browser_visitor({
     supabase,
     visitor_uuid,
@@ -801,6 +835,57 @@ export async function ensure_session(input: browser_session_input) {
   })
 
   return session
+}
+
+/**
+ * Server render/request path: creates the visitor DB row through session core.
+ * The response cookie must be set by middleware or a route handler.
+ */
+export async function ensure_request_session(
+  input: browser_session_input,
+) {
+  const caller = input.caller ?? 'unknown'
+  const source_channel = input.source_channel ?? 'web'
+  const session = await ensure_session_rows({
+    ...input,
+    caller,
+    source_channel,
+  })
+  const created = session.is_new_visitor
+
+  await emit_session_core_event(created ? 'session_created' : 'session_reused', {
+    caller,
+    cookie_exists: session.cookie_exists,
+    cookie_visitor_uuid: session.visitor_uuid,
+    resolved_visitor_uuid: session.visitor_uuid,
+    user_uuid: null,
+    source_channel,
+    created,
+    reused: !created,
+    error_code: null,
+    error_message: null,
+  })
+
+  return session
+}
+
+export async function emit_visitor_cookie_set(input: {
+  visitor_uuid: string
+  caller?: browser_session_caller
+  source_channel?: browser_session_source_channel
+}) {
+  await emit_session_core_event('visitor_cookie_set', {
+    caller: input.caller ?? 'unknown',
+    cookie_exists: false,
+    cookie_visitor_uuid: input.visitor_uuid,
+    resolved_visitor_uuid: input.visitor_uuid,
+    user_uuid: null,
+    source_channel: input.source_channel ?? 'web',
+    created: true,
+    reused: false,
+    error_code: null,
+    error_message: null,
+  })
 }
 
 /**
