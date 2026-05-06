@@ -4,6 +4,8 @@ import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
 
+import { room_select_fields } from '@/lib/chat/room/fields'
+
 export type chat_channel =
   | 'web'
   | 'line'
@@ -21,9 +23,6 @@ export type chat_room = {
   channel: chat_channel
   mode: room_mode
 }
-
-const ROOM_DB_SELECT =
-  'room_uuid, room_type, status, updated_at, mode, action_id, concierge_requested_at, concierge_accepted_at, bot_resumed_at'
 
 export function parse_room_mode(value: string | null | undefined): room_mode {
   return value === 'concierge' ? 'concierge' : 'bot'
@@ -50,14 +49,15 @@ type resolve_room_input = {
 
 type room_row = {
   room_uuid: string
-  room_type: string | null
-  status: string | null
-  updated_at: string | null
   mode: string | null
+  room_type: string | null
+  user_uuid: string | null
+  visitor_uuid: string | null
+  status: string | null
+  source_channel: string | null
   action_id: string | null
-  concierge_requested_at: string | null
-  concierge_accepted_at: string | null
-  bot_resumed_at: string | null
+  created_at: string | null
+  updated_at: string | null
 }
 
 type participant_row = {
@@ -301,7 +301,7 @@ async function find_canonical_user_participant(
 export async function load_room_row(room_uuid: string) {
   const result = await supabase
     .from('rooms')
-    .select(ROOM_DB_SELECT)
+    .select(room_select_fields)
     .eq('room_uuid', room_uuid)
     .maybeSingle()
 
@@ -343,8 +343,11 @@ async function insert_direct_room_row(
       status: 'active',
       updated_at: now,
       mode: 'bot',
+      user_uuid: input.user_uuid ?? null,
+      visitor_uuid: input.visitor_uuid,
+      source_channel: input.channel,
     })
-    .select(ROOM_DB_SELECT)
+    .select(room_select_fields)
     .maybeSingle()
 
   if (room_result.error && !is_unique_violation(room_result.error)) {
@@ -371,23 +374,35 @@ async function insert_direct_room_row(
     }
   }
 
-  if (!room_result.data?.room_uuid) {
+  const inserted = room_result.data as room_row | null
+
+  if (!inserted?.room_uuid) {
     throw new Error('insert_direct_room_row: no row returned')
   }
 
   return {
-    room: room_result.data as room_row,
+    room: inserted,
     created: true,
   }
 }
 
-async function touch_room_row(room_uuid: string) {
+async function touch_room_row(
+  room_uuid: string,
+  input?: resolve_room_input | null,
+) {
   const now = new Date().toISOString()
   const room_result = await supabase
     .from('rooms')
     .update({
       updated_at: now,
       status: 'active',
+      ...(input
+        ? {
+            user_uuid: input.user_uuid ?? null,
+            visitor_uuid: input.visitor_uuid,
+            source_channel: input.channel,
+          }
+        : {}),
     })
     .eq('room_uuid', room_uuid)
 
@@ -612,7 +627,7 @@ async function try_insert_participant_and_direct_room(
     .maybeSingle()
 
   if (!participant_result.error && participant_result.data) {
-    await touch_room_row(room.room_uuid)
+    await touch_room_row(room.room_uuid, input)
 
     return {
       tag: 'fresh',
@@ -665,6 +680,9 @@ async function touch_direct_participant_and_room(
     .update({
       status: 'active',
       updated_at: now,
+      user_uuid: input.user_uuid ?? null,
+      visitor_uuid: input.visitor_uuid,
+      source_channel: input.channel,
     })
     .eq('room_uuid', room.room_uuid)
 
@@ -759,7 +777,7 @@ async function assign_participant_to_direct_room(
     throw new Error('move_participant: update returned no row')
   }
 
-  await touch_room_row(new_room.room_uuid)
+  await touch_room_row(new_room.room_uuid, input)
 
   const final_room = await load_room_row(new_room.room_uuid)
 

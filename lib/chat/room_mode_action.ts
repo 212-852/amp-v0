@@ -319,10 +319,7 @@ export async function room_mode_request_concierge(input: {
       mode: 'concierge',
       requested_at: now,
       timeline: row.action_id
-        ? [
-            ...(row.bot_resumed_at ? ['Returned to bot'] : []),
-            'Concierge requested again',
-          ]
+        ? ['Concierge requested again']
         : ['Concierge requested'],
     }),
   })
@@ -414,7 +411,7 @@ export async function room_mode_accept_concierge(input: {
       user_uuid: handles.user_uuid,
       channel: input.channel,
       mode: 'concierge',
-      requested_at: row.concierge_requested_at,
+      requested_at: null,
       timeline: [log_label],
     }),
   })
@@ -502,11 +499,8 @@ export async function room_mode_resume_bot(input: {
       user_uuid: input.chat_room.user_uuid,
       channel: input.channel,
       mode: 'bot',
-      requested_at: row.concierge_requested_at,
-      timeline: [
-        ...(row.concierge_requested_at ? ['Concierge requested'] : []),
-        'Returned to bot',
-      ],
+      requested_at: null,
+      timeline: ['Concierge requested', 'Returned to bot'],
     }),
   })
 

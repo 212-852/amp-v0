@@ -880,20 +880,14 @@ async function apply_switch_room_mode_action(input: {
         user_uuid: input.chat_room.user_uuid,
         channel: input.channel,
         mode: input.mode,
-        requested_at:
-          input.mode === 'concierge'
-            ? now
-            : row.concierge_requested_at,
+        requested_at: input.mode === 'concierge' ? now : null,
         timeline:
           input.mode === 'concierge'
             ? row.action_id
-              ? [
-                  ...(row.bot_resumed_at ? ['Returned to bot'] : []),
-                  'Concierge requested again',
-                ]
+              ? ['Concierge requested again']
               : ['Concierge requested']
             : [
-                ...(row.concierge_requested_at
+                ...(current_mode === 'concierge'
                   ? ['Concierge requested']
                   : []),
                 'Returned to bot',
