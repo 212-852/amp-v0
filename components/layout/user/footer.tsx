@@ -119,6 +119,7 @@ export default function UserFooter() {
   const [locale, set_locale] = useState<locale_key>('ja')
   const [room_mode_segment, set_room_mode_segment] =
     useState<room_mode_segment>('bot')
+  const [room_uuid, set_room_uuid] = useState<string | null>(null)
   const [mode, set_mode] = useState<footer_mode>('nav')
   const [flip_rotation, set_flip_rotation] = useState(0)
   const [card_scale, set_card_scale] = useState(1)
@@ -151,16 +152,23 @@ export default function UserFooter() {
           credentials: 'include',
         })
         const payload = (await response.json()) as {
-          chat?: { mode?: room_mode_segment } | null
+          chat?: {
+            room_uuid?: string | null
+            mode?: room_mode_segment
+          } | null
         }
 
-        if (
-          !cancelled &&
-          payload.chat &&
-          (payload.chat.mode === 'bot' ||
-            payload.chat.mode === 'concierge')
-        ) {
-          set_room_mode_segment(payload.chat.mode)
+        if (!cancelled && payload.chat) {
+          if (payload.chat.room_uuid) {
+            set_room_uuid(payload.chat.room_uuid)
+          }
+
+          if (
+            payload.chat.mode === 'bot' ||
+            payload.chat.mode === 'concierge'
+          ) {
+            set_room_mode_segment(payload.chat.mode)
+          }
         }
       } catch {
         // Session is optional for static render; keep footer default.
@@ -204,17 +212,18 @@ export default function UserFooter() {
     void _item_key
   }
 
-  async function post_room_mode_action(
-    action: 'request_concierge' | 'resume_bot',
-  ) {
+  async function post_room_mode_action(next_mode: room_mode_segment) {
     try {
-      const response = await fetch('/api/chat/room_mode', {
+      const response = await fetch('/api/chat/mode', {
         method: 'POST',
         credentials: 'include',
         headers: {
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({
+          room_uuid,
+          mode: next_mode,
+        }),
       })
       const payload = (await response.json()) as {
         ok?: boolean
@@ -231,13 +240,13 @@ export default function UserFooter() {
 
   function handle_select_bot() {
     if (room_mode_segment === 'concierge') {
-      void post_room_mode_action('resume_bot')
+      void post_room_mode_action('bot')
     }
   }
 
   function handle_select_concierge() {
     if (room_mode_segment === 'bot') {
-      void post_room_mode_action('request_concierge')
+      void post_room_mode_action('concierge')
     }
   }
 

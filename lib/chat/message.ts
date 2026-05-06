@@ -575,14 +575,14 @@ const room_mode_notice: {
   resumed_bot: localized_content
 } = {
   concierge_requested: {
-    ja: 'コンシェルジュモードに切り替えました。',
-    en: 'Switched to concierge mode.',
-    es: 'Modo conserje activado.',
+    ja: 'コンシェルジュに切り替えました。担当者が確認します。',
+    en: 'Switched to Concierge. A team member will check your message.',
+    es: 'Cambiamos a Concierge. Un miembro del equipo revisara tu mensaje.',
   },
   resumed_bot: {
-    ja: 'BOTモードに戻しました。',
-    en: 'Returned to bot mode.',
-    es: 'Volviste al modo bot.',
+    ja: 'BOTに切り替えました。自動応答に戻ります。',
+    en: 'Switched to BOT. Automated replies are back on.',
+    es: 'Cambiamos a BOT. Las respuestas automaticas vuelven a estar activas.',
   },
 }
 
