@@ -14,6 +14,7 @@ export type admin_route_access =
       display_name: string | null
       image_url: string | null
       role: 'admin'
+      tier: string | null
     }
   | {
       allowed: false
@@ -51,9 +52,8 @@ export type role_route_result = {
 }
 
 type auth_route_debug_event =
-  | 'AUTH_ROUTE admin_access_allowed'
   | 'AUTH_ROUTE admin_access_denied'
-  | 'AUTH_ROUTE role_redirect'
+  | 'AUTH_ROUTE auth_route_failed'
 
 async function emit_auth_route_debug(
   event: auth_route_debug_event,
@@ -152,11 +152,6 @@ export async function resolve_role_route(input: {
 
   if (pathname.startsWith('/admin')) {
     if (user_uuid && role === 'admin') {
-      await emit_auth_route_debug('AUTH_ROUTE admin_access_allowed', {
-        ...base_payload,
-        redirect_to: null,
-      })
-
       return { redirect_to: null }
     }
 
@@ -170,11 +165,6 @@ export async function resolve_role_route(input: {
 
   if (pathname === '/' || pathname === '/user') {
     if (user_uuid && role === 'admin') {
-      await emit_auth_route_debug('AUTH_ROUTE role_redirect', {
-        ...base_payload,
-        redirect_to: '/admin',
-      })
-
       return { redirect_to: '/admin' }
     }
 
@@ -230,6 +220,7 @@ export async function resolve_admin_route_access(
     user_uuid: user.user_uuid!,
     visitor_uuid: user.visitor_uuid!,
     role: 'admin',
+    tier: user.tier,
     display_name: user.display_name,
     image_url: user.image_url ?? null,
   }
@@ -271,5 +262,6 @@ export async function require_admin_route_access(pathname = '/admin') {
     display_name: session.display_name,
     image_url: session.image_url ?? null,
     role: 'admin' as const,
+    tier: session.tier,
   }
 }

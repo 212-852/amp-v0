@@ -10,6 +10,8 @@ import {
 type AdminHeaderProps = {
   display_name: string | null
   image_url?: string | null
+  role?: string | null
+  tier?: string | null
 }
 
 const icon_button_class =
@@ -18,8 +20,14 @@ const icon_button_class =
 export default function AdminHeader({
   display_name,
   image_url,
+  role,
+  tier,
 }: AdminHeaderProps) {
   const profile_name = display_name?.trim() || 'Admin'
+  const subtitle = [role, tier]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(' ') || 'admin'
 
   return (
     <header className="border-b border-black/[0.06] bg-white px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] shadow-[0_1px_0_rgba(0,0,0,0.03)]">
@@ -46,7 +54,7 @@ export default function AdminHeader({
               {profile_name}
             </div>
             <div className="mt-0.5 text-xs font-medium leading-tight text-neutral-500">
-              LINE admin
+              {subtitle}
             </div>
           </div>
         </div>
