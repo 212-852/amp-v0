@@ -1,6 +1,9 @@
+import { redirect } from 'next/navigation'
+
 import { WebChat } from '@/components/chat/web'
 import SessionBootstrap from '@/components/session/bootstrap'
 import type { initial_chat_result } from '@/lib/chat/action'
+import { get_session_user, resolve_role_route } from '@/lib/auth/route'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +24,18 @@ function empty_user_home_chat(): initial_chat_result {
 }
 
 export default async function UserPage() {
+  const session = await get_session_user()
+  const role_route = await resolve_role_route({
+    pathname: '/',
+    user_uuid: session.user_uuid,
+    role: session.role,
+    tier: session.tier,
+  })
+
+  if (role_route.redirect_to) {
+    redirect(role_route.redirect_to)
+  }
+
   let chat_state: initial_chat_result
 
   try {

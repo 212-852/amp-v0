@@ -1,6 +1,7 @@
 'use client'
 
 import type { Liff } from '@line/liff'
+import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 import { is_line_in_app_browser } from '@/lib/auth/context'
@@ -104,6 +105,7 @@ async function read_liff_id_token(liff: Liff): Promise<string | null> {
 }
 
 export default function LiffBootstrap() {
+  const router = useRouter()
   const [is_loading, set_is_loading] = useState(false)
   const [liff_error, set_liff_error] = useState<string | null>(null)
 
@@ -203,6 +205,7 @@ export default function LiffBootstrap() {
           result,
         })
         window.dispatchEvent(new Event('amp_session_changed'))
+        router.refresh()
       } else {
         await emit_liff_debug('liff_auth_api_failed', {
           ...base_payload,
