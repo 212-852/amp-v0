@@ -207,7 +207,35 @@ export async function deliver_line_chat_bundles(
 ) {
   const reply_token = input.line_reply_token
 
-  if (!reply_token || input.messages.length === 0) {
+  if (!reply_token?.trim()) {
+    if (control.debug.line_webhook) {
+      await debug_event({
+        category: 'line_webhook',
+        event: 'line_reply_skipped',
+        payload: {
+          reason: 'no_reply_token',
+          room_uuid: input.room.room_uuid,
+          line_user_id: input.line_user_id ?? null,
+        },
+      })
+    }
+
+    return
+  }
+
+  if (input.messages.length === 0) {
+    if (control.debug.line_webhook) {
+      await debug_event({
+        category: 'line_webhook',
+        event: 'line_reply_skipped',
+        payload: {
+          reason: 'no_messages',
+          room_uuid: input.room.room_uuid,
+          line_user_id: input.line_user_id ?? null,
+        },
+      })
+    }
+
     return
   }
 
@@ -243,6 +271,19 @@ export async function deliver_line_chat_bundles(
 
   const line_message_count = line_messages.length
 
+  if (control.debug.line_webhook) {
+    await debug_event({
+      category: 'line_webhook',
+      event: 'line_reply_attempted',
+      payload: {
+        ...line_trace_base,
+        bundle_count,
+        line_message_count,
+        flex_bubble_count,
+      },
+    })
+  }
+
   try {
     await post_line_reply_messages({
       reply_token,
@@ -276,5 +317,23 @@ export async function deliver_line_chat_bundles(
       bundle_count,
       line_message_count,
     })
+
+    if (control.debug.line_webhook) {
+      await debug_event({
+        category: 'line_webhook',
+        event: 'line_reply_failed',
+        payload: {
+          ...line_trace_base,
+          bundle_count,
+          line_message_count,
+          error_message:
+            reply_error instanceof Error
+              ? reply_error.message
+              : String(reply_error),
+          line_status: err.line_status ?? null,
+          line_body_preview: err.line_body ?? null,
+        },
+      })
+    }
   }
 }

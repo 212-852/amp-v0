@@ -196,6 +196,15 @@ export async function resolve_initial_chat(
   }
 
   try {
+    if (input.channel === 'line' && !input.line_reply_token?.trim()) {
+      return {
+        room: room_result.room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages: archived_messages,
+      }
+    }
+
     const archived_incoming =
       input.channel === 'line'
         ? await archive_input_line_text_for_room({

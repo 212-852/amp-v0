@@ -261,6 +261,18 @@ export async function archive_incoming_line_text(
       })
     }
 
+    if (control.debug.line_webhook) {
+      await debug_event({
+        category: 'line_webhook',
+        event: 'incoming_message_archived',
+        payload: {
+          room_uuid: input.room_uuid,
+          message_uuid: row.message_uuid,
+          line_message_id: input.line_message_id,
+        },
+      })
+    }
+
     return {
       archived_message: normalize_archive(row, existing_rows.length),
       is_duplicate: false,
@@ -357,6 +369,28 @@ export async function archive_message_bundles(
           message_uuid: row.message_uuid,
           direction,
           channel: input.channel,
+        },
+      })
+    }
+  }
+
+  if (control.debug.line_webhook && input.channel === 'line') {
+    for (let i = 0; i < inserted.length; i++) {
+      const row = inserted[i]
+      const bundle = input.bundles[i]
+      const direction = archive_direction_for_sender(bundle.sender)
+
+      await debug_event({
+        category: 'line_webhook',
+        event:
+          direction === 'incoming'
+            ? 'incoming_message_archived'
+            : 'outgoing_message_archived',
+        payload: {
+          room_uuid: input.room_uuid,
+          message_uuid: row.message_uuid,
+          direction,
+          bundle_type: bundle.bundle_type,
         },
       })
     }

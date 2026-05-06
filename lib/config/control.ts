@@ -9,7 +9,8 @@ export const control = {
     locale: false,
     identity: true,
     line: false,
-    line_webhook: false,
+    /** Temporary: LINE Messaging webhook trace (see `app/api/webhook/line/route.ts`). */
+    line_webhook: true,
     identity_promotion: false,
 
     line_auth: true,
@@ -23,6 +24,7 @@ export const control = {
       'session',
       'liff',
       'identity',
+      'line_webhook',
     ],
   },
 
