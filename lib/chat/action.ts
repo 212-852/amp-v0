@@ -836,12 +836,10 @@ async function apply_switch_room_mode_action(input: {
     input.mode === 'concierge'
       ? {
           mode: 'concierge' as const,
-          concierge_requested_at: now,
           updated_at: now,
         }
       : {
           mode: 'bot' as const,
-          bot_resumed_at: now,
           updated_at: now,
         }
 

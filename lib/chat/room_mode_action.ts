@@ -289,7 +289,6 @@ export async function room_mode_request_concierge(input: {
     .from('rooms')
     .update({
       mode: 'concierge',
-      concierge_requested_at: now,
       updated_at: now,
     })
     .eq('room_uuid', row.room_uuid)
@@ -367,7 +366,6 @@ export async function room_mode_accept_concierge(input: {
   const update = await supabase
     .from('rooms')
     .update({
-      concierge_accepted_at: now,
       updated_at: now,
     })
     .eq('room_uuid', row.room_uuid)
@@ -471,7 +469,6 @@ export async function room_mode_resume_bot(input: {
     .from('rooms')
     .update({
       mode: 'bot',
-      bot_resumed_at: now,
       updated_at: now,
     })
     .eq('room_uuid', row.room_uuid)

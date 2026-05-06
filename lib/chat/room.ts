@@ -4,7 +4,7 @@ import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
 
-import { room_select_fields } from '@/lib/chat/room/fields'
+import { room_select_fields } from '@/lib/chat/room/schema'
 
 export type chat_channel =
   | 'web'
@@ -49,12 +49,9 @@ type resolve_room_input = {
 
 type room_row = {
   room_uuid: string
-  mode: string | null
   room_type: string | null
-  user_uuid: string | null
-  visitor_uuid: string | null
   status: string | null
-  source_channel: string | null
+  mode: string | null
   action_id: string | null
   created_at: string | null
   updated_at: string | null
@@ -343,9 +340,6 @@ async function insert_direct_room_row(
       status: 'active',
       updated_at: now,
       mode: 'bot',
-      user_uuid: input.user_uuid ?? null,
-      visitor_uuid: input.visitor_uuid,
-      source_channel: input.channel,
     })
     .select(room_select_fields)
     .maybeSingle()
@@ -386,23 +380,13 @@ async function insert_direct_room_row(
   }
 }
 
-async function touch_room_row(
-  room_uuid: string,
-  input?: resolve_room_input | null,
-) {
+async function touch_room_row(room_uuid: string) {
   const now = new Date().toISOString()
   const room_result = await supabase
     .from('rooms')
     .update({
       updated_at: now,
       status: 'active',
-      ...(input
-        ? {
-            user_uuid: input.user_uuid ?? null,
-            visitor_uuid: input.visitor_uuid,
-            source_channel: input.channel,
-          }
-        : {}),
     })
     .eq('room_uuid', room_uuid)
 
@@ -627,7 +611,7 @@ async function try_insert_participant_and_direct_room(
     .maybeSingle()
 
   if (!participant_result.error && participant_result.data) {
-    await touch_room_row(room.room_uuid, input)
+    await touch_room_row(room.room_uuid)
 
     return {
       tag: 'fresh',
@@ -680,9 +664,6 @@ async function touch_direct_participant_and_room(
     .update({
       status: 'active',
       updated_at: now,
-      user_uuid: input.user_uuid ?? null,
-      visitor_uuid: input.visitor_uuid,
-      source_channel: input.channel,
     })
     .eq('room_uuid', room.room_uuid)
 
@@ -777,7 +758,7 @@ async function assign_participant_to_direct_room(
     throw new Error('move_participant: update returned no row')
   }
 
-  await touch_room_row(new_room.room_uuid, input)
+  await touch_room_row(new_room.room_uuid)
 
   const final_room = await load_room_row(new_room.room_uuid)
 
@@ -1041,6 +1022,40 @@ export async function resolve_chat_room(
     const canonical_participant =
       merged_participant ??
       (await find_canonical_user_participant(input))
+
+    const external_room_id = input.external_room_id?.trim() ?? null
+
+    if (external_room_id) {
+      if (!canonical_participant?.room_uuid) {
+        return {
+          ok: false,
+          room: fallback_chat_room(input),
+          is_new_room: false,
+        }
+      }
+
+      if (canonical_participant.room_uuid !== external_room_id) {
+        return {
+          ok: false,
+          room: fallback_chat_room(input),
+          is_new_room: false,
+        }
+      }
+
+      const pinned_room = await load_room_row(external_room_id)
+
+      if (
+        !pinned_room ||
+        pinned_room.room_type !== 'direct' ||
+        pinned_room.status === 'inactive'
+      ) {
+        return {
+          ok: false,
+          room: fallback_chat_room(input),
+          is_new_room: false,
+        }
+      }
+    }
 
     if (control.debug.chat_room) {
       await debug_event({
