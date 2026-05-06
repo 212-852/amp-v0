@@ -2,6 +2,173 @@ import 'server-only'
 
 import type { notify_event } from './rules'
 
+const discord_api_base = 'https://discord.com/api/v10'
+
+export type discord_action_context_input = {
+  title: string
+  content: string
+  action_id: string | null
+}
+
+export type discord_action_context_result = {
+  action_id: string | null
+}
+
+function action_id_from_discord_thread_id(
+  thread_id: string | null | undefined,
+) {
+  if (!thread_id) {
+    return null
+  }
+
+  return `discord:${thread_id}`
+}
+
+function discord_thread_id_from_action_id(
+  action_id: string | null | undefined,
+) {
+  if (!action_id?.startsWith('discord:')) {
+    return null
+  }
+
+  const thread_id = action_id.slice('discord:'.length).trim()
+
+  return thread_id || null
+}
+
+async function discord_action_bot_fetch(
+  path: string,
+  init: RequestInit,
+) {
+  const token = process.env.DISCORD_ACTION_BOT_TOKEN?.trim()
+
+  if (!token) {
+    return null
+  }
+
+  return fetch(`${discord_api_base}${path}`, {
+    ...init,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bot ${token}`,
+      ...(init.headers ?? {}),
+    },
+  })
+}
+
+function action_webhook_url(title: string) {
+  const raw = process.env.DISCORD_ACTION_WEBHOOK_URL?.trim()
+
+  if (!raw) {
+    return null
+  }
+
+  const url = new URL(raw)
+
+  url.searchParams.set('wait', 'true')
+  url.searchParams.set('thread_name', title.slice(0, 90))
+
+  return url.toString()
+}
+
+async function create_discord_action_context(input: {
+  title: string
+  content: string
+}): Promise<discord_action_context_result | null> {
+  const url = action_webhook_url(input.title)
+
+  if (!url) {
+    return null
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      content: input.content,
+    }),
+  })
+
+  if (!response.ok) {
+    console.warn(
+      '[discord_action] create_failed',
+      response.status,
+      await response.text(),
+    )
+
+    return null
+  }
+
+  const payload = (await response.json()) as {
+    channel_id?: string
+  }
+
+  return {
+    action_id: action_id_from_discord_thread_id(
+      payload.channel_id ?? null,
+    ),
+  }
+}
+
+async function update_discord_action_context(input: {
+  action_id: string
+  content: string
+}): Promise<discord_action_context_result | null> {
+  const thread_id = discord_thread_id_from_action_id(input.action_id)
+
+  if (!thread_id) {
+    return null
+  }
+
+  const response = await discord_action_bot_fetch(
+    `/channels/${thread_id}/messages`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        content: input.content,
+      }),
+    },
+  )
+
+  if (response?.ok) {
+    return {
+      action_id: input.action_id,
+    }
+  }
+
+  if (response && !response.ok) {
+    console.warn(
+      '[discord_action] thread_append_failed',
+      response.status,
+      await response.text(),
+    )
+  }
+
+  return null
+}
+
+export async function sync_discord_action_context(
+  input: discord_action_context_input,
+): Promise<discord_action_context_result | null> {
+  if (input.action_id) {
+    const updated = await update_discord_action_context({
+      action_id: input.action_id,
+      content: input.content,
+    })
+
+    if (updated) {
+      return updated
+    }
+  }
+
+  return create_discord_action_context({
+    title: input.title,
+    content: input.content,
+  })
+}
+
 function get_debug_discord_mention_user_ids() {
   const raw = process.env.DISCORD_DEV_USER_IDS
 

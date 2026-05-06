@@ -8,7 +8,7 @@ import {
   type browser_session_source_channel,
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
-import { upsert_discord_action_post } from '@/lib/discord/action'
+import { sync_room_action_context } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 import { archive_message_bundles } from './archive'
@@ -71,15 +71,13 @@ function action_content(input: {
   ].join('\n')
 }
 
-async function persist_discord_tracking(input: {
+async function persist_action_id(input: {
   room_uuid: string
-  discord_action_post_id: string | null
   action_id: string | null
 }) {
   const result = await supabase
     .from('rooms')
     .update({
-      discord_action_post_id: input.discord_action_post_id,
       action_id: input.action_id,
       updated_at: new Date().toISOString(),
     })
@@ -306,13 +304,13 @@ export async function room_mode_request_concierge(input: {
   })
 
   const display_name = await load_display_name(input.chat_room.user_uuid)
-  const action_log = await upsert_discord_action_post({
+  const action_context = await sync_room_action_context({
+    provider: 'discord',
     title: action_title({
       display_name,
       room_uuid: row.room_uuid,
     }),
-    existing_post_id: row.discord_action_post_id,
-    existing_action_id: row.action_id,
+    action_id: row.action_id,
     content: action_content({
       room_uuid: row.room_uuid,
       visitor_uuid: input.chat_room.visitor_uuid,
@@ -320,7 +318,7 @@ export async function room_mode_request_concierge(input: {
       channel: input.channel,
       mode: 'concierge',
       requested_at: now,
-      timeline: row.discord_action_post_id
+      timeline: row.action_id
         ? [
             ...(row.bot_resumed_at ? ['Returned to bot'] : []),
             'Concierge requested again',
@@ -329,11 +327,10 @@ export async function room_mode_request_concierge(input: {
     }),
   })
 
-  if (action_log) {
-    await persist_discord_tracking({
+  if (action_context) {
+    await persist_action_id({
       room_uuid: row.room_uuid,
-      discord_action_post_id: action_log.discord_action_post_id,
-      action_id: action_log.action_id,
+      action_id: action_context.action_id,
     })
   }
 
@@ -404,13 +401,13 @@ export async function room_mode_accept_concierge(input: {
   const log_label = `${input.admin_display_name?.trim() || 'Admin'} accepted`
 
   const display_name = await load_display_name(handles.user_uuid)
-  const action_log = await upsert_discord_action_post({
+  const action_context = await sync_room_action_context({
+    provider: 'discord',
     title: action_title({
       display_name,
       room_uuid: row.room_uuid,
     }),
-    existing_post_id: row.discord_action_post_id,
-    existing_action_id: row.action_id,
+    action_id: row.action_id,
     content: action_content({
       room_uuid: row.room_uuid,
       visitor_uuid: handles.visitor_uuid,
@@ -422,11 +419,10 @@ export async function room_mode_accept_concierge(input: {
     }),
   })
 
-  if (action_log) {
-    await persist_discord_tracking({
+  if (action_context) {
+    await persist_action_id({
       room_uuid: row.room_uuid,
-      discord_action_post_id: action_log.discord_action_post_id,
-      action_id: action_log.action_id,
+      action_id: action_context.action_id,
     })
   }
 
@@ -493,13 +489,13 @@ export async function room_mode_resume_bot(input: {
   })
 
   const display_name = await load_display_name(input.chat_room.user_uuid)
-  const action_log = await upsert_discord_action_post({
+  const action_context = await sync_room_action_context({
+    provider: 'discord',
     title: action_title({
       display_name,
       room_uuid: row.room_uuid,
     }),
-    existing_post_id: row.discord_action_post_id,
-    existing_action_id: row.action_id,
+    action_id: row.action_id,
     content: action_content({
       room_uuid: row.room_uuid,
       visitor_uuid: input.chat_room.visitor_uuid,
@@ -514,11 +510,10 @@ export async function room_mode_resume_bot(input: {
     }),
   })
 
-  if (action_log) {
-    await persist_discord_tracking({
+  if (action_context) {
+    await persist_action_id({
       room_uuid: row.room_uuid,
-      discord_action_post_id: action_log.discord_action_post_id,
-      action_id: action_log.action_id,
+      action_id: action_context.action_id,
     })
   }
 

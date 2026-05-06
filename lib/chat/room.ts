@@ -23,7 +23,7 @@ export type chat_room = {
 }
 
 const ROOM_DB_SELECT =
-  'room_uuid, room_type, status, updated_at, mode, action_id, discord_action_post_id, concierge_requested_at, concierge_accepted_at, bot_resumed_at'
+  'room_uuid, room_type, status, updated_at, mode, action_id, concierge_requested_at, concierge_accepted_at, bot_resumed_at'
 
 export function parse_room_mode(value: string | null | undefined): room_mode {
   return value === 'concierge' ? 'concierge' : 'bot'
@@ -55,7 +55,6 @@ type room_row = {
   updated_at: string | null
   mode: string | null
   action_id: string | null
-  discord_action_post_id: string | null
   concierge_requested_at: string | null
   concierge_accepted_at: string | null
   bot_resumed_at: string | null

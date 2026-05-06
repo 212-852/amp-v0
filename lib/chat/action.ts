@@ -9,7 +9,7 @@ import {
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
-import { upsert_discord_action_post } from '@/lib/discord/action'
+import { sync_room_action_context } from '@/lib/notify'
 import {
   archive_incoming_line_text,
   archive_message_bundles,
@@ -717,15 +717,13 @@ function action_content(input: {
   ].join('\n')
 }
 
-async function persist_discord_tracking(input: {
+async function persist_action_id(input: {
   room_uuid: string
-  discord_action_post_id: string | null
   action_id: string | null
 }) {
   const result = await supabase
     .from('rooms')
     .update({
-      discord_action_post_id: input.discord_action_post_id,
       action_id: input.action_id,
       updated_at: new Date().toISOString(),
     })
@@ -864,18 +862,18 @@ async function apply_switch_room_mode_action(input: {
   const display_name = await load_user_display_name(
     input.chat_room.user_uuid,
   )
-  const should_sync_action_post =
+  const should_sync_action_context =
     input.mode === 'concierge' ||
-    Boolean(row.discord_action_post_id || row.action_id)
+    Boolean(row.action_id)
 
-  if (should_sync_action_post) {
-    const action_log = await upsert_discord_action_post({
+  if (should_sync_action_context) {
+    const action_context = await sync_room_action_context({
+      provider: 'discord',
       title: action_title({
         display_name,
         room_uuid: row.room_uuid,
       }),
-      existing_post_id: row.discord_action_post_id,
-      existing_action_id: row.action_id,
+      action_id: row.action_id,
       content: action_content({
         room_uuid: row.room_uuid,
         visitor_uuid: input.chat_room.visitor_uuid,
@@ -888,7 +886,7 @@ async function apply_switch_room_mode_action(input: {
             : row.concierge_requested_at,
         timeline:
           input.mode === 'concierge'
-            ? row.discord_action_post_id
+            ? row.action_id
               ? [
                   ...(row.bot_resumed_at ? ['Returned to bot'] : []),
                   'Concierge requested again',
@@ -903,11 +901,10 @@ async function apply_switch_room_mode_action(input: {
       }),
     })
 
-    if (action_log) {
-      await persist_discord_tracking({
+    if (action_context) {
+      await persist_action_id({
         room_uuid: row.room_uuid,
-        discord_action_post_id: action_log.discord_action_post_id,
-        action_id: action_log.action_id,
+        action_id: action_context.action_id,
       })
     }
   }
