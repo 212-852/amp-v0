@@ -7,7 +7,10 @@ import {
   visitor_cookie_max_age,
 } from '@/lib/auth/session'
 import { env } from '@/lib/config/env'
-import { visitor_cookie_name } from '@/lib/visitor/cookie'
+import {
+  resolved_visitor_request_header_name,
+  visitor_cookie_name,
+} from '@/lib/visitor/cookie'
 
 function read_browser_session_cookie_values(
   visitor_cookie: string | null | undefined,
@@ -40,6 +43,7 @@ function create_response(
   response_builder: (headers: Headers) => NextResponse,
 ) {
   const request_headers = new Headers(request.headers)
+  request_headers.delete(resolved_visitor_request_header_name)
   const existing = read_browser_session_cookie_values(
     request.cookies.get(visitor_cookie_name)?.value,
   )
@@ -52,6 +56,7 @@ function create_response(
     (should_create_guest_visitor ? mint_visitor_uuid() : null)
 
   if (visitor_uuid) {
+    request_headers.set(resolved_visitor_request_header_name, visitor_uuid)
     append_request_cookie(
       request_headers,
       visitor_cookie_name,

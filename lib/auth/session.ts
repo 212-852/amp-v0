@@ -2,6 +2,7 @@ import { cache } from 'react'
 
 import { control } from '@/lib/config/control'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
+import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 
 export { visitor_cookie_name }
 
@@ -260,6 +261,36 @@ async function find_visitor_row(
     .select('visitor_uuid, access_channel')
     .eq('visitor_uuid', visitor_uuid)
     .maybeSingle()
+}
+
+async function find_visitor_row_for_reuse(input: {
+  supabase: Awaited<ReturnType<typeof get_supabase>>
+  visitor_uuid: string
+  reuse_expected: boolean
+}) {
+  const attempts = input.reuse_expected ? 2 : 1
+  let last_row: Awaited<ReturnType<typeof find_visitor_row>> | undefined
+
+  for (let i = 0; i < attempts; i += 1) {
+    last_row = await find_visitor_row(
+      input.supabase,
+      input.visitor_uuid,
+    )
+
+    if (last_row.error) {
+      throw last_row.error
+    }
+
+    if (last_row.data?.visitor_uuid) {
+      return last_row
+    }
+
+    if (i < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 40))
+    }
+  }
+
+  return last_row!
 }
 
 async function find_visitor_by_user(
@@ -534,6 +565,7 @@ function build_visitor_access_patch(input: {
 async function ensure_browser_visitor(input: {
   supabase: Awaited<ReturnType<typeof get_supabase>>
   visitor_uuid: string
+  reuse_expected: boolean
   source_channel: browser_session_source_channel
   caller: browser_session_caller
   locale?: string | null
@@ -554,10 +586,11 @@ async function ensure_browser_visitor(input: {
     error_message: null,
   })
 
-  const existing_visitor = await find_visitor_row(
-    input.supabase,
-    input.visitor_uuid,
-  )
+  const existing_visitor = await find_visitor_row_for_reuse({
+    supabase: input.supabase,
+    visitor_uuid: input.visitor_uuid,
+    reuse_expected: input.reuse_expected,
+  })
 
   if (existing_visitor.error) {
     throw existing_visitor.error
@@ -725,6 +758,7 @@ async function ensure_session_rows(
   input: browser_session_input,
 ): Promise<browser_session_result> {
   const visitor_uuid = input.visitor_uuid ?? mint_visitor_uuid()
+  const reuse_expected = Boolean(input.visitor_uuid)
   const cookie_exists = Boolean(input.visitor_uuid) && !input.cookie_created
   const session_exists = cookie_exists
   const source_channel = input.source_channel ?? 'web'
@@ -748,6 +782,7 @@ async function ensure_session_rows(
   const is_new_visitor = await ensure_browser_visitor({
     supabase,
     visitor_uuid,
+    reuse_expected,
     source_channel,
     caller: input.caller ?? 'unknown',
     locale: input.locale,
@@ -769,14 +804,12 @@ async function ensure_session_rows(
  * Request-level cache: cookies().get only. No DB writes, no cookies().set.
  */
 export const read_session = cache(async (): Promise<read_session_result> => {
-  const { cookies, headers } = await import('next/headers')
-  const cookie_store = await cookies()
+  const { headers } = await import('next/headers')
   const header_store = await headers()
   const user_agent = header_store.get('user-agent')
   const source_channel = infer_source_channel_from_ua(user_agent)
 
-  const current_visitor_uuid =
-    cookie_store.get(visitor_cookie_name)?.value ?? null
+  const current_visitor_uuid = await get_request_visitor_uuid()
   const cookie_exists = Boolean(current_visitor_uuid)
   const session_exists = cookie_exists
 
@@ -903,9 +936,7 @@ export async function track_session_resolution(
   void _user_agent
   void _access_platform
 
-  const { cookies } = await import('next/headers')
-  const cookie_store = await cookies()
-  const pre_v = cookie_store.get(visitor_cookie_name)?.value ?? null
+  const pre_v = await get_request_visitor_uuid()
 
   await emit_session_core_event('session_resolve_started', {
     caller,

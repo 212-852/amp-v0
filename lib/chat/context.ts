@@ -6,7 +6,7 @@ import { headers } from 'next/headers'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
 import { locale_cookie_name } from '@/lib/locale/cookie'
-import { visitor_cookie_name } from '@/lib/visitor/cookie'
+import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import {
   resolve_visitor_context,
   type session_source_channel,
@@ -97,8 +97,7 @@ export async function resolve_chat_context(
     header_store.get('accept-language')?.split(',')[0] ??
     null
   const browser_locale = normalize_optional_locale(accept_language)
-  const visitor_uuid =
-    cookie_store.get(visitor_cookie_name)?.value ?? null
+  const visitor_uuid = await get_request_visitor_uuid()
   const cookie_created =
     header_store.get('x-amp-visitor-cookie-created') === '1'
   const browser_session = await resolve_visitor_context(

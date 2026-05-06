@@ -12,6 +12,7 @@ import {
   type browser_session_source_channel,
 } from '@/lib/auth/session'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
+import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { control } from '@/lib/config/control'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import type { chat_channel } from '@/lib/chat/room'
@@ -356,7 +357,7 @@ async function resolve_session_payload() {
   )
 
   const visitor = await ensure_session({
-    visitor_uuid: cookie_store.get(visitor_cookie_name)?.value ?? null,
+    visitor_uuid: (await get_request_visitor_uuid()) ?? null,
     caller: 'api_session',
     source_channel: session_src,
     locale,
