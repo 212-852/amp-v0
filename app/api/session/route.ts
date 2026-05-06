@@ -25,7 +25,6 @@ type connected_provider = 'line' | 'google' | 'email'
 type session_chat_state = {
   room_uuid: string
   mode: 'bot' | 'concierge'
-  assigned_admin_uuid: string | null
   is_seeded: boolean
   message_count: number
   initial_carousel_card_count: number
@@ -265,7 +264,6 @@ async function resolve_session_chat(input: {
     return {
       room_uuid: initial_chat.room.room_uuid,
       mode: initial_chat.room.mode,
-      assigned_admin_uuid: initial_chat.room.assigned_admin_uuid,
       is_seeded: initial_chat.is_seeded,
       message_count: initial_chat.messages.length,
       initial_carousel_card_count,

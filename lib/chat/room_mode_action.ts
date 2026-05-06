@@ -39,7 +39,6 @@ const PARTICIPANT_ARCHIVE_SELECT =
 function to_gate(row: stored_room_row): room_mode_gate_row {
   return {
     mode: parse_room_mode(row.mode),
-    assigned_admin_uuid: row.assigned_admin_uuid ?? null,
   }
 }
 
@@ -88,6 +87,89 @@ async function persist_discord_tracking(input: {
 
   if (result.error) {
     throw result.error
+  }
+}
+
+async function update_room_participant_statuses(input: {
+  room_uuid: string
+  mode: room_mode
+  admin_user_uuid?: string | null
+}) {
+  const now = new Date().toISOString()
+
+  if (input.mode === 'bot') {
+    const bot_result = await supabase
+      .from('participants')
+      .update({
+        status: 'handling',
+        updated_at: now,
+      })
+      .eq('room_uuid', input.room_uuid)
+      .eq('role', 'bot')
+
+    if (bot_result.error) {
+      throw bot_result.error
+    }
+
+    const staff_result = await supabase
+      .from('participants')
+      .update({
+        status: 'idle',
+        updated_at: now,
+      })
+      .eq('room_uuid', input.room_uuid)
+      .in('role', ['admin', 'concierge'])
+
+    if (staff_result.error) {
+      throw staff_result.error
+    }
+
+    return
+  }
+
+  const bot_result = await supabase
+    .from('participants')
+    .update({
+      status: 'idle',
+      updated_at: now,
+    })
+    .eq('room_uuid', input.room_uuid)
+    .eq('role', 'bot')
+
+  if (bot_result.error) {
+    throw bot_result.error
+  }
+
+  const staff_status = input.admin_user_uuid ? 'idle' : 'handling'
+  const staff_result = await supabase
+    .from('participants')
+    .update({
+      status: staff_status,
+      updated_at: now,
+    })
+    .eq('room_uuid', input.room_uuid)
+    .in('role', ['admin', 'concierge'])
+
+  if (staff_result.error) {
+    throw staff_result.error
+  }
+
+  if (!input.admin_user_uuid) {
+    return
+  }
+
+  const admin_result = await supabase
+    .from('participants')
+    .update({
+      status: 'handling',
+      updated_at: now,
+    })
+    .eq('room_uuid', input.room_uuid)
+    .eq('user_uuid', input.admin_user_uuid)
+    .in('role', ['admin', 'concierge'])
+
+  if (admin_result.error) {
+    throw admin_result.error
   }
 }
 
@@ -163,7 +245,7 @@ async function load_display_name(user_uuid: string | null) {
 }
 
 export type room_mode_action_result =
-  | { ok: true; mode: room_mode; assigned_admin_uuid: string | null }
+  | { ok: true; mode: room_mode }
   | {
       ok: false
       error: 'forbidden' | 'room_not_found' | 'invalid_transition'
@@ -184,7 +266,6 @@ export async function room_mode_request_concierge(input: {
     return {
       ok: true,
       mode: 'concierge',
-      assigned_admin_uuid: row.assigned_admin_uuid ?? null,
     }
   }
 
@@ -210,7 +291,6 @@ export async function room_mode_request_concierge(input: {
     .from('rooms')
     .update({
       mode: 'concierge',
-      assigned_admin_uuid: null,
       concierge_requested_at: now,
       updated_at: now,
     })
@@ -219,6 +299,11 @@ export async function room_mode_request_concierge(input: {
   if (update.error) {
     throw update.error
   }
+
+  await update_room_participant_statuses({
+    room_uuid: row.room_uuid,
+    mode: 'concierge',
+  })
 
   const display_name = await load_display_name(input.chat_room.user_uuid)
   const action_log = await upsert_discord_action_post({
@@ -257,7 +342,6 @@ export async function room_mode_request_concierge(input: {
   return {
     ok: true,
     mode: parse_room_mode(refreshed?.mode),
-    assigned_admin_uuid: refreshed?.assigned_admin_uuid ?? null,
   }
 }
 
@@ -289,7 +373,6 @@ export async function room_mode_accept_concierge(input: {
   const update = await supabase
     .from('rooms')
     .update({
-      assigned_admin_uuid: input.admin_user_uuid,
       concierge_accepted_at: now,
       updated_at: now,
     })
@@ -298,6 +381,12 @@ export async function room_mode_accept_concierge(input: {
   if (update.error) {
     throw update.error
   }
+
+  await update_room_participant_statuses({
+    room_uuid: row.room_uuid,
+    mode: 'concierge',
+    admin_user_uuid: input.admin_user_uuid,
+  })
 
   const bundle = build_room_mode_admin_accepted_bundle({
     admin_display_name: input.admin_display_name ?? 'Admin',
@@ -346,7 +435,6 @@ export async function room_mode_accept_concierge(input: {
   return {
     ok: true,
     mode: parse_room_mode(refreshed?.mode),
-    assigned_admin_uuid: refreshed?.assigned_admin_uuid ?? null,
   }
 }
 
@@ -365,7 +453,6 @@ export async function room_mode_resume_bot(input: {
     return {
       ok: true,
       mode: 'bot',
-      assigned_admin_uuid: row.assigned_admin_uuid ?? null,
     }
   }
 
@@ -391,7 +478,6 @@ export async function room_mode_resume_bot(input: {
     .from('rooms')
     .update({
       mode: 'bot',
-      assigned_admin_uuid: null,
       bot_resumed_at: now,
       updated_at: now,
     })
@@ -400,6 +486,11 @@ export async function room_mode_resume_bot(input: {
   if (update.error) {
     throw update.error
   }
+
+  await update_room_participant_statuses({
+    room_uuid: row.room_uuid,
+    mode: 'bot',
+  })
 
   const display_name = await load_display_name(input.chat_room.user_uuid)
   const action_log = await upsert_discord_action_post({
@@ -436,7 +527,6 @@ export async function room_mode_resume_bot(input: {
   return {
     ok: true,
     mode: parse_room_mode(refreshed?.mode),
-    assigned_admin_uuid: refreshed?.assigned_admin_uuid ?? null,
   }
 }
 
@@ -468,7 +558,6 @@ export async function room_mode_resume_bot_for_room(input: {
     visitor_uuid: handles.visitor_uuid,
     channel: input.channel,
     mode: parse_room_mode(row.mode),
-    assigned_admin_uuid: row.assigned_admin_uuid ?? null,
   }
 
   return room_mode_resume_bot({

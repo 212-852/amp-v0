@@ -20,11 +20,10 @@ export type chat_room = {
   visitor_uuid: string
   channel: chat_channel
   mode: room_mode
-  assigned_admin_uuid: string | null
 }
 
 const ROOM_DB_SELECT =
-  'room_uuid, room_type, status, updated_at, mode, assigned_admin_uuid, discord_action_thread_id, discord_action_post_id, concierge_requested_at, concierge_accepted_at, bot_resumed_at'
+  'room_uuid, room_type, status, updated_at, mode, discord_action_thread_id, discord_action_post_id, concierge_requested_at, concierge_accepted_at, bot_resumed_at'
 
 export function parse_room_mode(value: string | null | undefined): room_mode {
   return value === 'concierge' ? 'concierge' : 'bot'
@@ -55,7 +54,6 @@ type room_row = {
   status: string | null
   updated_at: string | null
   mode: string | null
-  assigned_admin_uuid: string | null
   discord_action_thread_id: string | null
   discord_action_post_id: string | null
   concierge_requested_at: string | null
@@ -91,7 +89,6 @@ function fallback_chat_room(input: resolve_room_input): chat_room {
     visitor_uuid: input.visitor_uuid,
     channel: input.channel,
     mode: 'bot',
-    assigned_admin_uuid: null,
   }
 }
 
@@ -109,7 +106,6 @@ function normalize_room(
     visitor_uuid: input.visitor_uuid,
     channel: input.channel,
     mode: parse_room_mode(row.mode),
-    assigned_admin_uuid: row.assigned_admin_uuid ?? null,
   }
 }
 

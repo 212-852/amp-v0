@@ -35,7 +35,6 @@ function empty_user_home_chat(): initial_chat_result {
       visitor_uuid: '',
       channel: 'web',
       mode: 'bot',
-      assigned_admin_uuid: null,
     },
     is_new_room: false,
     is_seeded: false,

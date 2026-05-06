@@ -2,7 +2,6 @@
 
 ALTER TABLE public.rooms
   ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'bot',
-  ADD COLUMN IF NOT EXISTS assigned_admin_uuid uuid NULL,
   ADD COLUMN IF NOT EXISTS discord_action_thread_id text NULL,
   ADD COLUMN IF NOT EXISTS discord_action_post_id text NULL,
   ADD COLUMN IF NOT EXISTS concierge_requested_at timestamptz NULL,

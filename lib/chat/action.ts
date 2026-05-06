@@ -382,7 +382,6 @@ export async function load_user_home_chat() {
       visitor_uuid: '',
       channel: 'web' as const,
       mode: 'bot' as const,
-      assigned_admin_uuid: null,
     },
     is_new_room: false,
     is_seeded: false,
@@ -599,7 +598,6 @@ type room_mode_switch_result =
   | {
       ok: true
       mode: room_mode
-      assigned_admin_uuid: string | null
       message_uuid: string | null
     }
   | {
@@ -616,7 +614,6 @@ type switch_room_mode_action_result =
   | {
       ok: true
       mode: room_mode
-      assigned_admin_uuid: string | null
     }
   | {
       ok: false
@@ -742,7 +739,6 @@ async function persist_discord_tracking(input: {
 function room_mode_gate(row: NonNullable<Awaited<ReturnType<typeof load_room_row>>>): room_mode_gate_row {
   return {
     mode: parse_room_mode(row.mode),
-    assigned_admin_uuid: row.assigned_admin_uuid ?? null,
   }
 }
 
@@ -842,13 +838,11 @@ async function apply_switch_room_mode_action(input: {
     input.mode === 'concierge'
       ? {
           mode: 'concierge' as const,
-          assigned_admin_uuid: null,
           concierge_requested_at: now,
           updated_at: now,
         }
       : {
           mode: 'bot' as const,
-          assigned_admin_uuid: null,
           bot_resumed_at: now,
           updated_at: now,
         }
@@ -923,7 +917,6 @@ async function apply_switch_room_mode_action(input: {
   return {
     ok: true,
     mode: parse_room_mode(refreshed?.mode),
-    assigned_admin_uuid: refreshed?.assigned_admin_uuid ?? null,
   }
 }
 
