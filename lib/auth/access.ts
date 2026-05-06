@@ -25,28 +25,6 @@ export type access_result = {
   is_new_visitor: boolean
 }
 
-async function sync_line_messaging_profile_to_visitor(input: {
-  visitor_uuid: string
-  user_uuid: string
-  display_name: string | null | undefined
-}) {
-  const trimmed = input.display_name?.trim()
-
-  if (!trimmed) {
-    return
-  }
-
-  const updated = await supabase
-    .from('visitors')
-    .update({ display_name: trimmed })
-    .eq('visitor_uuid', input.visitor_uuid)
-    .eq('user_uuid', input.user_uuid)
-
-  if (updated.error) {
-    throw updated.error
-  }
-}
-
 function serialize_error(error: unknown) {
   return {
     name: error instanceof Error ? error.name : null,
@@ -166,12 +144,6 @@ export async function resolve_auth_access(
           throw user_update.error
         }
       }
-
-      await sync_line_messaging_profile_to_visitor({
-        visitor_uuid: visitor.visitor_uuid,
-        user_uuid,
-        display_name: input.display_name,
-      })
     }
 
     if (input.provider === 'line') {
@@ -267,27 +239,6 @@ export async function resolve_auth_access(
 
     throw created_identity.error
   }
-
-  if (input.provider === 'line') {
-    try {
-      await sync_line_messaging_profile_to_visitor({
-        visitor_uuid: visitor.visitor_uuid,
-        user_uuid,
-        display_name: input.display_name,
-      })
-    } catch (error) {
-      await debug_line_identity('line_identity_create_failed', {
-        line_user_id: input.provider_id,
-        user_uuid,
-        visitor_uuid: visitor.visitor_uuid,
-        step: 'visitor_profile_sync',
-        error: serialize_error(error),
-      })
-
-      throw error
-    }
-  }
-
   if (input.provider === 'line') {
     await debug_line_identity('line_identity_create_completed', {
       line_user_id: input.provider_id,
