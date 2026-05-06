@@ -35,6 +35,10 @@ function allow_discord_debug_category(category: string) {
     return false
   }
 
+  if (category === 'USER_PAGE' && !control.debug.user_page) {
+    return false
+  }
+
   if (!control.debug.use_discord_category_allowlist) {
     return true
   }

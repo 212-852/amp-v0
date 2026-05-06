@@ -8,6 +8,7 @@ import {
   type browser_session_source_channel,
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
+import { debug_event } from '@/lib/debug'
 import { upsert_discord_action_post } from '@/lib/discord/action'
 import {
   archive_incoming_line_text,
@@ -67,6 +68,72 @@ export type initial_chat_result = {
   is_new_room: boolean
   is_seeded: boolean
   messages: archived_message[]
+}
+
+type user_page_debug_payload = {
+  user_uuid: string | null
+  visitor_uuid: string | null
+  room_uuid: string | null
+  participant_uuid: string | null
+  source_channel: chat_channel
+  locale: chat_locale
+  message_count: number
+  has_initial_messages: boolean | null
+  error: unknown
+}
+
+function serialize_error(error: unknown): Record<string, unknown> | null {
+  if (!error) {
+    return null
+  }
+
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      cause:
+        typeof error.cause === 'object' && error.cause !== null
+          ? error.cause
+          : undefined,
+    }
+  }
+
+  if (typeof error === 'object') {
+    try {
+      return JSON.parse(JSON.stringify(error)) as Record<string, unknown>
+    } catch {
+      return { value: String(error) }
+    }
+  }
+
+  return { value: String(error) }
+}
+
+async function emit_user_page_debug(
+  event: string,
+  payload: Partial<user_page_debug_payload>,
+) {
+  const safe_payload: user_page_debug_payload = {
+    user_uuid: payload.user_uuid ?? null,
+    visitor_uuid: payload.visitor_uuid ?? null,
+    room_uuid: payload.room_uuid ?? null,
+    participant_uuid: payload.participant_uuid ?? null,
+    source_channel: payload.source_channel ?? 'web',
+    locale: payload.locale ?? 'ja',
+    message_count: payload.message_count ?? 0,
+    has_initial_messages: payload.has_initial_messages ?? null,
+    error: payload.error ?? null,
+  }
+
+  await debug_event({
+    category: 'USER_PAGE',
+    event,
+    payload: {
+      ...safe_payload,
+      error: serialize_error(safe_payload.error),
+    },
+  })
 }
 
 async function archive_input_line_text_for_room(input: {
@@ -306,33 +373,226 @@ export async function resolve_initial_chat(
 }
 
 export async function load_user_home_chat() {
-  const chat_context = await resolve_chat_context({
-    channel: 'web',
-  })
-  const visitor_uuid = chat_context.visitor_uuid
-
-  if (!visitor_uuid) {
-    return {
-      room: {
-        room_uuid: '',
-        participant_uuid: '',
-        bot_participant_uuid: '',
-        user_uuid: null,
-        visitor_uuid: '',
-        channel: 'web' as const,
-        mode: 'bot' as const,
-        assigned_admin_uuid: null,
-      },
-      is_new_room: false,
-      is_seeded: false,
-      messages: [],
-    }
+  const fallback_result: initial_chat_result = {
+    room: {
+      room_uuid: '',
+      participant_uuid: '',
+      bot_participant_uuid: '',
+      user_uuid: null,
+      visitor_uuid: '',
+      channel: 'web' as const,
+      mode: 'bot' as const,
+      assigned_admin_uuid: null,
+    },
+    is_new_room: false,
+    is_seeded: false,
+    messages: [],
   }
 
-  return resolve_initial_chat({
-    ...chat_context,
-    visitor_uuid,
-  })
+  await emit_user_page_debug('render_started', {})
+
+  try {
+    const chat_context = await resolve_chat_context({
+      channel: 'web',
+    })
+    const visitor_uuid = chat_context.visitor_uuid
+    const user_uuid = chat_context.user_uuid ?? null
+    const source_channel = chat_context.channel
+    const locale = chat_context.locale
+
+    await emit_user_page_debug('session_resolved', {
+      user_uuid,
+      visitor_uuid,
+      source_channel,
+      locale,
+    })
+
+    if (!visitor_uuid) {
+      await emit_user_page_debug('render_failed', {
+        user_uuid,
+        visitor_uuid: null,
+        source_channel,
+        locale,
+        error: {
+          message: 'visitor_uuid_missing',
+        },
+      })
+
+      return fallback_result
+    }
+
+    await emit_user_page_debug('room_resolve_started', {
+      user_uuid,
+      visitor_uuid,
+      source_channel,
+      locale,
+    })
+
+    const room_result = await resolve_chat_room({
+      visitor_uuid,
+      user_uuid,
+      channel: source_channel,
+    })
+
+    if (!room_result.ok || !room_result.room.room_uuid) {
+      await emit_user_page_debug('render_failed', {
+        user_uuid,
+        visitor_uuid,
+        source_channel,
+        locale,
+        error: {
+          message: 'room_resolve_failed',
+          room_ok: room_result.ok,
+        },
+      })
+
+      return fallback_result
+    }
+
+    const room = room_result.room
+
+    await emit_user_page_debug('room_resolve_completed', {
+      user_uuid,
+      visitor_uuid,
+      room_uuid: room.room_uuid,
+      participant_uuid: room.participant_uuid,
+      source_channel,
+      locale,
+    })
+
+    await emit_user_page_debug('message_fetch_started', {
+      user_uuid,
+      visitor_uuid,
+      room_uuid: room.room_uuid,
+      participant_uuid: room.participant_uuid,
+      source_channel,
+      locale,
+    })
+
+    const archived_messages = await load_archived_messages(room.room_uuid)
+
+    await emit_user_page_debug('message_fetch_completed', {
+      user_uuid,
+      visitor_uuid,
+      room_uuid: room.room_uuid,
+      participant_uuid: room.participant_uuid,
+      source_channel,
+      locale,
+      message_count: archived_messages.length,
+    })
+
+    await emit_user_page_debug('initial_seed_check_started', {
+      user_uuid,
+      visitor_uuid,
+      room_uuid: room.room_uuid,
+      participant_uuid: room.participant_uuid,
+      source_channel,
+      locale,
+      message_count: archived_messages.length,
+    })
+
+    const room_has_initial_messages = await has_initial_messages(
+      room.room_uuid,
+    )
+
+    if (archived_messages.length > 0) {
+      await emit_user_page_debug('initial_seed_skipped', {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: room.room_uuid,
+        participant_uuid: room.participant_uuid,
+        source_channel,
+        locale,
+        message_count: archived_messages.length,
+        has_initial_messages: room_has_initial_messages,
+      })
+
+      await emit_user_page_debug('render_completed', {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: room.room_uuid,
+        participant_uuid: room.participant_uuid,
+        source_channel,
+        locale,
+        message_count: archived_messages.length,
+        has_initial_messages: room_has_initial_messages,
+      })
+
+      return {
+        room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages: archived_messages,
+      }
+    }
+
+    const bundles = build_initial_chat_bundles({ locale })
+    await archive_message_bundles({
+      room_uuid: room.room_uuid,
+      participant_uuid: room.participant_uuid,
+      bot_participant_uuid: room.bot_participant_uuid,
+      channel: source_channel,
+      bundles,
+    })
+
+    const final_messages = await load_archived_messages(room.room_uuid)
+
+    await emit_user_page_debug('initial_seed_created', {
+      user_uuid,
+      visitor_uuid,
+      room_uuid: room.room_uuid,
+      participant_uuid: room.participant_uuid,
+      source_channel,
+      locale,
+      message_count: final_messages.length,
+      has_initial_messages: room_has_initial_messages,
+    })
+
+    if (final_messages.length === 0) {
+      await emit_user_page_debug('render_failed', {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: room.room_uuid,
+        participant_uuid: room.participant_uuid,
+        source_channel,
+        locale,
+        message_count: 0,
+        has_initial_messages: room_has_initial_messages,
+        error: { message: 'empty_messages_after_seed' },
+      })
+
+      return {
+        room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages: [],
+      }
+    }
+
+    await emit_user_page_debug('render_completed', {
+      user_uuid,
+      visitor_uuid,
+      room_uuid: room.room_uuid,
+      participant_uuid: room.participant_uuid,
+      source_channel,
+      locale,
+      message_count: final_messages.length,
+      has_initial_messages: room_has_initial_messages,
+    })
+
+    return {
+      room,
+      is_new_room: room_result.is_new_room,
+      is_seeded: true,
+      messages: final_messages,
+    }
+  } catch (error) {
+    await emit_user_page_debug('render_failed', {
+      error,
+    })
+
+    return fallback_result
+  }
 }
 
 type room_mode_switch_result =
