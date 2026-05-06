@@ -2,6 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { debug_event } from '@/lib/debug'
+import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
 export {
@@ -30,10 +31,6 @@ function locale_source_for_debug(source: locale_source): string {
   return source
 }
 
-type line_profile_locale = {
-  language?: string | null
-}
-
 function raw_locale_is_supported(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase()
 
@@ -48,28 +45,9 @@ function raw_locale_is_supported(value: string | null | undefined) {
 async function fetch_line_profile_locale(
   line_user_id: string | null | undefined,
 ) {
-  const access_token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN
+  const profile = await fetch_line_messaging_profile(line_user_id)
 
-  if (!line_user_id || !access_token) {
-    return null
-  }
-
-  const response = await fetch(
-    `https://api.line.me/v2/bot/profile/${line_user_id}`,
-    {
-      headers: {
-        authorization: `Bearer ${access_token}`,
-      },
-    },
-  )
-
-  if (!response.ok) {
-    return null
-  }
-
-  const profile = (await response.json()) as line_profile_locale
-
-  return profile.language ?? null
+  return profile?.language ?? null
 }
 
 export async function resolve_dispatch_locale(input: {

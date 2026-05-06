@@ -25,6 +25,28 @@ export type access_result = {
   is_new_visitor: boolean
 }
 
+async function sync_line_messaging_profile_to_visitor(input: {
+  visitor_uuid: string
+  user_uuid: string
+  display_name: string | null | undefined
+}) {
+  const trimmed = input.display_name?.trim()
+
+  if (!trimmed) {
+    return
+  }
+
+  const updated = await supabase
+    .from('visitors')
+    .update({ display_name: trimmed })
+    .eq('visitor_uuid', input.visitor_uuid)
+    .eq('user_uuid', input.user_uuid)
+
+  if (updated.error) {
+    throw updated.error
+  }
+}
+
 export async function resolve_auth_access(
   input: access_input,
 ): Promise<access_result> {
@@ -86,6 +108,36 @@ export async function resolve_auth_access(
       visitor_uuid: input.visitor_uuid,
     })
 
+    if (input.provider === 'line') {
+      const user_patch: { display_name?: string; image_url?: string | null } =
+        {}
+
+      if (input.display_name?.trim()) {
+        user_patch.display_name = input.display_name.trim()
+      }
+
+      if (input.image_url?.trim()) {
+        user_patch.image_url = input.image_url.trim()
+      }
+
+      if (Object.keys(user_patch).length > 0) {
+        const user_update = await supabase
+          .from('users')
+          .update(user_patch)
+          .eq('user_uuid', user_uuid)
+
+        if (user_update.error) {
+          throw user_update.error
+        }
+      }
+
+      await sync_line_messaging_profile_to_visitor({
+        visitor_uuid: visitor.visitor_uuid,
+        user_uuid,
+        display_name: input.display_name,
+      })
+    }
+
     if (control.debug.identity && input.provider === 'line') {
       await debug_event({
         category: 'identity',
@@ -140,6 +192,14 @@ export async function resolve_auth_access(
 
   if (created_identity.error) {
     throw created_identity.error
+  }
+
+  if (input.provider === 'line') {
+    await sync_line_messaging_profile_to_visitor({
+      visitor_uuid: visitor.visitor_uuid,
+      user_uuid,
+      display_name: input.display_name,
+    })
   }
 
   if (control.debug.identity && input.provider === 'line') {

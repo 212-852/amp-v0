@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
+import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
 import { notify_new_user_created } from '@/lib/notify/new_user_created'
 
 type line_webhook_event = {
@@ -138,16 +139,25 @@ export async function POST(request: Request) {
         continue
       }
 
+      const msg_profile = await fetch_line_messaging_profile(line_user_id)
+
       const profile_locale = await resolve_dispatch_locale({
         source_channel: 'line',
         line_user_id,
+        line_profile_locale: msg_profile?.language ?? null,
         webhook_source_locale:
           event.source?.locale ?? event.source?.language ?? null,
       })
+
+      const line_display_name = msg_profile?.displayName?.trim() || null
+      const line_image_url = msg_profile?.pictureUrl?.trim() || null
+
       const access = await resolve_auth_access({
         provider: 'line',
         provider_id: line_user_id,
         locale: profile_locale.locale,
+        display_name: line_display_name,
+        image_url: line_image_url,
       })
 
       if (access.is_new_user) {
@@ -155,7 +165,7 @@ export async function POST(request: Request) {
           provider: 'line',
           user_uuid: access.user_uuid,
           visitor_uuid: access.visitor_uuid,
-          display_name: null,
+          display_name: line_display_name,
           locale: access.locale,
           is_new_user: access.is_new_user,
           is_new_visitor: access.is_new_visitor,
