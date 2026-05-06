@@ -4,7 +4,7 @@ const discord_api_base = 'https://discord.com/api/v10'
 
 type discord_action_result = {
   discord_action_post_id: string
-  discord_action_thread_id: string | null
+  action_id: string | null
 }
 
 async function discord_action_bot_fetch(
@@ -61,6 +61,32 @@ function action_webhook_message_url(input: {
   return url.toString()
 }
 
+function action_id_from_discord_thread_id(
+  thread_id: string | null | undefined,
+) {
+  if (!thread_id) {
+    return null
+  }
+
+  return `discord:${thread_id}`
+}
+
+function discord_thread_id_from_action_id(
+  action_id: string | null | undefined,
+) {
+  if (!action_id) {
+    return null
+  }
+
+  if (!action_id.startsWith('discord:')) {
+    return null
+  }
+
+  const thread_id = action_id.slice('discord:'.length).trim()
+
+  return thread_id || null
+}
+
 async function create_action_post(input: {
   title: string
   content: string
@@ -102,18 +128,21 @@ async function create_action_post(input: {
 
   return {
     discord_action_post_id: payload.id,
-    discord_action_thread_id: payload.channel_id ?? null,
+    action_id: action_id_from_discord_thread_id(
+      payload.channel_id ?? null,
+    ),
   }
 }
 
 async function update_action_post(input: {
   post_id: string
-  thread_id: string | null
+  action_id: string | null
   content: string
 }): Promise<discord_action_result | null> {
-  const response = input.thread_id
+  const thread_id = discord_thread_id_from_action_id(input.action_id)
+  const response = thread_id
     ? await discord_action_bot_fetch(
-        `/channels/${input.thread_id}/messages/${input.post_id}`,
+        `/channels/${thread_id}/messages/${input.post_id}`,
         {
           method: 'PATCH',
           body: JSON.stringify({
@@ -126,7 +155,7 @@ async function update_action_post(input: {
   if (response?.ok) {
     return {
       discord_action_post_id: input.post_id,
-      discord_action_thread_id: input.thread_id,
+      action_id: input.action_id,
     }
   }
 
@@ -140,7 +169,7 @@ async function update_action_post(input: {
 
   const webhook_url = action_webhook_message_url({
     post_id: input.post_id,
-    thread_id: input.thread_id,
+    thread_id,
   })
 
   if (!webhook_url) {
@@ -169,7 +198,7 @@ async function update_action_post(input: {
 
   return {
     discord_action_post_id: input.post_id,
-    discord_action_thread_id: input.thread_id,
+    action_id: input.action_id,
   }
 }
 
@@ -177,12 +206,12 @@ export async function upsert_discord_action_post(input: {
   title: string
   content: string
   existing_post_id: string | null
-  existing_thread_id: string | null
+  existing_action_id: string | null
 }) {
   if (input.existing_post_id) {
     const updated = await update_action_post({
       post_id: input.existing_post_id,
-      thread_id: input.existing_thread_id,
+      action_id: input.existing_action_id,
       content: input.content,
     })
 

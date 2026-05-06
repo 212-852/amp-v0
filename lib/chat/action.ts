@@ -720,13 +720,13 @@ function action_content(input: {
 async function persist_discord_tracking(input: {
   room_uuid: string
   discord_action_post_id: string | null
-  discord_action_thread_id: string | null
+  action_id: string | null
 }) {
   const result = await supabase
     .from('rooms')
     .update({
       discord_action_post_id: input.discord_action_post_id,
-      discord_action_thread_id: input.discord_action_thread_id,
+      action_id: input.action_id,
       updated_at: new Date().toISOString(),
     })
     .eq('room_uuid', input.room_uuid)
@@ -866,7 +866,7 @@ async function apply_switch_room_mode_action(input: {
   )
   const should_sync_action_post =
     input.mode === 'concierge' ||
-    Boolean(row.discord_action_post_id || row.discord_action_thread_id)
+    Boolean(row.discord_action_post_id || row.action_id)
 
   if (should_sync_action_post) {
     const action_log = await upsert_discord_action_post({
@@ -875,7 +875,7 @@ async function apply_switch_room_mode_action(input: {
         room_uuid: row.room_uuid,
       }),
       existing_post_id: row.discord_action_post_id,
-      existing_thread_id: row.discord_action_thread_id,
+      existing_action_id: row.action_id,
       content: action_content({
         room_uuid: row.room_uuid,
         visitor_uuid: input.chat_room.visitor_uuid,
@@ -907,7 +907,7 @@ async function apply_switch_room_mode_action(input: {
       await persist_discord_tracking({
         room_uuid: row.room_uuid,
         discord_action_post_id: action_log.discord_action_post_id,
-        discord_action_thread_id: action_log.discord_action_thread_id,
+        action_id: action_log.action_id,
       })
     }
   }
