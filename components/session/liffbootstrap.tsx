@@ -3,6 +3,7 @@
 import type { Liff } from '@line/liff'
 import { useEffect, useState } from 'react'
 
+import { is_line_in_app_browser } from '@/lib/auth/context'
 import Loading from '@/components/shared/loading'
 
 type liff_debug_payload = Record<string, unknown>
@@ -21,14 +22,16 @@ function should_skip_path(pathname: string) {
   )
 }
 
+/**
+ * LIFF bootstrap only in LINE in-app WebView (`Line/` user agent).
+ * Desktop (incl. `liff.referrer` on the endpoint URL or `liff.line.me` in Chrome) uses OAuth via `/api/auth/line`.
+ */
 function should_run_liff_bootstrap(): boolean {
   if (typeof window === 'undefined') {
     return false
   }
 
-  const ua = navigator.userAgent.toLowerCase()
-
-  return ua.includes('line/') || window.location.href.includes('liff.line.me')
+  return is_line_in_app_browser(navigator.userAgent)
 }
 
 function serialize_error(error: unknown) {
@@ -120,7 +123,7 @@ export default function LiffBootstrap() {
     const href = window.location.href
     const user_agent = navigator.userAgent
     const pathname = window.location.pathname
-    const is_line_browser = user_agent.toLowerCase().includes('line/')
+    const is_line_browser = is_line_in_app_browser(user_agent)
     const is_liff_url = href.includes('liff.line.me')
     const liff_id = process.env.NEXT_PUBLIC_LIFF_ID ?? ''
     const base_payload = {
@@ -381,6 +384,20 @@ export default function LiffBootstrap() {
           set_liff_error(
             error instanceof Error ? error.message : 'LIFF init failed',
           )
+          set_is_loading(false)
+
+          return
+        }
+
+        if (
+          !liff.isInClient() &&
+          !is_line_in_app_browser(navigator.userAgent)
+        ) {
+          await emit_liff_debug('liff_identity_skipped_not_liff_context', {
+            ...base_payload,
+            liff_id,
+            is_in_client: liff.isInClient(),
+          })
           set_is_loading(false)
 
           return

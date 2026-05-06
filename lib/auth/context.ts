@@ -17,12 +17,13 @@ export function is_public_asset_path(pathname: string) {
 }
 
 /**
- * LINE in-app browser or LIFF-capable WebView (substring match, lowercase).
+ * LINE in-app browser (LINE WebView). Use for LIFF vs desktop OAuth split.
+ * Do not treat desktop browsers with `liff.referrer` or other URL hints alone.
  */
 export function is_line_in_app_browser(
   user_agent: string | null | undefined,
 ): boolean {
   const ua = user_agent?.toLowerCase() ?? ''
 
-  return ua.includes('line/') || ua.includes('liff')
+  return ua.includes('line/')
 }

@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react'
 
+import { is_line_in_app_browser } from '@/lib/auth/context'
 import type { locale_key } from '@/lib/locale/action'
 
 type connected_provider = 'line' | 'google' | 'email'
@@ -124,13 +125,23 @@ export default function ConnectModal({
   const has_connected_provider = connected_providers.length > 0
 
   function open_line_login() {
-    const liff_id = process.env.NEXT_PUBLIC_LIFF_ID
-
-    if (!liff_id) {
+    if (connected_providers.includes('line')) {
       return
     }
 
-    window.location.href = `https://liff.line.me/${liff_id}`
+    if (is_line_in_app_browser(navigator.userAgent)) {
+      const liff_id = process.env.NEXT_PUBLIC_LIFF_ID?.trim()
+
+      if (!liff_id) {
+        return
+      }
+
+      window.location.href = `https://liff.line.me/${liff_id}`
+
+      return
+    }
+
+    window.location.href = '/api/auth/line'
   }
 
   function open_google_login() {
