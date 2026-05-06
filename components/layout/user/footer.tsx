@@ -112,9 +112,13 @@ const quick_menu_items: quick_menu_item[] = [
   },
 ]
 
+type room_mode_segment = 'bot' | 'concierge'
+
 export default function UserFooter() {
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
+  const [room_mode_segment, set_room_mode_segment] =
+    useState<room_mode_segment>('bot')
   const [mode, set_mode] = useState<footer_mode>('nav')
   const [flip_rotation, set_flip_rotation] = useState(0)
   const [card_scale, set_card_scale] = useState(1)
@@ -135,6 +139,36 @@ export default function UserFooter() {
     return () => {
       window.clearTimeout(mounted_timer)
       unsubscribe_locale()
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const response = await fetch('/api/session', {
+          credentials: 'include',
+        })
+        const payload = (await response.json()) as {
+          chat?: { mode?: room_mode_segment } | null
+        }
+
+        if (
+          !cancelled &&
+          payload.chat &&
+          (payload.chat.mode === 'bot' ||
+            payload.chat.mode === 'concierge')
+        ) {
+          set_room_mode_segment(payload.chat.mode)
+        }
+      } catch {
+        // Session is optional for static render; keep footer default.
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -168,6 +202,43 @@ export default function UserFooter() {
 
   function handle_quick_menu_item_click(_item_key: quick_menu_item_key) {
     void _item_key
+  }
+
+  async function post_room_mode_action(
+    action: 'request_concierge' | 'resume_bot',
+  ) {
+    try {
+      const response = await fetch('/api/chat/room_mode', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ action }),
+      })
+      const payload = (await response.json()) as {
+        ok?: boolean
+        mode?: room_mode_segment
+      }
+
+      if (payload.ok !== false && payload.mode) {
+        set_room_mode_segment(payload.mode)
+      }
+    } catch {
+      // Network errors: leave toggle unchanged.
+    }
+  }
+
+  function handle_select_bot() {
+    if (room_mode_segment === 'concierge') {
+      void post_room_mode_action('resume_bot')
+    }
+  }
+
+  function handle_select_concierge() {
+    if (room_mode_segment === 'bot') {
+      void post_room_mode_action('request_concierge')
+    }
   }
 
   return (
@@ -350,26 +421,28 @@ export default function UserFooter() {
                 >
                   <button
                     type="button"
-                    className="
-                      h-full flex-1 rounded-full
-                      bg-white
-                      text-[10px] font-medium
-                      tracking-wide
-                      text-[#2a1d18]
-                      shadow-[0_1px_4px_rgba(42,29,24,0.07)]
-                    "
+                    onClick={handle_select_bot}
+                    className={[
+                      'h-full flex-1 rounded-full',
+                      'text-[10px] font-medium tracking-wide',
+                      room_mode_segment === 'bot'
+                        ? 'bg-white text-[#2a1d18] shadow-[0_1px_4px_rgba(42,29,24,0.07)]'
+                        : 'text-[#8a7467]',
+                    ].join(' ')}
                   >
                     {content.bot[render_locale]}
                   </button>
 
                   <button
                     type="button"
-                    className="
-                      h-full flex-1 rounded-full
-                      text-[10px] font-medium
-                      tracking-wide
-                      text-[#8a7467]
-                    "
+                    onClick={handle_select_concierge}
+                    className={[
+                      'h-full flex-1 rounded-full',
+                      'text-[10px] font-medium tracking-wide',
+                      room_mode_segment === 'concierge'
+                        ? 'bg-white text-[#2a1d18] shadow-[0_1px_4px_rgba(42,29,24,0.07)]'
+                        : 'text-[#8a7467]',
+                    ].join(' ')}
                   >
                     {content.concierge[render_locale]}
                   </button>

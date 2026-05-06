@@ -10,6 +10,8 @@ export type chat_channel =
   | 'liff'
   | 'pwa'
 
+export type room_mode = 'bot' | 'concierge'
+
 export type chat_room = {
   room_uuid: string
   participant_uuid: string
@@ -17,6 +19,15 @@ export type chat_room = {
   user_uuid: string | null
   visitor_uuid: string
   channel: chat_channel
+  mode: room_mode
+  assigned_admin_uuid: string | null
+}
+
+const ROOM_DB_SELECT =
+  'room_uuid, room_type, status, updated_at, mode, assigned_admin_uuid, discord_action_thread_id, discord_action_post_id, concierge_requested_at, concierge_accepted_at, bot_resumed_at'
+
+export function parse_room_mode(value: string | null | undefined): room_mode {
+  return value === 'concierge' ? 'concierge' : 'bot'
 }
 
 export type resolve_chat_room_outcome =
@@ -43,6 +54,13 @@ type room_row = {
   room_type: string | null
   status: string | null
   updated_at: string | null
+  mode: string | null
+  assigned_admin_uuid: string | null
+  discord_action_thread_id: string | null
+  discord_action_post_id: string | null
+  concierge_requested_at: string | null
+  concierge_accepted_at: string | null
+  bot_resumed_at: string | null
 }
 
 type participant_row = {
@@ -72,6 +90,8 @@ function fallback_chat_room(input: resolve_room_input): chat_room {
     user_uuid: input.user_uuid ?? null,
     visitor_uuid: input.visitor_uuid,
     channel: input.channel,
+    mode: 'bot',
+    assigned_admin_uuid: null,
   }
 }
 
@@ -88,6 +108,8 @@ function normalize_room(
     user_uuid: input.user_uuid ?? participant.user_uuid ?? null,
     visitor_uuid: input.visitor_uuid,
     channel: input.channel,
+    mode: parse_room_mode(row.mode),
+    assigned_admin_uuid: row.assigned_admin_uuid ?? null,
   }
 }
 
@@ -281,10 +303,10 @@ async function find_canonical_user_participant(
   return find_user_participant_by_visitor(input.visitor_uuid)
 }
 
-async function load_room(room_uuid: string) {
+export async function load_room_row(room_uuid: string) {
   const result = await supabase
     .from('rooms')
-    .select('room_uuid, room_type, status, updated_at')
+    .select(ROOM_DB_SELECT)
     .eq('room_uuid', room_uuid)
     .maybeSingle()
 
@@ -325,8 +347,9 @@ async function insert_direct_room_row(
       room_type: 'direct',
       status: 'active',
       updated_at: now,
+      mode: 'bot',
     })
-    .select('room_uuid, room_type, status, updated_at')
+    .select(ROOM_DB_SELECT)
     .maybeSingle()
 
   if (room_result.error && !is_unique_violation(room_result.error)) {
@@ -341,7 +364,7 @@ async function insert_direct_room_row(
       throw room_result.error
     }
 
-    const existing_room = await load_room(existing_participant.room_uuid)
+    const existing_room = await load_room_row(existing_participant.room_uuid)
 
     if (!existing_room) {
       throw room_result.error
@@ -654,7 +677,7 @@ async function touch_direct_participant_and_room(
     throw room_result.error
   }
 
-  const refreshed_room = await load_room(room.room_uuid)
+  const refreshed_room = await load_room_row(room.room_uuid)
 
   if (!refreshed_room) {
     throw new Error('touch_direct_participant: room missing after update')
@@ -676,7 +699,7 @@ async function assign_participant_to_direct_room(
   is_new_room: boolean
 }> {
   if (participant.room_uuid) {
-    const existing_room = await load_room(participant.room_uuid)
+    const existing_room = await load_room_row(participant.room_uuid)
 
     if (existing_room?.room_type === 'direct') {
       return {
@@ -727,7 +750,7 @@ async function assign_participant_to_direct_room(
       await find_canonical_user_participant(input)
 
     if (reused_participant?.room_uuid) {
-      const reused_room = await load_room(reused_participant.room_uuid)
+      const reused_room = await load_room_row(reused_participant.room_uuid)
 
       if (reused_room?.room_type === 'direct') {
         return {
@@ -743,7 +766,7 @@ async function assign_participant_to_direct_room(
 
   await touch_room_row(new_room.room_uuid)
 
-  const final_room = await load_room(new_room.room_uuid)
+  const final_room = await load_room_row(new_room.room_uuid)
 
   if (!final_room) {
     throw new Error('move_participant: new room not found')
@@ -889,7 +912,7 @@ async function handle_existing_participant(
     )
   }
 
-  const room = await load_room(participant.room_uuid)
+  const room = await load_room_row(participant.room_uuid)
 
   if (!room) {
     await debug_chat_room('participant_lookup_empty', {
@@ -1055,7 +1078,7 @@ export async function resolve_chat_room(
         })
       }
 
-      const linked_room = await load_room(created.room.room_uuid)
+      const linked_room = await load_room_row(created.room.room_uuid)
 
       if (!linked_room) {
         await debug_chat_room('participant_failed', {

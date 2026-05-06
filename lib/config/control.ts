@@ -32,6 +32,7 @@ export const control = {
 
   notify: {
     new_user_created: true,
+    concierge_room_request: true,
     /** Required for `debug_event` -> notify path. */
     debug_trace: true,
   },

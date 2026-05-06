@@ -569,3 +569,60 @@ export function build_user_text_bundle(input: {
     },
   }
 }
+
+const room_mode_notice: {
+  concierge_requested: localized_content
+  resumed_bot: localized_content
+} = {
+  concierge_requested: {
+    ja: 'コンシェルジュモードに切り替えました。',
+    en: 'Switched to concierge mode.',
+    es: 'Modo conserje activado.',
+  },
+  resumed_bot: {
+    ja: 'BOTモードに戻しました。',
+    en: 'Returned to bot mode.',
+    es: 'Volviste al modo bot.',
+  },
+}
+
+export function build_room_mode_notice_bundle(input: {
+  notice: 'concierge_requested' | 'resumed_bot'
+  locale: chat_locale
+}): text_bundle {
+  return {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'text',
+    sender: 'bot',
+    version: 1,
+    locale: input.locale,
+    content_key: `room.mode.${input.notice}`,
+    payload: {
+      text: pick_text(room_mode_notice[input.notice], input.locale),
+    },
+  }
+}
+
+export function build_room_mode_admin_accepted_bundle(input: {
+  admin_display_name: string
+  locale: chat_locale
+}): text_bundle {
+  const name = input.admin_display_name.trim() || 'Admin'
+  const lines: localized_content = {
+    ja: `${name} がコンシェルジュ対応を引き受けました。`,
+    en: `${name} accepted.`,
+    es: `${name} acepto.`,
+  }
+
+  return {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'text',
+    sender: 'bot',
+    version: 1,
+    locale: input.locale,
+    content_key: 'room.mode.concierge_accepted',
+    payload: {
+      text: pick_text(lines, input.locale),
+    },
+  }
+}

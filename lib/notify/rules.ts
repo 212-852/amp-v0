@@ -14,6 +14,13 @@ export type notify_event =
       is_new_visitor: boolean
     }
   | {
+      event: 'concierge_room_request'
+      room_uuid: string
+      visitor_uuid: string
+      user_uuid: string | null
+      channel: string
+    }
+  | {
       event: 'line_push'
       line_user_id: string
       message: string
@@ -36,6 +43,10 @@ export function should_send_notify(event: notify_event) {
     return control.notify.new_user_created
   }
 
+  if (event.event === 'concierge_room_request') {
+    return control.notify.concierge_room_request
+  }
+
   if (event.event === 'line_push') {
     return true
   }
@@ -55,6 +66,12 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
   }
 
   if (event.event === 'new_user_created') {
+    return {
+      channels: ['discord'],
+    }
+  }
+
+  if (event.event === 'concierge_room_request') {
     return {
       channels: ['discord'],
     }

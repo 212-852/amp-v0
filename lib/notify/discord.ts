@@ -30,6 +30,16 @@ function build_discord_content(event: notify_event) {
     ].join('\n')
   }
 
+  if (event.event === 'concierge_room_request') {
+    return [
+      '[CONCIERGE REQUEST]',
+      `room_uuid: ${event.room_uuid}`,
+      `visitor_uuid: ${event.visitor_uuid}`,
+      `user_uuid: ${event.user_uuid ?? 'none'}`,
+      `channel: ${event.channel}`,
+    ].join('\n')
+  }
+
   if (event.event === 'debug_trace') {
     const lines = [
       `**[DEBUG] ${event.category.toUpperCase()}**`,

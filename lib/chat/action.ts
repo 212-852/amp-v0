@@ -297,6 +297,8 @@ export async function load_user_home_chat() {
         user_uuid: null,
         visitor_uuid: '',
         channel: 'web' as const,
+        mode: 'bot' as const,
+        assigned_admin_uuid: null,
       },
       is_new_room: false,
       is_seeded: false,
