@@ -125,6 +125,7 @@ export type text_bundle = {
   version: 1
   locale?: chat_locale
   content_key?: string
+  metadata?: Record<string, unknown>
   payload: {
     text: string
   }
@@ -556,6 +557,7 @@ export function build_user_text_bundle(input: {
   text: string
   locale?: chat_locale
   content_key?: string
+  metadata?: Record<string, unknown>
 }): text_bundle {
   return {
     bundle_uuid: create_bundle_uuid(),
@@ -564,10 +566,42 @@ export function build_user_text_bundle(input: {
     version: 1,
     locale: input.locale,
     content_key: input.content_key,
+    metadata: input.metadata,
     payload: {
       text: input.text,
     },
   }
+}
+
+const room_mode_switch_text: {
+  bot: localized_content
+  concierge: localized_content
+} = {
+  bot: {
+    ja: 'BOTに切り替え',
+    en: 'Switch to BOT',
+    es: 'Cambiar a BOT',
+  },
+  concierge: {
+    ja: 'コンシェルジュに切り替え',
+    en: 'Switch to Concierge',
+    es: 'Cambiar a Concierge',
+  },
+}
+
+export function build_room_mode_switch_bundle(input: {
+  mode: 'bot' | 'concierge'
+  locale: chat_locale
+}): text_bundle {
+  return build_user_text_bundle({
+    text: pick_text(room_mode_switch_text[input.mode], input.locale),
+    locale: input.locale,
+    content_key: `room.mode.switch.${input.mode}`,
+    metadata: {
+      intent: 'switch_mode',
+      mode: input.mode,
+    },
+  })
 }
 
 const room_mode_notice: {

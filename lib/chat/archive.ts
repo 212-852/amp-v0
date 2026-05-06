@@ -35,6 +35,8 @@ type parsed_archive_body = {
     bundle_type?: string
     initial_seed?: boolean
     line_message_id?: string
+    intent?: string
+    mode?: string
   }
 }
 
@@ -388,26 +390,36 @@ export async function archive_message_bundles(
   const existing_messages =
     await load_archived_messages(input.room_uuid)
   const next_sequence = existing_messages.length + 1
-  const rows = input.bundles.map((bundle, index) => ({
-    room_uuid: input.room_uuid,
-    participant_uuid: resolve_participant_uuid(input, bundle.sender),
-    channel: input.channel,
-    body: JSON.stringify({
-      type: bundle.bundle_type,
-      direction: archive_direction_for_sender(bundle.sender),
-      locale: bundle.locale,
-      content_key: bundle.content_key,
-      sequence: next_sequence + index,
-      payload: 'payload' in bundle ? bundle.payload : undefined,
-      metadata: {
-        bundle_type: bundle.bundle_type,
-        initial_seed:
-          bundle.bundle_type === 'welcome' ||
-          bundle.bundle_type === 'initial_carousel',
-      },
-      bundle,
-    }),
-  }))
+  const rows = input.bundles.map((bundle, index) => {
+    const bundle_metadata =
+      'metadata' in bundle &&
+      bundle.metadata &&
+      typeof bundle.metadata === 'object'
+        ? bundle.metadata
+        : {}
+
+    return {
+      room_uuid: input.room_uuid,
+      participant_uuid: resolve_participant_uuid(input, bundle.sender),
+      channel: input.channel,
+      body: JSON.stringify({
+        type: bundle.bundle_type,
+        direction: archive_direction_for_sender(bundle.sender),
+        locale: bundle.locale,
+        content_key: bundle.content_key,
+        sequence: next_sequence + index,
+        payload: 'payload' in bundle ? bundle.payload : undefined,
+        metadata: {
+          ...bundle_metadata,
+          bundle_type: bundle.bundle_type,
+          initial_seed:
+            bundle.bundle_type === 'welcome' ||
+            bundle.bundle_type === 'initial_carousel',
+        },
+        bundle,
+      }),
+    }
+  })
 
   const result = await supabase
     .from('messages')
