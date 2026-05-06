@@ -26,6 +26,8 @@ export type chat_request_context = {
   user_uuid: string | null
   channel: chat_channel
   locale: chat_locale
+  /** True when this request inserted the visitor row (browser session core). */
+  is_new_visitor: boolean
 }
 
 async function resolve_user_state(visitor_uuid: string) {
@@ -129,5 +131,6 @@ export async function resolve_chat_context(
       input.profile_locale,
       accept_language,
     ),
+    is_new_visitor: browser_session.is_new_visitor,
   }
 }

@@ -15,6 +15,7 @@ import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { control } from '@/lib/config/control'
 import { resolve_initial_chat } from '@/lib/chat/action'
+import { ensure_direct_room_for_visitor } from '@/lib/chat/room'
 import type { chat_channel } from '@/lib/chat/room'
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
@@ -248,8 +249,17 @@ async function resolve_session_chat(input: {
   user_uuid: string | null
   channel: chat_channel
   locale: locale_key
+  is_new_visitor: boolean
 }): Promise<session_chat_state> {
   try {
+    if (input.is_new_visitor) {
+      await ensure_direct_room_for_visitor({
+        visitor_uuid: input.visitor_uuid,
+        user_uuid: input.user_uuid,
+        channel: input.channel,
+      })
+    }
+
     const initial_chat = await resolve_initial_chat(input)
     const initial_carousel_card_count = initial_chat.messages.reduce(
       (count, message) => {
@@ -377,6 +387,7 @@ async function resolve_session_payload() {
     user_uuid: session_state.user_uuid,
     channel: chat_channel,
     locale: resolved_locale,
+    is_new_visitor: visitor.is_new_visitor,
   })
   const role = normalized_session.role
   const tier = normalized_session.tier

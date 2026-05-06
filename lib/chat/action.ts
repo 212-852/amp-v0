@@ -27,6 +27,7 @@ import {
 import type { chat_locale } from './message'
 import { normalize_locale } from '@/lib/locale/action'
 import {
+  ensure_direct_room_for_visitor,
   load_room_row,
   parse_room_mode,
   resolve_chat_room,
@@ -418,6 +419,14 @@ export async function load_user_home_chat() {
       })
 
       return fallback_result
+    }
+
+    if (chat_context.is_new_visitor) {
+      await ensure_direct_room_for_visitor({
+        visitor_uuid,
+        user_uuid,
+        channel: source_channel,
+      })
     }
 
     await emit_user_page_debug('room_resolve_started', {

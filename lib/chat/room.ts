@@ -295,6 +295,26 @@ async function find_canonical_user_participant(
   return find_user_participant_by_visitor(input.visitor_uuid)
 }
 
+async function find_canonical_user_participant_after_insert_conflict(
+  input: resolve_room_input,
+): Promise<participant_row | null> {
+  const max_attempts = 6
+
+  for (let attempt = 1; attempt <= max_attempts; attempt += 1) {
+    const existing = await find_canonical_user_participant(input)
+
+    if (existing) {
+      return existing
+    }
+
+    if (attempt < max_attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 45 * attempt))
+    }
+  }
+
+  return null
+}
+
 export async function load_room_row(room_uuid: string) {
   const result = await supabase
     .from('rooms')
@@ -307,6 +327,27 @@ export async function load_room_row(room_uuid: string) {
   }
 
   return result.data as room_row | null
+}
+
+async function load_room_row_with_retry(
+  room_uuid: string,
+  max_attempts = 6,
+): Promise<room_row | null> {
+  let last: room_row | null = null
+
+  for (let attempt = 1; attempt <= max_attempts; attempt += 1) {
+    last = await load_room_row(room_uuid)
+
+    if (last) {
+      return last
+    }
+
+    if (attempt < max_attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 40 * attempt))
+    }
+  }
+
+  return last
 }
 
 async function delete_orphan_direct_room(room_uuid: string) {
@@ -342,7 +383,7 @@ async function insert_direct_room_row(
       mode: 'bot',
     })
     .select(room_select_fields)
-    .maybeSingle()
+    .single()
 
   if (room_result.error && !is_unique_violation(room_result.error)) {
     throw room_result.error
@@ -608,7 +649,7 @@ async function try_insert_participant_and_direct_room(
     .from('participants')
     .insert(build_user_participant_insert_row(input, room.room_uuid, now))
     .select(PARTICIPANT_DB_SELECT)
-    .maybeSingle()
+    .single()
 
   if (!participant_result.error && participant_result.data) {
     await touch_room_row(room.room_uuid)
@@ -626,7 +667,8 @@ async function try_insert_participant_and_direct_room(
     throw participant_result.error
   }
 
-  const existing = await find_canonical_user_participant(input)
+  const existing =
+    await find_canonical_user_participant_after_insert_conflict(input)
 
   if (!existing) {
     throw participant_result.error
@@ -831,6 +873,54 @@ async function resolve_bot_participant(room_uuid: string) {
     }
 
     throw error
+  }
+}
+
+/**
+ * Idempotent: one direct active room, user participant (by visitor/user), and bot.
+ * Run immediately after a new visitor row is created so the first room resolve sees data.
+ */
+export async function ensure_direct_room_for_visitor(
+  input: resolve_room_input,
+): Promise<void> {
+  const identity = debug_identity_payload(input)
+
+  try {
+    const merged_participant = await merge_identity_rooms(input)
+    const canonical_participant =
+      merged_participant ?? (await find_canonical_user_participant(input))
+
+    if (canonical_participant?.room_uuid) {
+      const room = await load_room_row(canonical_participant.room_uuid)
+
+      if (
+        room &&
+        room.room_type === 'direct' &&
+        room.status !== 'inactive'
+      ) {
+        try {
+          await resolve_bot_participant(room.room_uuid)
+        } catch {
+          /* resolve_chat_room will ensure bot */
+        }
+
+        return
+      }
+    }
+
+    const created = await try_insert_participant_and_direct_room(
+      input,
+      identity,
+    )
+
+    if (created.tag === 'fresh') {
+      await resolve_bot_participant(created.room.room_uuid)
+    }
+  } catch (error) {
+    console.error(
+      '[ensure_direct_room_for_visitor]',
+      snapshot_error_for_log(error),
+    )
   }
 }
 
@@ -1106,7 +1196,9 @@ export async function resolve_chat_room(
         })
       }
 
-      const linked_room = await load_room_row(created.room.room_uuid)
+      const linked_room = await load_room_row_with_retry(
+        created.room.room_uuid,
+      )
 
       if (!linked_room) {
         await debug_chat_room('participant_failed', {
