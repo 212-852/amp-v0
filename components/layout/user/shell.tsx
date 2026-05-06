@@ -7,8 +7,8 @@ import {
   useRef,
 } from 'react'
 
-import UserFooter from '@/components/layout/user/footer'
-import UserHeader from '@/components/layout/user/header'
+import UserFooter from '@/components/user/footer'
+import UserHeader from '@/components/user/header'
 
 type UserShellProps = {
   children: React.ReactNode

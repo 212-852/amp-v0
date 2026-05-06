@@ -5,8 +5,6 @@ import SessionBootstrap from '@/components/session/bootstrap'
 import type { initial_chat_result } from '@/lib/chat/action'
 import { get_session_user, resolve_role_route } from '@/lib/auth/route'
 
-export const dynamic = 'force-dynamic'
-
 const page_copy = {
   reload_title: {
     ja: 'チャットの読み込みに失敗しました',
@@ -42,10 +40,16 @@ function empty_user_home_chat(): initial_chat_result {
   }
 }
 
-export default async function UserPage() {
+type user_home_chat_props = {
+  pathname: '/' | '/user'
+}
+
+export default async function UserHomeChat({
+  pathname,
+}: user_home_chat_props) {
   const session = await get_session_user()
   const role_route = await resolve_role_route({
-    pathname: '/',
+    pathname,
     user_uuid: session.user_uuid,
     role: session.role,
     tier: session.tier,
@@ -62,7 +66,7 @@ export default async function UserPage() {
 
     chat_state = await load_user_home_chat()
   } catch (error) {
-    console.error('[root_page_chat_load_failed]', error)
+    console.error('[user_home_chat_load_failed]', error)
     chat_state = empty_user_home_chat()
   }
 
@@ -86,7 +90,7 @@ export default async function UserPage() {
               {page_copy.reload_body.ja}
             </p>
             <a
-              href="/"
+              href={pathname}
               className="mt-4 inline-flex rounded-full bg-[#c9a77d] px-5 py-2 text-[13px] font-semibold text-white"
             >
               {page_copy.reload_label.ja}

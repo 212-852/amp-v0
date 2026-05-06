@@ -1,6 +1,6 @@
 import UserShell from '@/components/user/shell'
 
-export default function UserLayout({
+export default function UserRouteLayout({
   children,
 }: {
   children: React.ReactNode
