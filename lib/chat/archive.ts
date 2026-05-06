@@ -21,6 +21,23 @@ type archive_row = {
   created_at: string
 }
 
+type parsed_archive_body = {
+  type?: string
+  direction?: string
+  sender_role?: string
+  line_message_id?: string
+  bundle_type?: string
+  bundle?: {
+    bundle_type?: string
+    sender?: string
+  }
+  metadata?: {
+    bundle_type?: string
+    initial_seed?: boolean
+    line_message_id?: string
+  }
+}
+
 export type archive_incoming_line_text_input = {
   room_uuid: string
   participant_uuid: string
@@ -127,18 +144,13 @@ function debug_incoming_line_archive_payload(
   }
 }
 
-function parse_archive_body(body: string | null) {
+function parse_archive_body(body: string | null): parsed_archive_body | null {
   if (!body) {
     return null
   }
 
   try {
-    return JSON.parse(body) as {
-      line_message_id?: string
-      metadata?: {
-        line_message_id?: string
-      }
-    }
+    return JSON.parse(body) as parsed_archive_body
   } catch {
     return null
   }
@@ -289,6 +301,55 @@ export async function archive_incoming_line_text(
   }
 }
 
+function archive_body_bundle_type(body: parsed_archive_body | null) {
+  return (
+    body?.bundle?.bundle_type ??
+    body?.bundle_type ??
+    body?.metadata?.bundle_type ??
+    body?.type ??
+    null
+  )
+}
+
+function archive_body_is_outgoing_initial(
+  body: parsed_archive_body | null,
+) {
+  const bundle_type = archive_body_bundle_type(body)
+
+  if (bundle_type !== 'welcome' && bundle_type !== 'initial_carousel') {
+    return false
+  }
+
+  if (body?.metadata?.initial_seed === true) {
+    return true
+  }
+
+  if (body?.direction === 'incoming' || body?.sender_role === 'user') {
+    return false
+  }
+
+  if (body?.direction === 'outgoing' || body?.bundle?.sender === 'bot') {
+    return true
+  }
+
+  return true
+}
+
+export async function has_initial_messages(room_uuid: string) {
+  const result = await supabase
+    .from('messages')
+    .select('message_uuid, room_uuid, body, created_at')
+    .eq('room_uuid', room_uuid)
+
+  if (result.error) {
+    throw result.error
+  }
+
+  return ((result.data ?? []) as archive_row[]).some((row) =>
+    archive_body_is_outgoing_initial(parse_archive_body(row.body)),
+  )
+}
+
 function resolve_participant_uuid(
   input: {
     participant_uuid: string
@@ -333,10 +394,17 @@ export async function archive_message_bundles(
     channel: input.channel,
     body: JSON.stringify({
       type: bundle.bundle_type,
+      direction: archive_direction_for_sender(bundle.sender),
       locale: bundle.locale,
       content_key: bundle.content_key,
       sequence: next_sequence + index,
       payload: 'payload' in bundle ? bundle.payload : undefined,
+      metadata: {
+        bundle_type: bundle.bundle_type,
+        initial_seed:
+          bundle.bundle_type === 'welcome' ||
+          bundle.bundle_type === 'initial_carousel',
+      },
       bundle,
     }),
   }))

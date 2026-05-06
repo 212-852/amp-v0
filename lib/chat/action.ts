@@ -3,6 +3,7 @@ import 'server-only'
 import {
   archive_incoming_line_text,
   archive_message_bundles,
+  has_initial_messages,
   load_archived_messages,
   type archived_message,
 } from './archive'
@@ -118,7 +119,14 @@ export async function resolve_initial_chat(
     }
   }
 
-  if (!should_seed_initial_messages(archived_messages)) {
+  const room_has_initial_messages = await has_initial_messages(
+    room_result.room.room_uuid,
+  )
+  const should_seed =
+    !room_has_initial_messages &&
+    should_seed_initial_messages(archived_messages)
+
+  if (!should_seed) {
     if (
       input.channel === 'line' &&
       input.line_reply_token &&
