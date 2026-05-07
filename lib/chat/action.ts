@@ -704,7 +704,36 @@ async function notify_room_mode_switch(input: {
   mode: room_mode
   action_id: string | null
 }) {
+  const should_notify =
+    input.mode === 'concierge' || input.mode === 'bot'
+  const notify_category =
+    input.mode === 'concierge'
+      ? 'concierge_requested'
+      : input.mode === 'bot'
+        ? 'concierge_closed'
+        : null
+
+  console.log('[chat] mode_switch_notify_check', {
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    mode: input.mode,
+    should_notify,
+    category: notify_category,
+    action_id: input.action_id,
+  })
+
+  if (!should_notify || !notify_category) {
+    return
+  }
+
   try {
+    console.log('[chat] notify_action_started', {
+      room_uuid: input.room_uuid,
+      mode: input.mode,
+      category: notify_category,
+      action_id: input.action_id,
+    })
+
     const results = await notify(
       input.mode === 'concierge'
         ? {
@@ -724,6 +753,17 @@ async function notify_room_mode_switch(input: {
             action_id: input.action_id,
           },
     )
+
+    console.log('[chat] notify_action_completed', {
+      room_uuid: input.room_uuid,
+      mode: input.mode,
+      category: notify_category,
+      delivery_count: results.length,
+      deliveries: results.map((item) => ({
+        channel: item.channel,
+        action_id: item.action_id ?? null,
+      })),
+    })
 
     const previous_action_id =
       typeof input.action_id === 'string' && input.action_id.trim().length > 0
@@ -755,9 +795,10 @@ async function notify_room_mode_switch(input: {
       throw result.error
     }
   } catch (error) {
-    console.error('[chat]', 'room_mode_notify_failed', {
+    console.error('[chat] notify_action_failed', {
       room_uuid: input.room_uuid,
       mode: input.mode,
+      category: notify_category,
       error: serialize_error(error),
     })
   }
