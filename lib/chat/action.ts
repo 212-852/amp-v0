@@ -17,6 +17,10 @@ import {
   load_archived_messages,
   type archived_message,
 } from './archive'
+import {
+  web_chat_timeline_visibility,
+  type web_timeline_filtered_row,
+} from './web_timeline'
 import { resolve_chat_context } from '@/lib/dispatch/context'
 import {
   build_initial_chat_bundles,
@@ -83,6 +87,12 @@ type user_page_debug_payload = {
   error: unknown
 }
 
+type user_page_debug_extras = {
+  raw_count?: number
+  visible_count?: number
+  filtered_out?: web_timeline_filtered_row[]
+}
+
 function serialize_error(error: unknown): Record<string, unknown> | null {
   if (!error) {
     return null
@@ -113,7 +123,7 @@ function serialize_error(error: unknown): Record<string, unknown> | null {
 
 async function emit_user_page_debug(
   event: string,
-  payload: Partial<user_page_debug_payload>,
+  payload: Partial<user_page_debug_payload> & user_page_debug_extras,
 ) {
   const safe_payload: user_page_debug_payload = {
     user_uuid: payload.user_uuid ?? null,
@@ -127,14 +137,56 @@ async function emit_user_page_debug(
     error: payload.error ?? null,
   }
 
+  const timeline_extras: user_page_debug_extras = {}
+
+  if (payload.raw_count !== undefined) {
+    timeline_extras.raw_count = payload.raw_count
+  }
+
+  if (payload.visible_count !== undefined) {
+    timeline_extras.visible_count = payload.visible_count
+  }
+
+  if (payload.filtered_out !== undefined) {
+    timeline_extras.filtered_out = payload.filtered_out
+  }
+
   await debug_event({
     category: 'USER_PAGE',
     event,
     payload: {
       ...safe_payload,
+      ...timeline_extras,
       error: serialize_error(safe_payload.error),
     },
   })
+}
+
+async function emit_user_page_message_fetch_completed(
+  base: Omit<
+    Partial<user_page_debug_payload>,
+    'message_count' | 'error'
+  >,
+  archived_messages: archived_message[],
+) {
+  const { raw_count, visible_count, filtered_out } =
+    web_chat_timeline_visibility(archived_messages)
+
+  await emit_user_page_debug('message_fetch_completed', {
+    ...base,
+    message_count: raw_count,
+    raw_count,
+    visible_count,
+    filtered_out,
+  })
+
+  if (raw_count > visible_count) {
+    console.error('[USER_PAGE] message_fetch_visible_gap', {
+      raw_count,
+      visible_count,
+      filtered: filtered_out,
+    })
+  }
 }
 
 async function archive_input_line_text_for_room(input: {
@@ -479,15 +531,17 @@ export async function load_user_home_chat() {
 
     const archived_messages = await load_archived_messages(room.room_uuid)
 
-    await emit_user_page_debug('message_fetch_completed', {
-      user_uuid,
-      visitor_uuid,
-      room_uuid: room.room_uuid,
-      participant_uuid: room.participant_uuid,
-      source_channel,
-      locale,
-      message_count: archived_messages.length,
-    })
+    await emit_user_page_message_fetch_completed(
+      {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: room.room_uuid,
+        participant_uuid: room.participant_uuid,
+        source_channel,
+        locale,
+      },
+      archived_messages,
+    )
 
     await emit_user_page_debug('initial_seed_check_started', {
       user_uuid,
@@ -544,6 +598,18 @@ export async function load_user_home_chat() {
     })
 
     const final_messages = await load_archived_messages(room.room_uuid)
+
+    await emit_user_page_message_fetch_completed(
+      {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: room.room_uuid,
+        participant_uuid: room.participant_uuid,
+        source_channel,
+        locale,
+      },
+      final_messages,
+    )
 
     await emit_user_page_debug('initial_seed_created', {
       user_uuid,

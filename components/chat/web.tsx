@@ -7,6 +7,7 @@ import type {
   initial_carousel_bundle,
   initial_carousel_card,
   quick_menu_bundle,
+  text_bundle,
   welcome_bundle,
 } from '@/lib/chat/message'
 
@@ -242,48 +243,78 @@ function InitialCarouselBubble({
   )
 }
 
-export function WebChat({ messages }: { messages: archived_message[] }) {
-  const welcome_messages = messages.filter(
-    (message) => message.bundle.bundle_type === 'welcome',
-  )
-  const carousel_messages = messages.filter(
-    (message) => message.bundle.bundle_type === 'initial_carousel',
-  )
-  const card_messages = messages.filter((message) =>
-    ['quick_menu', 'how_to_use', 'faq'].includes(message.bundle.bundle_type),
-  )
+function TextBubble({ bundle }: { bundle: text_bundle }) {
+  const body = bundle.payload?.text ?? ''
+  const from_user = bundle.sender === 'user'
 
   return (
+    <div
+      className={[
+        'flex px-5',
+        from_user ? 'justify-end' : 'justify-start',
+      ].join(' ')}
+    >
+      <div
+        className={[
+          'max-w-[86%] rounded-[20px] px-4 py-3 shadow-[0_2px_14px_rgba(42,29,24,0.06)]',
+          from_user
+            ? 'bg-[#c9a77d] text-white'
+            : 'bg-white text-[#2a1d18]',
+        ].join(' ')}
+      >
+        <p className="whitespace-pre-wrap text-[15px] font-medium leading-[1.55]">
+          {body}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function SingleCardRow({ bundle }: { bundle: initial_carousel_card }) {
+  return (
+    <div className="overflow-x-auto px-5 pb-3">
+      <div className="flex w-max gap-4">
+        <ChatCard bundle={bundle} />
+      </div>
+    </div>
+  )
+}
+
+function WebChatMessageRow({ message }: { message: archived_message }) {
+  const bundle = message.bundle
+
+  if (bundle.bundle_type === 'welcome') {
+    return <WelcomeBubble bundle={bundle} />
+  }
+
+  if (bundle.bundle_type === 'initial_carousel') {
+    return <InitialCarouselBubble bundle={bundle} />
+  }
+
+  if (
+    bundle.bundle_type === 'quick_menu' ||
+    bundle.bundle_type === 'how_to_use' ||
+    bundle.bundle_type === 'faq'
+  ) {
+    return <SingleCardRow bundle={bundle} />
+  }
+
+  if (bundle.bundle_type === 'text') {
+    return <TextBubble bundle={bundle} />
+  }
+
+  return null
+}
+
+export function WebChat({ messages }: { messages: archived_message[] }) {
+  return (
     <section className="space-y-5 pt-4">
-      {welcome_messages.map((message) => (
-        <WelcomeBubble
+      {messages.map((message) => (
+        <WebChatMessageRow
           key={message.archive_uuid}
-          bundle={message.bundle as welcome_bundle}
+          message={message}
         />
       ))}
-
-      {carousel_messages.map((message) => (
-        <InitialCarouselBubble
-          key={message.archive_uuid}
-          bundle={message.bundle as initial_carousel_bundle}
-        />
-      ))}
-
-      {card_messages.length > 0 ? (
-        <InitialCarouselBubble
-          bundle={{
-            bundle_uuid: 'legacy_initial_carousel',
-            bundle_type: 'initial_carousel',
-            sender: 'bot',
-            version: 1,
-            locale: 'ja',
-            content_key: 'initial.carousel',
-            cards: card_messages.map(
-              (message) => message.bundle as initial_carousel_card,
-            ),
-          }}
-        />
-      ) : null}
     </section>
   )
 }
