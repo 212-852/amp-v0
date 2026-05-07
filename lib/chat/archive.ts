@@ -129,6 +129,22 @@ export async function load_archived_messages(room_uuid: string) {
     .map(normalize_archive)
 }
 
+async function count_archived_messages(room_uuid: string) {
+  const result = await supabase
+    .from('messages')
+    .select('message_uuid', {
+      count: 'exact',
+      head: true,
+    })
+    .eq('room_uuid', room_uuid)
+
+  if (result.error) {
+    throw result.error
+  }
+
+  return result.count ?? 0
+}
+
 function debug_incoming_line_archive_payload(
   input: archive_incoming_line_text_input,
   message_uuid?: string | null,
@@ -387,9 +403,9 @@ export async function archive_message_bundles(
     return []
   }
 
-  const existing_messages =
-    await load_archived_messages(input.room_uuid)
-  const next_sequence = existing_messages.length + 1
+  const existing_message_count =
+    await count_archived_messages(input.room_uuid)
+  const next_sequence = existing_message_count + 1
   const rows = input.bundles.map((bundle, index) => {
     const bundle_metadata =
       'metadata' in bundle &&
@@ -477,6 +493,6 @@ export async function archive_message_bundles(
   }
 
   return inserted.map((row, index) =>
-    normalize_archive(row, existing_messages.length + index),
+    normalize_archive(row, existing_message_count + index),
   )
 }

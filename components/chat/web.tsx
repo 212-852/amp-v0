@@ -1,7 +1,10 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect } from 'react'
+import {
+  useEffect,
+  useRef,
+} from 'react'
 
 import { useUserChat } from '@/components/chat/context'
 import type { archived_message } from '@/lib/chat/archive'
@@ -335,6 +338,8 @@ export function WebChat({
     room_uuid: active_room_uuid,
     messages: active_messages,
   } = chat
+  const bottom_ref = useRef<HTMLDivElement | null>(null)
+  const did_initial_scroll_ref = useRef(false)
 
   useEffect(() => {
     hydrate_chat({
@@ -395,6 +400,14 @@ export function WebChat({
     ? active_messages
     : messages
 
+  useEffect(() => {
+    bottom_ref.current?.scrollIntoView({
+      behavior: did_initial_scroll_ref.current ? 'smooth' : 'auto',
+      block: 'end',
+    })
+    did_initial_scroll_ref.current = true
+  }, [render_messages.length])
+
   return (
     <section className="space-y-5 pt-4">
       {render_messages.map((message) => (
@@ -403,6 +416,7 @@ export function WebChat({
           message={message}
         />
       ))}
+      <div ref={bottom_ref} />
     </section>
   )
 }

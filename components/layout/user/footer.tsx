@@ -117,22 +117,6 @@ const quick_menu_items: quick_menu_item[] = [
 
 type room_mode_segment = 'bot' | 'concierge'
 
-const switch_message_text: Record<
-  room_mode_segment,
-  Record<locale_key, string>
-> = {
-  bot: {
-    ja: 'BOTに切り替え',
-    en: 'Switch to BOT',
-    es: 'Cambiar a BOT',
-  },
-  concierge: {
-    ja: 'コンシェルジュに切り替え',
-    en: 'Switch to Concierge',
-    es: 'Cambiar a Concierge',
-  },
-}
-
 function now_ms() {
   return performance.now()
 }
@@ -146,52 +130,6 @@ function log_switch_timing(
     ...payload,
     duration_ms: Math.round(performance.now() - since),
   })
-}
-
-function is_switch_mode_incoming_message(message: archived_message) {
-  const bundle = message.bundle
-
-  if (bundle.bundle_type !== 'text' || bundle.sender !== 'user') {
-    return false
-  }
-
-  const meta =
-    bundle.metadata && typeof bundle.metadata === 'object'
-      ? (bundle.metadata as { intent?: string })
-      : null
-
-  return meta?.intent === 'switch_mode'
-}
-
-function create_optimistic_switch_message(input: {
-  room_uuid: string
-  mode: room_mode_segment
-  locale: locale_key
-}): archived_message {
-  const optimistic_uuid = `optimistic:${crypto.randomUUID()}`
-  const created_at = new Date().toISOString()
-
-  return {
-    archive_uuid: optimistic_uuid,
-    room_uuid: input.room_uuid,
-    sequence: Number.MAX_SAFE_INTEGER,
-    created_at,
-    bundle: {
-      bundle_uuid: optimistic_uuid,
-      bundle_type: 'text',
-      sender: 'user',
-      version: 1,
-      locale: input.locale,
-      content_key: `room.mode.switch.${input.mode}`,
-      metadata: {
-        intent: 'switch_mode',
-        mode: input.mode,
-      },
-      payload: {
-        text: switch_message_text[input.mode][input.locale],
-      },
-    },
-  }
 }
 
 export default function UserFooter() {
@@ -271,17 +209,8 @@ export default function UserFooter() {
       mode: next_mode,
     })
 
-    const optimistic_message = create_optimistic_switch_message({
-      room_uuid: chat.room_uuid,
-      mode: next_mode,
-      locale: render_locale,
-    })
-
-    chat.append_message(optimistic_message)
-    log_switch_timing('client_message_appended', clicked_at, {
-      archive_uuid: optimistic_message.archive_uuid,
-      optimistic: true,
-    })
+    const previous_mode = chat.mode
+    chat.set_mode(next_mode as room_mode)
     set_is_switch_pending(true)
 
     try {
@@ -305,7 +234,7 @@ export default function UserFooter() {
       })
 
       if (!response.ok) {
-        chat.remove_message(optimistic_message.archive_uuid)
+        chat.set_mode(previous_mode)
         return
       }
 
@@ -319,31 +248,11 @@ export default function UserFooter() {
         chat.set_mode(payload.mode as room_mode)
 
         const returned_messages = payload.messages ?? []
-        const incoming_message = returned_messages.find(
-          is_switch_mode_incoming_message,
-        )
-        const outgoing_messages = returned_messages.filter(
-          (message) => !is_switch_mode_incoming_message(message),
-        )
+        chat.append_messages(returned_messages)
 
-        if (incoming_message) {
-          chat.replace_message(
-            optimistic_message.archive_uuid,
-            incoming_message,
-          )
-          log_switch_timing('client_message_appended', clicked_at, {
-            archive_uuid: incoming_message.archive_uuid,
-            optimistic: false,
-          })
-        }
-
-        chat.append_messages(outgoing_messages)
-
-        outgoing_messages.forEach((message) => {
+        returned_messages.forEach((message) => {
           log_switch_timing('client_message_appended', clicked_at, {
             archive_uuid: message.archive_uuid,
-            optimistic: false,
-            outgoing: true,
           })
         })
 
@@ -353,11 +262,11 @@ export default function UserFooter() {
           message_count: returned_messages.length,
         })
       } else {
-        chat.remove_message(optimistic_message.archive_uuid)
+        chat.set_mode(previous_mode)
       }
     } catch (error) {
       console.error('[chat] switch_api_failed', error)
-      chat.remove_message(optimistic_message.archive_uuid)
+      chat.set_mode(previous_mode)
     } finally {
       set_is_switch_pending(false)
       // Network errors: leave toggle unchanged.
