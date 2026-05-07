@@ -105,52 +105,48 @@ export function UserChatProvider({
 
   const scroll_to_bottom = useCallback(
     (behavior: ScrollBehavior = 'smooth') => {
-      const el = scroll_area_ref.current
-
-      if (!el || typeof window === 'undefined') {
+      if (typeof window === 'undefined') {
         return
       }
 
       window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          el.scrollTop = el.scrollHeight
+        const el = scroll_area_ref.current
 
-          if (behavior === 'smooth') {
-            el.scrollTo({
-              top: el.scrollHeight,
-              behavior: 'smooth',
-            })
-          }
+        console.log('[CHAT_SCROLL] before', {
+          exists: Boolean(el),
+          scrollTop: el?.scrollTop,
+          scrollHeight: el?.scrollHeight,
+          clientHeight: el?.clientHeight,
+          canScroll: el ? el.scrollHeight > el.clientHeight : false,
+        })
 
-          console.log('scroll_to_bottom_done', {
+        if (!el) {
+          return
+        }
+
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior,
+        })
+
+        window.setTimeout(() => {
+          console.log('[CHAT_SCROLL] after', {
             scrollTop: el.scrollTop,
             scrollHeight: el.scrollHeight,
             clientHeight: el.clientHeight,
+            reachedBottom:
+              Math.abs(
+                el.scrollHeight - el.clientHeight - el.scrollTop,
+              ) < 4,
           })
-        })
+        }, 100)
       })
     },
     [],
   )
 
   const log_scroll_button_clicked = useCallback(() => {
-    const el = scroll_area_ref.current
-
-    if (!el) {
-      console.log('scroll_button_clicked', {
-        scrollTop: null,
-        scrollHeight: null,
-        clientHeight: null,
-      })
-
-      return
-    }
-
-    console.log('scroll_button_clicked', {
-      scrollTop: el.scrollTop,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-    })
+    console.log('[CHAT_SCROLL] button_clicked')
   }, [])
 
   const hydrate_chat = useCallback(
