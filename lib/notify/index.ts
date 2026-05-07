@@ -10,6 +10,11 @@ import {
   type notify_event,
 } from './rules'
 
+export type notify_delivery_result = {
+  channel: 'discord' | 'line'
+  action_id?: string | null
+}
+
 export async function notify(event: notify_event) {
   const rule = resolve_notify_rule(event)
 
@@ -28,7 +33,15 @@ export async function notify(event: notify_event) {
     return Promise.resolve()
   })
 
-  await Promise.allSettled(deliveries)
+  const settled = await Promise.allSettled(deliveries)
+
+  return settled.flatMap((result) => {
+    if (result.status !== 'fulfilled' || !result.value) {
+      return []
+    }
+
+    return [result.value as notify_delivery_result]
+  })
 }
 
 export async function sync_room_action_context(input: {

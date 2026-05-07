@@ -14,6 +14,11 @@ export type discord_action_context_result = {
   action_id: string | null
 }
 
+export type discord_notify_result = {
+  channel: 'discord'
+  action_id?: string | null
+}
+
 function action_id_from_discord_thread_id(
   thread_id: string | null | undefined,
 ) {
@@ -169,6 +174,35 @@ export async function sync_discord_action_context(
   })
 }
 
+function short_room_uuid(room_uuid: string) {
+  return room_uuid.replace(/-/g, '').slice(0, 8) || room_uuid.slice(0, 8)
+}
+
+function concierge_start_content(event: Extract<
+  notify_event,
+  { event: 'concierge_requested' }
+>) {
+  return [
+    'Concierge requested',
+    `room_uuid: ${event.room_uuid}`,
+    `participant_uuid: ${event.participant_uuid}`,
+    `visitor_uuid: ${event.visitor_uuid}`,
+    `source_channel: ${event.source_channel}`,
+    `mode: ${event.mode}`,
+  ].join('\n')
+}
+
+function concierge_end_content(event: Extract<
+  notify_event,
+  { event: 'concierge_closed' }
+>) {
+  return [
+    'Returned to bot',
+    `room_uuid: ${event.room_uuid}`,
+    `mode: ${event.mode}`,
+  ].join('\n')
+}
+
 function get_debug_discord_mention_user_ids() {
   const raw = process.env.DISCORD_DEV_USER_IDS
 
@@ -225,13 +259,43 @@ function build_discord_content(event: notify_event) {
   return null
 }
 
-export async function send_discord_notify(event: notify_event) {
+export async function send_discord_notify(
+  event: notify_event,
+): Promise<discord_notify_result | null> {
+  if (event.event === 'concierge_requested') {
+    const result = await sync_discord_action_context({
+      title: `Concierge request - room ${short_room_uuid(event.room_uuid)}`,
+      action_id: event.action_id,
+      content: concierge_start_content(event),
+    })
+
+    return {
+      channel: 'discord',
+      action_id: result?.action_id ?? event.action_id,
+    }
+  }
+
+  if (event.event === 'concierge_closed') {
+    const result = event.action_id
+      ? await sync_discord_action_context({
+          title: `Concierge request - room ${short_room_uuid(event.room_uuid)}`,
+          action_id: event.action_id,
+          content: concierge_end_content(event),
+        })
+      : null
+
+    return {
+      channel: 'discord',
+      action_id: result?.action_id ?? event.action_id,
+    }
+  }
+
   if (event.event === 'debug_trace') {
     const webhook_url = process.env.DISCORD_DEBUG_WEBHOOK_URL
     const content = build_discord_content(event)
 
     if (!content || !webhook_url) {
-      return
+      return null
     }
 
     const mention_users = get_debug_discord_mention_user_ids()
@@ -250,14 +314,16 @@ export async function send_discord_notify(event: notify_event) {
       }),
     })
 
-    return
+    return {
+      channel: 'discord',
+    }
   }
 
   const webhook_url = process.env.DISCORD_NOTIFY_WEBHOOK_URL
   const content = build_discord_content(event)
 
   if (!content) {
-    return
+    return null
   }
 
   if (!webhook_url) {
@@ -265,7 +331,7 @@ export async function send_discord_notify(event: notify_event) {
       notify_event: event.event,
     })
 
-    return
+    return null
   }
 
   await fetch(webhook_url, {
@@ -277,4 +343,8 @@ export async function send_discord_notify(event: notify_event) {
       content,
     }),
   })
+
+  return {
+    channel: 'discord',
+  }
 }

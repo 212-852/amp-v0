@@ -29,7 +29,7 @@ import {
   build_user_text_bundle,
 } from './message'
 import type { chat_locale } from './message'
-import { sync_room_action_context } from '@/lib/notify'
+import { notify } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
 import {
   ensure_direct_room_for_visitor,
@@ -708,65 +708,47 @@ function switch_step_log(
   step_anchor.t = now
 }
 
-function switch_action_content(input: {
+async function notify_room_mode_switch(input: {
   room_uuid: string
+  participant_uuid: string
   visitor_uuid: string
   user_uuid: string | null
   channel: chat_channel
   mode: room_mode
-  requested_at: string
-  timeline: string[]
-}) {
-  return [
-    `room_uuid: ${input.room_uuid}`,
-    `visitor_uuid: ${input.visitor_uuid}`,
-    `user_uuid: ${input.user_uuid ?? ''}`,
-    `channel: ${input.channel}`,
-    `mode: ${input.mode}`,
-    `requested_at: ${input.requested_at}`,
-    '',
-    'Timeline:',
-    ...input.timeline.map((item) => `- ${item}`),
-  ].join('\n')
-}
-
-async function sync_concierge_switch_action(input: {
-  room_uuid: string
-  visitor_uuid: string
-  user_uuid: string | null
-  channel: chat_channel
   action_id: string | null
 }) {
   try {
-    const action_context = await sync_room_action_context({
-      provider: 'discord',
-      title: `Concierge: ${input.room_uuid}`,
-      action_id: input.action_id,
-      content: switch_action_content({
-        room_uuid: input.room_uuid,
-        visitor_uuid: input.visitor_uuid,
-        user_uuid: input.user_uuid,
-        channel: input.channel,
-        mode: 'concierge',
-        requested_at: new Date().toISOString(),
-        timeline: input.action_id
-          ? ['Concierge requested again']
-          : ['Concierge requested'],
-      }),
-    })
+    const results = await notify(
+      input.mode === 'concierge'
+        ? {
+            event: 'concierge_requested',
+            room_uuid: input.room_uuid,
+            participant_uuid: input.participant_uuid,
+            visitor_uuid: input.visitor_uuid,
+            user_uuid: input.user_uuid,
+            source_channel: input.channel,
+            mode: 'concierge',
+            action_id: input.action_id,
+          }
+        : {
+            event: 'concierge_closed',
+            room_uuid: input.room_uuid,
+            mode: 'bot',
+            action_id: input.action_id,
+          },
+    )
 
-    if (!action_context?.action_id) {
-      return
-    }
+    const action_id = results.find((result) => result.action_id)
+      ?.action_id
 
-    if (action_context.action_id === input.action_id) {
+    if (!action_id || action_id === input.action_id) {
       return
     }
 
     const result = await supabase
       .from('rooms')
       .update({
-        action_id: action_context.action_id,
+        action_id,
         updated_at: new Date().toISOString(),
       })
       .eq('room_uuid', input.room_uuid)
@@ -775,8 +757,9 @@ async function sync_concierge_switch_action(input: {
       throw result.error
     }
   } catch (error) {
-    console.error('[chat]', 'concierge_action_sync_failed', {
+    console.error('[chat]', 'room_mode_notify_failed', {
       room_uuid: input.room_uuid,
+      mode: input.mode,
       error: serialize_error(error),
     })
   }
@@ -988,18 +971,18 @@ export async function handle_chat_mode_request(
     messages: archived_messages,
   })
 
-  if (chat_room_after_mode.mode === 'concierge') {
-    await sync_concierge_switch_action({
-      room_uuid: chat_room_after_mode.room_uuid,
-      visitor_uuid: chat_room_after_mode.visitor_uuid,
-      user_uuid: chat_room_after_mode.user_uuid,
-      channel,
-      action_id:
-        typeof room_update.data.action_id === 'string'
-          ? room_update.data.action_id
-          : null,
-    })
-  }
+  await notify_room_mode_switch({
+    room_uuid: chat_room_after_mode.room_uuid,
+    participant_uuid: chat_room_after_mode.participant_uuid,
+    visitor_uuid: chat_room_after_mode.visitor_uuid,
+    user_uuid: chat_room_after_mode.user_uuid,
+    channel,
+    mode: chat_room_after_mode.mode,
+    action_id:
+      typeof room_update.data.action_id === 'string'
+        ? room_update.data.action_id
+        : null,
+  })
 
   switch_step_log('switch_api_completed', step_anchor, {
     room_uuid: chat_room_after_mode.room_uuid,
