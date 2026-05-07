@@ -8,6 +8,7 @@ export type discord_action_context_input = {
   title: string
   content: string
   action_id: string | null
+  close?: boolean
 }
 
 export type discord_action_context_result = {
@@ -61,40 +62,56 @@ async function discord_action_bot_fetch(
   })
 }
 
-function action_webhook_url(title: string) {
-  const raw = process.env.DISCORD_ACTION_WEBHOOK_URL?.trim()
+function discord_action_channel_id() {
+  return process.env.DISCORD_ACTION_CHANNEL_ID?.trim() || null
+}
 
-  if (!raw) {
-    return null
-  }
-
-  const url = new URL(raw)
-
-  url.searchParams.set('wait', 'true')
-  url.searchParams.set('thread_name', title.slice(0, 90))
-
-  return url.toString()
+function log_discord_action(
+  event: string,
+  payload: Record<string, unknown> = {},
+) {
+  console.log('[discord_action]', event, payload)
 }
 
 async function create_discord_action_context(input: {
   title: string
   content: string
 }): Promise<discord_action_context_result | null> {
-  const url = action_webhook_url(input.title)
+  const channel_id = discord_action_channel_id()
 
-  if (!url) {
+  if (!channel_id) {
+    console.warn(
+      '[discord_action]',
+      'thread_create_skipped_missing_channel_id',
+    )
     return null
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      content: input.content,
-    }),
+  log_discord_action('discord_action_thread_create_started', {
+    channel_id,
+    title: input.title,
   })
+
+  const response = await discord_action_bot_fetch(
+    `/channels/${channel_id}/threads`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        name: input.title.slice(0, 100),
+        message: {
+          content: input.content,
+        },
+      }),
+    },
+  )
+
+  if (!response) {
+    console.warn(
+      '[discord_action]',
+      'thread_create_skipped_missing_bot_token',
+    )
+    return null
+  }
 
   if (!response.ok) {
     console.warn(
@@ -107,28 +124,36 @@ async function create_discord_action_context(input: {
   }
 
   const payload = (await response.json()) as {
-    channel_id?: string
+    id?: string
+  }
+  const action_id = action_id_from_discord_thread_id(payload.id ?? null)
+
+  log_discord_action('discord_action_thread_created', {
+    channel_id,
+    thread_id: payload.id ?? null,
+    action_id,
+  })
+
+  if (payload.id) {
+    log_discord_action('discord_action_message_posted', {
+      thread_id: payload.id,
+      action_id,
+      initial: true,
+    })
   }
 
   return {
-    action_id: action_id_from_discord_thread_id(
-      payload.channel_id ?? null,
-    ),
+    action_id,
   }
 }
 
-async function update_discord_action_context(input: {
+async function post_discord_action_thread_message(input: {
+  thread_id: string
   action_id: string
   content: string
-}): Promise<discord_action_context_result | null> {
-  const thread_id = discord_thread_id_from_action_id(input.action_id)
-
-  if (!thread_id) {
-    return null
-  }
-
+}) {
   const response = await discord_action_bot_fetch(
-    `/channels/${thread_id}/messages`,
+    `/channels/${input.thread_id}/messages`,
     {
       method: 'POST',
       body: JSON.stringify({
@@ -138,9 +163,11 @@ async function update_discord_action_context(input: {
   )
 
   if (response?.ok) {
-    return {
+    log_discord_action('discord_action_message_posted', {
+      thread_id: input.thread_id,
       action_id: input.action_id,
-    }
+    })
+    return true
   }
 
   if (response && !response.ok) {
@@ -151,7 +178,71 @@ async function update_discord_action_context(input: {
     )
   }
 
-  return null
+  return false
+}
+
+async function close_discord_action_thread(input: {
+  thread_id: string
+  action_id: string
+}) {
+  const response = await discord_action_bot_fetch(
+    `/channels/${input.thread_id}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        archived: true,
+      }),
+    },
+  )
+
+  if (response?.ok) {
+    log_discord_action('discord_action_closed', {
+      thread_id: input.thread_id,
+      action_id: input.action_id,
+    })
+    return
+  }
+
+  if (response && !response.ok) {
+    console.warn(
+      '[discord_action] close_failed',
+      response.status,
+      await response.text(),
+    )
+  }
+}
+
+async function update_discord_action_context(input: {
+  action_id: string
+  content: string
+  close?: boolean
+}): Promise<discord_action_context_result | null> {
+  const thread_id = discord_thread_id_from_action_id(input.action_id)
+
+  if (!thread_id) {
+    return null
+  }
+
+  const posted = await post_discord_action_thread_message({
+    thread_id,
+    action_id: input.action_id,
+    content: input.content,
+  })
+
+  if (!posted) {
+    return null
+  }
+
+  if (input.close) {
+    await close_discord_action_thread({
+      thread_id,
+      action_id: input.action_id,
+    })
+  }
+
+  return {
+    action_id: input.action_id,
+  }
 }
 
 export async function sync_discord_action_context(
@@ -161,11 +252,14 @@ export async function sync_discord_action_context(
     const updated = await update_discord_action_context({
       action_id: input.action_id,
       content: input.content,
+      close: input.close,
     })
 
     if (updated) {
       return updated
     }
+
+    return null
   }
 
   return create_discord_action_context({
@@ -264,7 +358,7 @@ export async function send_discord_notify(
 ): Promise<discord_notify_result | null> {
   if (event.event === 'concierge_requested') {
     const result = await sync_discord_action_context({
-      title: `Concierge request - room ${short_room_uuid(event.room_uuid)}`,
+      title: `Concierge - ${short_room_uuid(event.room_uuid)}`,
       action_id: event.action_id,
       content: concierge_start_content(event),
     })
@@ -278,9 +372,10 @@ export async function send_discord_notify(
   if (event.event === 'concierge_closed') {
     const result = event.action_id
       ? await sync_discord_action_context({
-          title: `Concierge request - room ${short_room_uuid(event.room_uuid)}`,
+          title: `Concierge - ${short_room_uuid(event.room_uuid)}`,
           action_id: event.action_id,
           content: concierge_end_content(event),
+          close: true,
         })
       : null
 
