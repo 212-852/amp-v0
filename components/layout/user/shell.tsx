@@ -36,8 +36,8 @@ function ScrollToBottomButton() {
 
 export default function UserShell({ children }: UserShellProps) {
   return (
-    <div className="min-h-[100dvh] bg-[#f6e5cf]">
-      <div className="relative mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col overflow-x-hidden bg-[#f6e5cf]">
+    <div className="h-[100dvh] overflow-hidden bg-[#f6e5cf]">
+      <div className="relative mx-auto flex h-[100dvh] min-h-0 w-full max-w-[430px] flex-col overflow-hidden bg-[#f6e5cf]">
         <div className="fixed left-0 right-0 top-0 z-50 w-screen">
           <div className="mx-auto w-full max-w-[430px]">
             <UserHeader />
@@ -45,15 +45,12 @@ export default function UserShell({ children }: UserShellProps) {
         </div>
 
         <UserChatProvider>
-          <main className="flex min-h-0 flex-1 flex-col px-0 pt-[calc(env(safe-area-inset-top)+78px)]">
-            {children}
-          </main>
-
-          <div className="pointer-events-none fixed inset-x-0 top-[96px] z-40 mx-auto w-full max-w-[430px] px-4">
-            <div className="flex justify-end">
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden px-0 pt-[calc(env(safe-area-inset-top)+78px)]">
+            <div className="pointer-events-none absolute right-4 top-4 z-40">
               <ScrollToBottomButton />
             </div>
-          </div>
+            {children}
+          </main>
 
           <UserFooter />
         </UserChatProvider>

@@ -105,48 +105,44 @@ export function UserChatProvider({
 
   const scroll_to_bottom = useCallback(
     (behavior: ScrollBehavior = 'smooth') => {
-      if (typeof window === 'undefined') {
+      const el = scroll_area_ref.current
+
+      if (!el || typeof window === 'undefined') {
         return
       }
 
       window.requestAnimationFrame(() => {
-        const el = scroll_area_ref.current
+        window.requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight
 
-        console.log('[CHAT_SCROLL] before', {
-          exists: Boolean(el),
-          scrollTop: el?.scrollTop,
-          scrollHeight: el?.scrollHeight,
-          clientHeight: el?.clientHeight,
-          canScroll: el ? el.scrollHeight > el.clientHeight : false,
-        })
+          if (behavior === 'smooth') {
+            el.scrollTo({
+              top: el.scrollHeight,
+              behavior: 'smooth',
+            })
+          }
 
-        if (!el) {
-          return
-        }
-
-        el.scrollTo({
-          top: el.scrollHeight,
-          behavior,
-        })
-
-        window.setTimeout(() => {
-          console.log('[CHAT_SCROLL] after', {
+          console.log('scroll_to_bottom_done', {
             scrollTop: el.scrollTop,
             scrollHeight: el.scrollHeight,
             clientHeight: el.clientHeight,
-            reachedBottom:
-              Math.abs(
-                el.scrollHeight - el.clientHeight - el.scrollTop,
-              ) < 4,
+            canScroll: el.scrollHeight > el.clientHeight,
           })
-        }, 100)
+        })
       })
     },
     [],
   )
 
   const log_scroll_button_clicked = useCallback(() => {
-    console.log('[CHAT_SCROLL] button_clicked')
+    const el = scroll_area_ref.current
+
+    console.log('scroll_button_clicked', {
+      scrollTop: el?.scrollTop ?? null,
+      scrollHeight: el?.scrollHeight ?? null,
+      clientHeight: el?.clientHeight ?? null,
+      canScroll: el ? el.scrollHeight > el.clientHeight : false,
+    })
   }, [])
 
   const hydrate_chat = useCallback(

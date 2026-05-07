@@ -423,7 +423,7 @@ export function WebChat({
     <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={set_scroll_container}
-        className="min-h-0 flex-1 overflow-y-auto px-4 pt-4"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4"
       >
         <div className="flex flex-col gap-5">
           {render_messages.map((message) => (
@@ -433,7 +433,7 @@ export function WebChat({
             />
           ))}
         </div>
-        <div className="h-[220px] shrink-0" aria-hidden="true" />
+        <div className="h-[260px] shrink-0" aria-hidden="true" />
       </div>
     </div>
   )
