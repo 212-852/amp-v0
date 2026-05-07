@@ -695,19 +695,6 @@ type room_mode_switch_result =
         | 'invalid_transition'
     }
 
-function switch_step_log(
-  event: string,
-  step_anchor: { t: number },
-  payload: Record<string, unknown> = {},
-) {
-  const now = Date.now()
-  console.log('[chat]', event, {
-    ...payload,
-    duration_ms: now - step_anchor.t,
-  })
-  step_anchor.t = now
-}
-
 async function notify_room_mode_switch(input: {
   room_uuid: string
   participant_uuid: string
@@ -804,9 +791,6 @@ function session_source_to_chat_channel(
 export async function handle_chat_mode_request(
   request: Request,
 ): Promise<{ status: number; body: room_mode_switch_result }> {
-  const step_anchor = { t: Date.now() }
-  switch_step_log('switch_api_started', step_anchor, {})
-
   const visitor_uuid = await get_request_visitor_uuid()
 
   if (!visitor_uuid) {
@@ -909,7 +893,6 @@ export async function handle_chat_mode_request(
     mode: switch_action.mode,
   }
 
-  const update_started_at = Date.now()
   const room_update = await supabase
     .from('rooms')
     .update({
@@ -931,12 +914,6 @@ export async function handle_chat_mode_request(
     }
   }
 
-  switch_step_log('mode_updated', step_anchor, {
-    room_uuid: chat_room.room_uuid,
-    mode: room_update.data.mode,
-    step_duration_ms: Date.now() - update_started_at,
-  })
-
   const chat_room_after_mode: chat_room = {
     ...chat_room,
     mode: parse_room_mode(room_update.data.mode),
@@ -956,14 +933,6 @@ export async function handle_chat_mode_request(
     channel,
     bundles: [incoming_bundle, confirmation_bundle],
   })
-  switch_step_log('incoming_archived', step_anchor, {
-    room_uuid: chat_room_after_mode.room_uuid,
-    message_uuid: archived_messages[0]?.archive_uuid ?? null,
-  })
-  switch_step_log('outgoing_archived', step_anchor, {
-    room_uuid: chat_room_after_mode.room_uuid,
-    message_uuid: archived_messages[1]?.archive_uuid ?? null,
-  })
 
   await output_chat_bundles({
     room: chat_room_after_mode,
@@ -982,12 +951,6 @@ export async function handle_chat_mode_request(
       typeof room_update.data.action_id === 'string'
         ? room_update.data.action_id
         : null,
-  })
-
-  switch_step_log('switch_api_completed', step_anchor, {
-    room_uuid: chat_room_after_mode.room_uuid,
-    mode: chat_room_after_mode.mode,
-    message_count: archived_messages.length,
   })
 
   return {

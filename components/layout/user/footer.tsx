@@ -133,21 +133,6 @@ const switch_message_text: Record<
   },
 }
 
-function now_ms() {
-  return performance.now()
-}
-
-function log_switch_timing(
-  event: string,
-  since: number,
-  payload: Record<string, unknown> = {},
-) {
-  console.log('[chat]', event, {
-    ...payload,
-    duration_ms: Math.round(performance.now() - since),
-  })
-}
-
 function is_switch_mode_incoming_message(message: archived_message) {
   const bundle = message.bundle
 
@@ -264,13 +249,6 @@ export default function UserFooter() {
       return
     }
 
-    const clicked_at = now_ms()
-    log_switch_timing('switch_clicked', clicked_at, {
-      room_uuid: chat.room_uuid,
-      participant_uuid: chat.participant_uuid,
-      mode: next_mode,
-    })
-
     const previous_mode = chat.mode
     chat.set_mode(next_mode as room_mode)
     const optimistic_message = create_optimistic_switch_message({
@@ -279,18 +257,9 @@ export default function UserFooter() {
       locale: render_locale,
     })
     chat.append_message(optimistic_message)
-    log_switch_timing('client_message_appended', clicked_at, {
-      archive_uuid: optimistic_message.archive_uuid,
-      optimistic: true,
-    })
     set_pending_switch_mode(next_mode)
 
     try {
-      log_switch_timing('switch_api_started', clicked_at, {
-        room_uuid: chat.room_uuid,
-        mode: next_mode,
-      })
-
       const response = await fetch('/api/chat/mode', {
         method: 'POST',
         credentials: 'include',
@@ -338,18 +307,6 @@ export default function UserFooter() {
         }
 
         chat.append_messages(outgoing_messages)
-
-        returned_messages.forEach((message) => {
-          log_switch_timing('client_message_appended', clicked_at, {
-            archive_uuid: message.archive_uuid,
-          })
-        })
-
-        log_switch_timing('switch_api_completed', clicked_at, {
-          room_uuid: chat.room_uuid,
-          mode: payload.mode,
-          message_count: returned_messages.length,
-        })
       } else {
         chat.set_mode(previous_mode)
         chat.remove_message(optimistic_message.archive_uuid)

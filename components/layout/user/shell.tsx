@@ -14,20 +14,14 @@ type UserShellProps = {
 }
 
 function ScrollToBottomButton() {
-  const {
-    log_scroll_button_clicked,
-    scroll_to_bottom,
-  } = useUserChat()
+  const { scroll_to_bottom } = useUserChat()
 
   return (
     <button
       type="button"
       aria-label="Scroll to latest message"
       className="pointer-events-auto absolute right-4 top-[calc(env(safe-area-inset-top)+88px)] z-[999] flex h-10 w-10 items-center justify-center rounded-full border border-[#e8cdb5] bg-white text-[#3a2a21] shadow-[0_6px_18px_rgba(155,107,75,0.18)] transition-transform active:scale-95"
-      onClick={() => {
-        log_scroll_button_clicked()
-        scroll_to_bottom('smooth')
-      }}
+      onClick={() => scroll_to_bottom('smooth')}
     >
       <ChevronDown className="h-5 w-5" strokeWidth={2.4} />
     </button>

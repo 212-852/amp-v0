@@ -39,7 +39,6 @@ type chat_context_value = chat_room_client_state & {
   remove_message: (archive_uuid: string) => void
   set_mode: (mode: room_mode) => void
   set_scroll_container: (node: HTMLDivElement | null) => void
-  log_scroll_button_clicked: () => void
   scroll_to_bottom: (behavior?: ScrollBehavior) => void
 }
 
@@ -121,29 +120,11 @@ export function UserChatProvider({
               behavior: 'smooth',
             })
           }
-
-          console.log('scroll_to_bottom_done', {
-            scrollTop: el.scrollTop,
-            scrollHeight: el.scrollHeight,
-            clientHeight: el.clientHeight,
-            canScroll: el.scrollHeight > el.clientHeight,
-          })
         })
       })
     },
     [],
   )
-
-  const log_scroll_button_clicked = useCallback(() => {
-    const el = scroll_area_ref.current
-
-    console.log('scroll_button_clicked', {
-      scrollTop: el?.scrollTop ?? null,
-      scrollHeight: el?.scrollHeight ?? null,
-      clientHeight: el?.clientHeight ?? null,
-      canScroll: el ? el.scrollHeight > el.clientHeight : false,
-    })
-  }, [])
 
   const hydrate_chat = useCallback(
     (input: {
@@ -223,7 +204,6 @@ export function UserChatProvider({
       remove_message,
       set_mode,
       set_scroll_container,
-      log_scroll_button_clicked,
       scroll_to_bottom,
     }),
     [
@@ -236,7 +216,6 @@ export function UserChatProvider({
       remove_message,
       set_mode,
       set_scroll_container,
-      log_scroll_button_clicked,
       scroll_to_bottom,
     ],
   )
