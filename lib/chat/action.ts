@@ -6,6 +6,7 @@ import {
   infer_source_channel_from_ua,
   type browser_session_source_channel,
 } from '@/lib/auth/session'
+import { send_action_trace } from '@/lib/debug/action'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
@@ -864,6 +865,11 @@ export async function handle_chat_mode_request(
     participant_uuid: body?.participant_uuid ?? null,
     mode: body?.mode ?? null,
   })
+  await send_action_trace('action_entered', {
+    room_uuid: body?.room_uuid ?? null,
+    participant_uuid: body?.participant_uuid ?? null,
+    mode: body?.mode ?? null,
+  })
 
   if (
     !body?.room_uuid ||
@@ -976,6 +982,10 @@ export async function handle_chat_mode_request(
     room_uuid: body.room_uuid,
     mode: room_update.data.mode,
   })
+  await send_action_trace('mode_updated', {
+    room_uuid: body.room_uuid,
+    mode: room_update.data.mode,
+  })
 
   const chat_room_after_mode: chat_room = {
     ...chat_room,
@@ -1002,6 +1012,11 @@ export async function handle_chat_mode_request(
     mode: chat_room_after_mode.mode,
     message_count: archived_messages.length,
   })
+  await send_action_trace('messages_archived', {
+    room_uuid: chat_room_after_mode.room_uuid,
+    mode: chat_room_after_mode.mode,
+    message_count: archived_messages.length,
+  })
 
   await output_chat_bundles({
     room: chat_room_after_mode,
@@ -1010,6 +1025,10 @@ export async function handle_chat_mode_request(
   })
 
   console.log('[ACTION_TRACE] before_notify', {
+    room_uuid: chat_room_after_mode.room_uuid,
+    mode: chat_room_after_mode.mode,
+  })
+  await send_action_trace('before_notify', {
     room_uuid: chat_room_after_mode.room_uuid,
     mode: chat_room_after_mode.mode,
   })

@@ -4,6 +4,7 @@ import {
   send_discord_notify,
   sync_discord_action_context,
 } from './discord'
+import { send_action_trace } from '@/lib/debug/action'
 import { send_line_push_notify } from './line'
 import {
   resolve_notify_rule,
@@ -17,10 +18,18 @@ export type notify_delivery_result = {
 
 export async function notify(event: notify_event) {
   console.log('[ACTION_TRACE] notify_entered', event)
+  await send_action_trace('notify_entered', event as unknown as Record<
+    string,
+    unknown
+  >)
 
   const rule = resolve_notify_rule(event)
 
   console.log('[ACTION_TRACE] notify_rules_decided', {
+    event: event.event,
+    decision: rule,
+  })
+  await send_action_trace('notify_rules_decided', {
     event: event.event,
     decision: rule,
   })

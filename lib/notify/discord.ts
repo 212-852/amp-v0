@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { send_action_trace } from '@/lib/debug/action'
 import type { notify_event } from './rules'
 
 const discord_api_base = 'https://discord.com/api/v10'
@@ -58,6 +59,10 @@ async function discord_action_bot_fetch(
     url,
     method,
   })
+  await send_action_trace('discord_fetch_started', {
+    url,
+    method,
+  })
 
   const response = await fetch(url, {
     ...init,
@@ -68,10 +73,19 @@ async function discord_action_bot_fetch(
     },
   })
 
+  const response_body = await response.clone().text()
+
   console.log('[ACTION_TRACE] discord_fetch_completed', {
     status: response.status,
     ok: response.ok,
-    body: await response.clone().text(),
+    body: response_body,
+  })
+  await send_action_trace('discord_api_result', {
+    url,
+    method,
+    status: response.status,
+    ok: response.ok,
+    body: response_body,
   })
 
   return response
@@ -418,6 +432,13 @@ export async function send_discord_notify(
 ): Promise<discord_notify_result | null> {
   console.log('[ACTION_TRACE] discord_entered', {
     category: 'category' in event ? event.category : event.event,
+    has_bot_token: Boolean(process.env.DISCORD_ACTION_BOT_TOKEN),
+    has_channel_id: Boolean(process.env.DISCORD_ACTION_CHANNEL_ID),
+    has_webhook_url: Boolean(process.env.DISCORD_ACTION_WEBHOOK_URL),
+  })
+  await send_action_trace('discord_entered', {
+    category: 'category' in event ? event.category : event.event,
+    event: event.event,
     has_bot_token: Boolean(process.env.DISCORD_ACTION_BOT_TOKEN),
     has_channel_id: Boolean(process.env.DISCORD_ACTION_CHANNEL_ID),
     has_webhook_url: Boolean(process.env.DISCORD_ACTION_WEBHOOK_URL),
