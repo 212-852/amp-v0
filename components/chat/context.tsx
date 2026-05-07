@@ -38,7 +38,7 @@ type chat_context_value = chat_room_client_state & {
   ) => void
   remove_message: (archive_uuid: string) => void
   set_mode: (mode: room_mode) => void
-  set_bottom_anchor: (node: HTMLElement | null) => void
+  set_scroll_container: (node: HTMLElement | null) => void
   scroll_to_bottom: (behavior?: ScrollBehavior) => void
 }
 
@@ -157,26 +157,33 @@ export function UserChatProvider({
     }))
   }, [])
 
-  const bottom_anchor_ref = useRef<HTMLElement | null>(null)
+  const scroll_container_ref = useRef<HTMLElement | null>(null)
 
-  const set_bottom_anchor = useCallback((node: HTMLElement | null) => {
-    bottom_anchor_ref.current = node
-  }, [])
+  const set_scroll_container = useCallback(
+    (node: HTMLElement | null) => {
+      scroll_container_ref.current = node
+    },
+    [],
+  )
 
   const scroll_to_bottom = useCallback(
     (behavior: ScrollBehavior = 'smooth') => {
-      const run = () => {
-        bottom_anchor_ref.current?.scrollIntoView({
-          behavior,
-          block: 'end',
-        })
-      }
-
       if (typeof window === 'undefined') {
         return
       }
 
-      window.requestAnimationFrame(run)
+      window.requestAnimationFrame(() => {
+        const el = scroll_container_ref.current
+
+        if (!el) {
+          return
+        }
+
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior,
+        })
+      })
     },
     [],
   )
@@ -191,7 +198,7 @@ export function UserChatProvider({
       replace_message,
       remove_message,
       set_mode,
-      set_bottom_anchor,
+      set_scroll_container,
       scroll_to_bottom,
     }),
     [
@@ -203,7 +210,7 @@ export function UserChatProvider({
       replace_message,
       remove_message,
       set_mode,
-      set_bottom_anchor,
+      set_scroll_container,
       scroll_to_bottom,
     ],
   )

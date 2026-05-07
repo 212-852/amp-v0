@@ -39,7 +39,7 @@ export default function UserShell({ children }: UserShellProps) {
         </div>
 
         <UserChatProvider>
-          <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-0 pt-[calc(env(safe-area-inset-top)+78px)] pb-[calc(220px+env(safe-area-inset-bottom,0px))]">
+          <main className="flex min-h-0 flex-1 flex-col px-0 pt-[calc(env(safe-area-inset-top)+78px)]">
             {children}
           </main>
 

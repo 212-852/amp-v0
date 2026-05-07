@@ -335,12 +335,11 @@ export function WebChat({
   const {
     hydrate_chat,
     append_message,
-    set_bottom_anchor,
+    set_scroll_container,
     scroll_to_bottom,
     room_uuid: active_room_uuid,
     messages: active_messages,
   } = chat
-  const messages_container_ref = useRef<HTMLDivElement | null>(null)
   const did_initial_scroll_ref = useRef(false)
 
   useEffect(() => {
@@ -417,9 +416,9 @@ export function WebChat({
   }, [render_messages.length, scroll_to_bottom])
 
   return (
-    <section
-      ref={messages_container_ref}
-      className="flex flex-col gap-5 pt-4 pb-28"
+    <div
+      ref={set_scroll_container}
+      className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pt-4 pb-40"
     >
       {render_messages.map((message) => (
         <WebChatMessageRow
@@ -427,7 +426,7 @@ export function WebChat({
           message={message}
         />
       ))}
-      <div ref={set_bottom_anchor} aria-hidden="true" />
-    </section>
+      <div className="h-32 shrink-0" aria-hidden="true" />
+    </div>
   )
 }
