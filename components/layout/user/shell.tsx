@@ -22,8 +22,8 @@ function ScrollToBottomButton() {
   return (
     <button
       type="button"
-      aria-label="Scroll to bottom"
-      className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border border-[#e8cdb5] bg-[#fffaf3] text-[#3a2a21] shadow-[0_6px_18px_rgba(155,107,75,0.18)] transition-transform active:scale-95"
+      aria-label="Scroll to latest message"
+      className="pointer-events-auto absolute right-4 top-4 z-[999] flex h-10 w-10 items-center justify-center rounded-full border border-[#e8cdb5] bg-white text-[#3a2a21] shadow-[0_6px_18px_rgba(155,107,75,0.18)] transition-transform active:scale-95"
       onClick={() => {
         log_scroll_button_clicked()
         scroll_to_bottom('smooth')
@@ -46,9 +46,7 @@ export default function UserShell({ children }: UserShellProps) {
 
         <UserChatProvider>
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden px-0 pt-[calc(env(safe-area-inset-top)+78px)]">
-            <div className="pointer-events-none absolute right-4 top-4 z-40">
-              <ScrollToBottomButton />
-            </div>
+            <ScrollToBottomButton />
             {children}
           </main>
 
