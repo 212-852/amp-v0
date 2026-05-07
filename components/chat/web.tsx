@@ -335,10 +335,12 @@ export function WebChat({
   const {
     hydrate_chat,
     append_message,
+    set_bottom_anchor,
+    scroll_to_bottom,
     room_uuid: active_room_uuid,
     messages: active_messages,
   } = chat
-  const bottom_ref = useRef<HTMLDivElement | null>(null)
+  const messages_container_ref = useRef<HTMLDivElement | null>(null)
   const did_initial_scroll_ref = useRef(false)
 
   useEffect(() => {
@@ -401,22 +403,31 @@ export function WebChat({
     : messages
 
   useEffect(() => {
-    bottom_ref.current?.scrollIntoView({
-      behavior: did_initial_scroll_ref.current ? 'smooth' : 'auto',
-      block: 'end',
-    })
-    did_initial_scroll_ref.current = true
-  }, [render_messages.length])
+    if (render_messages.length === 0) {
+      return
+    }
+
+    if (!did_initial_scroll_ref.current) {
+      scroll_to_bottom('auto')
+      did_initial_scroll_ref.current = true
+      return
+    }
+
+    scroll_to_bottom('smooth')
+  }, [render_messages.length, scroll_to_bottom])
 
   return (
-    <section className="space-y-5 pt-4">
+    <section
+      ref={messages_container_ref}
+      className="flex flex-col gap-5 pt-4 pb-28"
+    >
       {render_messages.map((message) => (
         <WebChatMessageRow
           key={message.archive_uuid}
           message={message}
         />
       ))}
-      <div ref={bottom_ref} />
+      <div ref={set_bottom_anchor} aria-hidden="true" />
     </section>
   )
 }
