@@ -1,51 +1,10 @@
 import 'server-only'
 
-/**
- * Resolve optional ping for ACTION_TRACE webhook posts only.
- * Prefer DISCORD_DEBUG_MENTION_USER_ID (snowflake). Fallback: DISCORD_DEBUG_MENTION
- * as "<@id>", "<@!id>", plain snowflake, or arbitrary prefix (no allowed_mentions).
- */
-function resolve_action_trace_mention(): {
-  mention_prefix: string
-  allowed_user_ids: string[]
-} {
-  const user_id_env = process.env.DISCORD_DEBUG_MENTION_USER_ID?.trim()
-
-  if (user_id_env && /^\d{15,22}$/.test(user_id_env)) {
-    return {
-      mention_prefix: `<@${user_id_env}>\n`,
-      allowed_user_ids: [user_id_env],
-    }
-  }
-
-  const raw = process.env.DISCORD_DEBUG_MENTION?.trim()
-
-  if (!raw) {
-    return { mention_prefix: '', allowed_user_ids: [] }
-  }
-
-  const bracket = raw.match(/^<@!?(\d{15,22})>$/)
-
-  if (bracket) {
-    const id = bracket[1]
-
-    return {
-      mention_prefix: `<@${id}>\n`,
-      allowed_user_ids: [id],
-    }
-  }
-
-  if (/^\d{15,22}$/.test(raw)) {
-    return {
-      mention_prefix: `<@${raw}>\n`,
-      allowed_user_ids: [raw],
-    }
-  }
-
-  return {
-    mention_prefix: `${raw}\n`,
-    allowed_user_ids: [],
-  }
+function resolve_action_trace_dev_user_ids(): string[] {
+  return (process.env.DISCORD_DEV_USER_IDS ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
 }
 
 export async function send_action_trace(
@@ -60,10 +19,15 @@ export async function send_action_trace(
     return
   }
 
-  const { mention_prefix, allowed_user_ids } = resolve_action_trace_mention()
+  const dev_user_ids = resolve_action_trace_dev_user_ids()
+  const mention_text = dev_user_ids
+    .map((id) => `<@${id}>`)
+    .join(' ')
+
   const json_block = JSON.stringify(payload, null, 2).slice(0, 1500)
   let content =
-    `${mention_prefix}[ACTION_TRACE] ` +
+    `${mention_text ? mention_text + '\n' : ''}` +
+    '[ACTION_TRACE] ' +
     event +
     '\n```json\n' +
     json_block +
@@ -77,9 +41,9 @@ export async function send_action_trace(
     content,
   }
 
-  if (allowed_user_ids.length > 0) {
+  if (dev_user_ids.length > 0) {
     body.allowed_mentions = {
-      users: allowed_user_ids,
+      users: dev_user_ids,
     }
   }
 
