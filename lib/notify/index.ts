@@ -16,7 +16,14 @@ export type notify_delivery_result = {
 }
 
 export async function notify(event: notify_event) {
+  console.log('[ACTION_TRACE] notify_entered', event)
+
   const rule = resolve_notify_rule(event)
+
+  console.log('[ACTION_TRACE] notify_rules_decided', {
+    event: event.event,
+    decision: rule,
+  })
 
   const deliveries = rule.channels.map((channel) => {
     if (channel === 'discord') {

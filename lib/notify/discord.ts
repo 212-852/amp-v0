@@ -47,12 +47,19 @@ async function discord_action_bot_fetch(
   init: RequestInit,
 ) {
   const token = process.env.DISCORD_ACTION_BOT_TOKEN?.trim()
+  const url = `${discord_api_base}${path}`
+  const method = init.method ?? 'GET'
 
   if (!token) {
     return null
   }
 
-  return fetch(`${discord_api_base}${path}`, {
+  console.log('[ACTION_TRACE] discord_fetch_started', {
+    url,
+    method,
+  })
+
+  const response = await fetch(url, {
     ...init,
     headers: {
       'content-type': 'application/json',
@@ -60,6 +67,14 @@ async function discord_action_bot_fetch(
       ...(init.headers ?? {}),
     },
   })
+
+  console.log('[ACTION_TRACE] discord_fetch_completed', {
+    status: response.status,
+    ok: response.ok,
+    body: await response.clone().text(),
+  })
+
+  return response
 }
 
 function discord_action_channel_id() {
@@ -401,6 +416,13 @@ function build_discord_content(event: notify_event) {
 export async function send_discord_notify(
   event: notify_event,
 ): Promise<discord_notify_result | null> {
+  console.log('[ACTION_TRACE] discord_entered', {
+    category: 'category' in event ? event.category : event.event,
+    has_bot_token: Boolean(process.env.DISCORD_ACTION_BOT_TOKEN),
+    has_channel_id: Boolean(process.env.DISCORD_ACTION_CHANNEL_ID),
+    has_webhook_url: Boolean(process.env.DISCORD_ACTION_WEBHOOK_URL),
+  })
+
   if (event.event === 'concierge_requested') {
     const result = await sync_discord_action_context({
       title: `Concierge - ${short_room_uuid(event.room_uuid)}`,
