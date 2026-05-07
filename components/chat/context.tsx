@@ -38,7 +38,8 @@ type chat_context_value = chat_room_client_state & {
   ) => void
   remove_message: (archive_uuid: string) => void
   set_mode: (mode: room_mode) => void
-  set_scroll_container: (node: HTMLElement | null) => void
+  set_scroll_container: (node: HTMLDivElement | null) => void
+  log_scroll_button_clicked: () => void
   scroll_to_bottom: (behavior?: ScrollBehavior) => void
 }
 
@@ -92,6 +93,7 @@ export function UserChatProvider({
 }: {
   children: ReactNode
 }) {
+  const scroll_area_ref = useRef<HTMLDivElement | null>(null)
   const [room_state, set_room_state] =
     useState<chat_room_client_state>({
       room_uuid: null,
@@ -100,6 +102,56 @@ export function UserChatProvider({
       mode: 'bot',
     })
   const [messages, set_messages] = useState<archived_message[]>([])
+
+  const scroll_to_bottom = useCallback(
+    (behavior: ScrollBehavior = 'smooth') => {
+      const el = scroll_area_ref.current
+
+      if (!el || typeof window === 'undefined') {
+        return
+      }
+
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight
+
+          if (behavior === 'smooth') {
+            el.scrollTo({
+              top: el.scrollHeight,
+              behavior: 'smooth',
+            })
+          }
+
+          console.log('scroll_to_bottom_done', {
+            scrollTop: el.scrollTop,
+            scrollHeight: el.scrollHeight,
+            clientHeight: el.clientHeight,
+          })
+        })
+      })
+    },
+    [],
+  )
+
+  const log_scroll_button_clicked = useCallback(() => {
+    const el = scroll_area_ref.current
+
+    if (!el) {
+      console.log('scroll_button_clicked', {
+        scrollTop: null,
+        scrollHeight: null,
+        clientHeight: null,
+      })
+
+      return
+    }
+
+    console.log('scroll_button_clicked', {
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    })
+  }, [])
 
   const hydrate_chat = useCallback(
     (input: {
@@ -116,19 +168,22 @@ export function UserChatProvider({
         mode: input.mode,
       })
       set_messages(input.messages)
+      window.setTimeout(() => scroll_to_bottom('auto'), 0)
     },
-    [],
+    [scroll_to_bottom],
   )
 
   const append_message = useCallback((message: archived_message) => {
     set_messages((current) => append_unique(current, [message]))
-  }, [])
+    window.setTimeout(() => scroll_to_bottom('smooth'), 0)
+  }, [scroll_to_bottom])
 
   const append_messages = useCallback(
     (next_messages: archived_message[]) => {
       set_messages((current) => append_unique(current, next_messages))
+      window.setTimeout(() => scroll_to_bottom('smooth'), 0)
     },
-    [],
+    [scroll_to_bottom],
   )
 
   const replace_message = useCallback(
@@ -140,8 +195,9 @@ export function UserChatProvider({
           ),
         ),
       )
+      window.setTimeout(() => scroll_to_bottom('smooth'), 0)
     },
-    [],
+    [scroll_to_bottom],
   )
 
   const remove_message = useCallback((archive_uuid: string) => {
@@ -157,33 +213,9 @@ export function UserChatProvider({
     }))
   }, [])
 
-  const scroll_container_ref = useRef<HTMLElement | null>(null)
-
   const set_scroll_container = useCallback(
-    (node: HTMLElement | null) => {
-      scroll_container_ref.current = node
-    },
-    [],
-  )
-
-  const scroll_to_bottom = useCallback(
-    (behavior: ScrollBehavior = 'smooth') => {
-      if (typeof window === 'undefined') {
-        return
-      }
-
-      window.requestAnimationFrame(() => {
-        const el = scroll_container_ref.current
-
-        if (!el) {
-          return
-        }
-
-        el.scrollTo({
-          top: el.scrollHeight,
-          behavior,
-        })
-      })
+    (node: HTMLDivElement | null) => {
+      scroll_area_ref.current = node
     },
     [],
   )
@@ -199,6 +231,7 @@ export function UserChatProvider({
       remove_message,
       set_mode,
       set_scroll_container,
+      log_scroll_button_clicked,
       scroll_to_bottom,
     }),
     [
@@ -211,6 +244,7 @@ export function UserChatProvider({
       remove_message,
       set_mode,
       set_scroll_container,
+      log_scroll_button_clicked,
       scroll_to_bottom,
     ],
   )
