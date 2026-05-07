@@ -610,13 +610,13 @@ const room_mode_notice: {
 } = {
   concierge_requested: {
     ja: 'コンシェルジュに切り替えました。担当者が確認します。',
-    en: 'Switched to Concierge. A team member will check your message.',
-    es: 'Cambiamos a Concierge. Un miembro del equipo revisara tu mensaje.',
+    en: 'Switched to concierge. Our team will review this.',
+    es: 'Cambiamos al concierge. Nuestro equipo lo revisara.',
   },
   resumed_bot: {
-    ja: 'BOTに切り替えました。自動応答に戻ります。',
-    en: 'Switched to BOT. Automated replies are back on.',
-    es: 'Cambiamos a BOT. Las respuestas automaticas vuelven a estar activas.',
+    ja: 'ボット応答に切り替えました。',
+    en: 'Switched to bot replies.',
+    es: 'Cambiamos a respuestas del bot.',
   },
 }
 

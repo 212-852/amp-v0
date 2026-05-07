@@ -25,6 +25,7 @@ import { resolve_chat_context } from '@/lib/dispatch/context'
 import {
   build_initial_chat_bundles,
   build_line_followup_ack_bundle,
+  build_room_mode_notice_bundle,
   build_room_mode_switch_bundle,
   build_user_text_bundle,
 } from './message'
@@ -674,6 +675,7 @@ type room_mode_switch_result =
       ok: true
       mode: room_mode
       message_uuid: string | null
+      outgoing_message_uuid: string | null
     }
   | {
       ok: false
@@ -1074,10 +1076,29 @@ export async function handle_chat_mode_request(
     }
   }
 
+  const confirmation_bundle = build_room_mode_notice_bundle({
+    notice:
+      rule_action.mode === 'concierge'
+        ? 'concierge_requested'
+        : 'resumed_bot',
+    locale,
+  })
+  const outgoing_messages = await archive_message_bundles({
+    room_uuid: room_result.room.room_uuid,
+    participant_uuid: room_result.room.participant_uuid,
+    bot_participant_uuid: room_result.room.bot_participant_uuid,
+    channel,
+    bundles: [confirmation_bundle],
+  })
+  const output_messages = [
+    ...archived_messages,
+    ...outgoing_messages,
+  ]
+
   await output_chat_bundles({
     room: room_result.room,
     channel,
-    messages: archived_messages,
+    messages: output_messages,
   })
 
   return {
@@ -1085,6 +1106,8 @@ export async function handle_chat_mode_request(
     body: {
       ...action_result,
       message_uuid: archived_messages[0]?.archive_uuid ?? null,
+      outgoing_message_uuid:
+        outgoing_messages[0]?.archive_uuid ?? null,
     },
   }
 }

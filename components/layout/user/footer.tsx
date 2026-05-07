@@ -5,6 +5,7 @@ import {
   Edit3,
   Menu,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 import { useEffect, useState } from 'react'
 import { FaPaw } from 'react-icons/fa'
@@ -115,6 +116,7 @@ const quick_menu_items: quick_menu_item[] = [
 type room_mode_segment = 'bot' | 'concierge'
 
 export default function UserFooter() {
+  const router = useRouter()
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [room_mode_segment, set_room_mode_segment] =
@@ -232,6 +234,7 @@ export default function UserFooter() {
 
       if (payload.ok !== false && payload.mode) {
         set_room_mode_segment(payload.mode)
+        router.refresh()
       }
     } catch {
       // Network errors: leave toggle unchanged.
