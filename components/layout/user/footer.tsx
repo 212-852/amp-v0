@@ -5,11 +5,11 @@ import {
   Edit3,
   Menu,
 } from 'lucide-react'
-import { useRouter } from 'next/navigation'
 
 import { useEffect, useState } from 'react'
 import { FaPaw } from 'react-icons/fa'
 
+import { useUserChat } from '@/components/chat/context'
 import PawIcon from '@/components/icons/paw'
 import MenuModal from '@/components/modal/menu'
 import MypageModal from '@/components/modal/mypage'
@@ -21,6 +21,8 @@ import type {
 } from '@/components/shared/quick/cards'
 import { get_copyright_text } from '@/lib/config/site'
 import type { locale_key } from '@/lib/locale/action'
+import type { archived_message } from '@/lib/chat/archive'
+import type { room_mode } from '@/lib/chat/room'
 import {
   get_locale,
   subscribe_locale,
@@ -115,13 +117,88 @@ const quick_menu_items: quick_menu_item[] = [
 
 type room_mode_segment = 'bot' | 'concierge'
 
+const switch_message_text: Record<
+  room_mode_segment,
+  Record<locale_key, string>
+> = {
+  bot: {
+    ja: 'BOTに切り替え',
+    en: 'Switch to BOT',
+    es: 'Cambiar a BOT',
+  },
+  concierge: {
+    ja: 'コンシェルジュに切り替え',
+    en: 'Switch to Concierge',
+    es: 'Cambiar a Concierge',
+  },
+}
+
+function now_ms() {
+  return performance.now()
+}
+
+function log_switch_timing(
+  event: string,
+  since: number,
+  payload: Record<string, unknown> = {},
+) {
+  console.log('[chat]', event, {
+    ...payload,
+    duration_ms: Math.round(performance.now() - since),
+  })
+}
+
+function is_switch_mode_incoming_message(message: archived_message) {
+  const bundle = message.bundle
+
+  if (bundle.bundle_type !== 'text' || bundle.sender !== 'user') {
+    return false
+  }
+
+  const meta =
+    bundle.metadata && typeof bundle.metadata === 'object'
+      ? (bundle.metadata as { intent?: string })
+      : null
+
+  return meta?.intent === 'switch_mode'
+}
+
+function create_optimistic_switch_message(input: {
+  room_uuid: string
+  mode: room_mode_segment
+  locale: locale_key
+}): archived_message {
+  const optimistic_uuid = `optimistic:${crypto.randomUUID()}`
+  const created_at = new Date().toISOString()
+
+  return {
+    archive_uuid: optimistic_uuid,
+    room_uuid: input.room_uuid,
+    sequence: Number.MAX_SAFE_INTEGER,
+    created_at,
+    bundle: {
+      bundle_uuid: optimistic_uuid,
+      bundle_type: 'text',
+      sender: 'user',
+      version: 1,
+      locale: input.locale,
+      content_key: `room.mode.switch.${input.mode}`,
+      metadata: {
+        intent: 'switch_mode',
+        mode: input.mode,
+      },
+      payload: {
+        text: switch_message_text[input.mode][input.locale],
+      },
+    },
+  }
+}
+
 export default function UserFooter() {
-  const router = useRouter()
+  const chat = useUserChat()
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
-  const [room_mode_segment, set_room_mode_segment] =
-    useState<room_mode_segment>('bot')
-  const [room_uuid, set_room_uuid] = useState<string | null>(null)
+  const [is_switch_pending, set_is_switch_pending] = useState(false)
   const [mode, set_mode] = useState<footer_mode>('nav')
   const [flip_rotation, set_flip_rotation] = useState(0)
   const [card_scale, set_card_scale] = useState(1)
@@ -131,6 +208,7 @@ export default function UserFooter() {
   const [is_paw_pressed, set_is_paw_pressed] = useState(false)
   const is_input_mode = mode === 'input'
   const render_locale = mounted ? locale : 'ja'
+  const room_mode_segment = chat.mode
 
   useEffect(() => {
     const mounted_timer = window.setTimeout(() => {
@@ -142,43 +220,6 @@ export default function UserFooter() {
     return () => {
       window.clearTimeout(mounted_timer)
       unsubscribe_locale()
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-
-    ;(async () => {
-      try {
-        const response = await fetch('/api/session', {
-          credentials: 'include',
-        })
-        const payload = (await response.json()) as {
-          chat?: {
-            room_uuid?: string | null
-            mode?: room_mode_segment
-          } | null
-        }
-
-        if (!cancelled && payload.chat) {
-          if (payload.chat.room_uuid) {
-            set_room_uuid(payload.chat.room_uuid)
-          }
-
-          if (
-            payload.chat.mode === 'bot' ||
-            payload.chat.mode === 'concierge'
-          ) {
-            set_room_mode_segment(payload.chat.mode)
-          }
-        }
-      } catch {
-        // Session is optional for static render; keep footer default.
-      }
-    })()
-
-    return () => {
-      cancelled = true
     }
   }, [])
 
@@ -215,7 +256,40 @@ export default function UserFooter() {
   }
 
   async function post_room_mode_action(next_mode: room_mode_segment) {
+    if (
+      is_switch_pending ||
+      !chat.room_uuid ||
+      !chat.participant_uuid
+    ) {
+      return
+    }
+
+    const clicked_at = now_ms()
+    log_switch_timing('switch_clicked', clicked_at, {
+      room_uuid: chat.room_uuid,
+      participant_uuid: chat.participant_uuid,
+      mode: next_mode,
+    })
+
+    const optimistic_message = create_optimistic_switch_message({
+      room_uuid: chat.room_uuid,
+      mode: next_mode,
+      locale: render_locale,
+    })
+
+    chat.append_message(optimistic_message)
+    log_switch_timing('client_message_appended', clicked_at, {
+      archive_uuid: optimistic_message.archive_uuid,
+      optimistic: true,
+    })
+    set_is_switch_pending(true)
+
     try {
+      log_switch_timing('switch_api_started', clicked_at, {
+        room_uuid: chat.room_uuid,
+        mode: next_mode,
+      })
+
       const response = await fetch('/api/chat/mode', {
         method: 'POST',
         credentials: 'include',
@@ -223,20 +297,69 @@ export default function UserFooter() {
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          room_uuid,
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          locale: render_locale,
           mode: next_mode,
         }),
       })
+
+      if (!response.ok) {
+        chat.remove_message(optimistic_message.archive_uuid)
+        return
+      }
+
       const payload = (await response.json()) as {
         ok?: boolean
         mode?: room_mode_segment
+        messages?: archived_message[]
       }
 
       if (payload.ok !== false && payload.mode) {
-        set_room_mode_segment(payload.mode)
-        router.refresh()
+        chat.set_mode(payload.mode as room_mode)
+
+        const returned_messages = payload.messages ?? []
+        const incoming_message = returned_messages.find(
+          is_switch_mode_incoming_message,
+        )
+        const outgoing_messages = returned_messages.filter(
+          (message) => !is_switch_mode_incoming_message(message),
+        )
+
+        if (incoming_message) {
+          chat.replace_message(
+            optimistic_message.archive_uuid,
+            incoming_message,
+          )
+          log_switch_timing('client_message_appended', clicked_at, {
+            archive_uuid: incoming_message.archive_uuid,
+            optimistic: false,
+          })
+        }
+
+        chat.append_messages(outgoing_messages)
+
+        outgoing_messages.forEach((message) => {
+          log_switch_timing('client_message_appended', clicked_at, {
+            archive_uuid: message.archive_uuid,
+            optimistic: false,
+            outgoing: true,
+          })
+        })
+
+        log_switch_timing('switch_api_completed', clicked_at, {
+          room_uuid: chat.room_uuid,
+          mode: payload.mode,
+          message_count: returned_messages.length,
+        })
+      } else {
+        chat.remove_message(optimistic_message.archive_uuid)
       }
-    } catch {
+    } catch (error) {
+      console.error('[chat] switch_api_failed', error)
+      chat.remove_message(optimistic_message.archive_uuid)
+    } finally {
+      set_is_switch_pending(false)
       // Network errors: leave toggle unchanged.
     }
   }
@@ -434,9 +557,11 @@ export default function UserFooter() {
                   <button
                     type="button"
                     onClick={handle_select_bot}
+                    disabled={is_switch_pending}
                     className={[
                       'h-full flex-1 rounded-full',
                       'text-[10px] font-medium tracking-wide',
+                      is_switch_pending ? 'opacity-60' : '',
                       room_mode_segment === 'bot'
                         ? 'bg-white text-[#2a1d18] shadow-[0_1px_4px_rgba(42,29,24,0.07)]'
                         : 'text-[#8a7467]',
@@ -448,9 +573,11 @@ export default function UserFooter() {
                   <button
                     type="button"
                     onClick={handle_select_concierge}
+                    disabled={is_switch_pending}
                     className={[
                       'h-full flex-1 rounded-full',
                       'text-[10px] font-medium tracking-wide',
+                      is_switch_pending ? 'opacity-60' : '',
                       room_mode_segment === 'concierge'
                         ? 'bg-white text-[#2a1d18] shadow-[0_1px_4px_rgba(42,29,24,0.07)]'
                         : 'text-[#8a7467]',

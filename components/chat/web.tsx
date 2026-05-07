@@ -1,6 +1,12 @@
-import Image from 'next/image'
+'use client'
 
+import Image from 'next/image'
+import { useEffect } from 'react'
+
+import { useUserChat } from '@/components/chat/context'
 import type { archived_message } from '@/lib/chat/archive'
+import { archived_message_from_message_row } from '@/lib/chat/realtime_row'
+import type { message_insert_row } from '@/lib/chat/realtime_row'
 import type {
   faq_bundle,
   how_to_use_bundle,
@@ -10,6 +16,9 @@ import type {
   text_bundle,
   welcome_bundle,
 } from '@/lib/chat/message'
+import type { chat_locale } from '@/lib/chat/message'
+import type { room_mode } from '@/lib/chat/room'
+import { create_browser_supabase } from '@/lib/db/browser'
 
 function text_for(content: string | { ja?: string } | undefined) {
   if (typeof content === 'string') {
@@ -306,10 +315,89 @@ function WebChatMessageRow({ message }: { message: archived_message }) {
   return null
 }
 
-export function WebChat({ messages }: { messages: archived_message[] }) {
+export function WebChat({
+  messages,
+  room_uuid,
+  participant_uuid,
+  locale,
+  mode,
+}: {
+  messages: archived_message[]
+  room_uuid: string
+  participant_uuid: string
+  locale: chat_locale
+  mode: room_mode
+}) {
+  const chat = useUserChat()
+  const {
+    hydrate_chat,
+    append_message,
+    room_uuid: active_room_uuid,
+    messages: active_messages,
+  } = chat
+
+  useEffect(() => {
+    hydrate_chat({
+      room_uuid,
+      participant_uuid,
+      locale,
+      mode,
+      messages,
+    })
+  }, [
+    room_uuid,
+    participant_uuid,
+    locale,
+    mode,
+    messages,
+    hydrate_chat,
+  ])
+
+  useEffect(() => {
+    if (!room_uuid) {
+      return
+    }
+
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      return
+    }
+
+    const channel = supabase
+      .channel(`room_messages:${room_uuid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `room_uuid=eq.${room_uuid}`,
+        },
+        (payload) => {
+          const message = archived_message_from_message_row(
+            payload.new as message_insert_row,
+          )
+
+          if (message) {
+            append_message(message)
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [append_message, room_uuid])
+
+  const render_messages = active_room_uuid === room_uuid
+    ? active_messages
+    : messages
+
   return (
     <section className="space-y-5 pt-4">
-      {messages.map((message) => (
+      {render_messages.map((message) => (
         <WebChatMessageRow
           key={message.archive_uuid}
           message={message}

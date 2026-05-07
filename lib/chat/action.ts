@@ -4,9 +4,9 @@ import { cookies, headers } from 'next/headers'
 
 import {
   infer_source_channel_from_ua,
-  read_session,
   type browser_session_source_channel,
 } from '@/lib/auth/session'
+import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
 import { sync_room_action_context } from '@/lib/notify'
@@ -41,14 +41,11 @@ import {
   type room_mode,
 } from './room'
 import {
-  resolve_chat_message_action,
-  should_seed_initial_messages,
-} from './rules'
-import {
   room_mode_can_request_concierge,
   room_mode_can_resume_bot,
   type room_mode_gate_row,
 } from './room_mode_rules'
+import { should_seed_initial_messages } from './rules'
 import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
@@ -74,6 +71,7 @@ export type initial_chat_result = {
   is_new_room: boolean
   is_seeded: boolean
   messages: archived_message[]
+  locale: chat_locale
 }
 
 type user_page_debug_payload = {
@@ -237,6 +235,7 @@ export async function resolve_initial_chat(
       is_new_room: false,
       is_seeded: false,
       messages: [],
+      locale: input.locale,
     }
   }
 
@@ -260,6 +259,7 @@ export async function resolve_initial_chat(
       is_new_room: room_result.is_new_room,
       is_seeded: false,
       messages: [],
+      locale: input.locale,
     }
   }
 
@@ -292,6 +292,7 @@ export async function resolve_initial_chat(
           messages: await load_archived_messages(
             room_result.room.room_uuid,
           ),
+          locale: input.locale,
         }
       }
 
@@ -321,6 +322,7 @@ export async function resolve_initial_chat(
         messages: await load_archived_messages(
           room_result.room.room_uuid,
         ),
+        locale: input.locale,
       }
     }
 
@@ -344,6 +346,7 @@ export async function resolve_initial_chat(
       messages: await load_archived_messages(
         room_result.room.room_uuid,
       ),
+      locale: input.locale,
     }
   }
 
@@ -354,6 +357,7 @@ export async function resolve_initial_chat(
         is_new_room: room_result.is_new_room,
         is_seeded: false,
         messages: archived_messages,
+        locale: input.locale,
       }
     }
 
@@ -375,6 +379,7 @@ export async function resolve_initial_chat(
         messages: await load_archived_messages(
           room_result.room.room_uuid,
         ),
+        locale: input.locale,
       }
     }
 
@@ -407,6 +412,7 @@ export async function resolve_initial_chat(
           : []),
         ...seeded_messages,
       ],
+      locale: input.locale,
     }
   } catch (error) {
     const e = error as { code?: string; message?: string }
@@ -422,6 +428,7 @@ export async function resolve_initial_chat(
       is_new_room: room_result.is_new_room,
       is_seeded: false,
       messages: archived_messages,
+      locale: input.locale,
     }
   }
 }
@@ -440,6 +447,7 @@ export async function load_user_home_chat() {
     is_new_room: false,
     is_seeded: false,
     messages: [],
+    locale: 'ja',
   }
 
   await emit_user_page_debug('render_started', {})
@@ -586,6 +594,7 @@ export async function load_user_home_chat() {
         is_new_room: room_result.is_new_room,
         is_seeded: false,
         messages: archived_messages,
+        locale,
       }
     }
 
@@ -641,6 +650,7 @@ export async function load_user_home_chat() {
         is_new_room: room_result.is_new_room,
         is_seeded: false,
         messages: [],
+        locale,
       }
     }
 
@@ -660,6 +670,7 @@ export async function load_user_home_chat() {
       is_new_room: room_result.is_new_room,
       is_seeded: true,
       messages: final_messages,
+      locale,
     }
   } catch (error) {
     await emit_user_page_debug('render_failed', {
@@ -676,6 +687,7 @@ type room_mode_switch_result =
       mode: room_mode
       message_uuid: string | null
       outgoing_message_uuid: string | null
+      messages: archived_message[]
     }
   | {
       ok: false
@@ -686,6 +698,19 @@ type room_mode_switch_result =
         | 'room_mismatch'
         | 'invalid_transition'
     }
+
+function switch_step_log(
+  event: string,
+  step_anchor: { t: number },
+  payload: Record<string, unknown> = {},
+) {
+  const now = Date.now()
+  console.log('[chat]', event, {
+    ...payload,
+    duration_ms: now - step_anchor.t,
+  })
+  step_anchor.t = now
+}
 
 type switch_room_mode_action_result =
   | {
@@ -731,20 +756,6 @@ function session_source_to_chat_channel(
   }
 
   return source_channel
-}
-
-async function resolve_visitor_user_uuid(visitor_uuid: string) {
-  const result = await supabase
-    .from('visitors')
-    .select('user_uuid')
-    .eq('visitor_uuid', visitor_uuid)
-    .maybeSingle()
-
-  if (result.error) {
-    throw result.error
-  }
-
-  return result.data?.user_uuid ?? null
 }
 
 async function load_user_display_name(user_uuid: string | null) {
@@ -989,9 +1000,12 @@ async function apply_switch_room_mode_action(input: {
 export async function handle_chat_mode_request(
   request: Request,
 ): Promise<{ status: number; body: room_mode_switch_result }> {
-  const session = await read_session()
+  const step_anchor = { t: Date.now() }
+  switch_step_log('switch_api_started', step_anchor, {})
 
-  if (!session.visitor_uuid) {
+  const visitor_uuid = await get_request_visitor_uuid()
+
+  if (!visitor_uuid) {
     return {
       status: 401,
       body: { ok: false, error: 'session_required' },
@@ -1000,10 +1014,16 @@ export async function handle_chat_mode_request(
 
   const body = (await request.json().catch(() => null)) as {
     room_uuid?: string
+    participant_uuid?: string
+    locale?: string
     mode?: room_mode
   } | null
 
-  if (body?.mode !== 'bot' && body?.mode !== 'concierge') {
+  if (
+    !body?.room_uuid ||
+    !body.participant_uuid ||
+    (body.mode !== 'bot' && body.mode !== 'concierge')
+  ) {
     return {
       status: 400,
       body: { ok: false, error: 'invalid_mode' },
@@ -1012,61 +1032,72 @@ export async function handle_chat_mode_request(
 
   const header_store = await headers()
   const cookie_store = await cookies()
+  const user_agent = header_store.get('user-agent')
   const source_channel = resolve_session_source_channel(
     cookie_store.get(browser_channel_cookie_name)?.value ?? null,
-    session.source_channel,
-    header_store.get('user-agent'),
+    infer_source_channel_from_ua(user_agent),
+    user_agent,
   )
   const channel = session_source_to_chat_channel(source_channel)
-  const locale = normalize_locale(
-    header_store.get('accept-language')?.split(',')[0],
-  ) as chat_locale
-  const visitor_uuid = session.visitor_uuid
-  const user_uuid = await resolve_visitor_user_uuid(visitor_uuid)
-  const room_result = await resolve_chat_room({
-    visitor_uuid,
-    user_uuid,
-    channel,
-  })
+  const locale = normalize_locale(body.locale) as chat_locale
 
-  if (!room_result.ok || !room_result.room.room_uuid) {
-    return {
-      status: 404,
-      body: { ok: false, error: 'room_not_found' },
-    }
+  const participant_result = await supabase
+    .from('participants')
+    .select('participant_uuid, room_uuid, visitor_uuid, user_uuid')
+    .eq('participant_uuid', body.participant_uuid)
+    .eq('room_uuid', body.room_uuid)
+    .eq('role', 'user')
+    .maybeSingle()
+
+  if (participant_result.error) {
+    throw participant_result.error
   }
 
-  if (body.room_uuid && body.room_uuid !== room_result.room.room_uuid) {
+  if (
+    !participant_result.data ||
+    participant_result.data.visitor_uuid !== visitor_uuid
+  ) {
     return {
       status: 403,
       body: { ok: false, error: 'room_mismatch' },
     }
   }
 
-  const switch_bundle = build_room_mode_switch_bundle({
-    mode: body.mode,
-    locale,
-  })
-  const archived_messages = await archive_message_bundles({
-    room_uuid: room_result.room.room_uuid,
-    participant_uuid: room_result.room.participant_uuid,
-    bot_participant_uuid: room_result.room.bot_participant_uuid,
-    channel,
-    bundles: [switch_bundle],
-  })
-  const rule_action = resolve_chat_message_action(switch_bundle)
+  const bot_participant_result = await supabase
+    .from('participants')
+    .select('participant_uuid')
+    .eq('room_uuid', body.room_uuid)
+    .eq('role', 'bot')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
 
-  if (rule_action.action !== 'switch_room_mode') {
+  if (bot_participant_result.error) {
+    throw bot_participant_result.error
+  }
+
+  if (!bot_participant_result.data?.participant_uuid) {
     return {
-      status: 400,
-      body: { ok: false, error: 'invalid_mode' },
+      status: 404,
+      body: { ok: false, error: 'room_not_found' },
     }
   }
 
-  const action_result = await apply_switch_room_mode_action({
-    chat_room: room_result.room,
+  const room_row = await load_room_row(body.room_uuid)
+  const chat_room: chat_room = {
+    room_uuid: body.room_uuid,
+    participant_uuid: body.participant_uuid,
+    bot_participant_uuid: bot_participant_result.data.participant_uuid,
+    user_uuid: participant_result.data.user_uuid ?? null,
+    visitor_uuid,
     channel,
-    mode: rule_action.mode,
+    mode: parse_room_mode(room_row?.mode),
+  }
+
+  const action_result = await apply_switch_room_mode_action({
+    chat_room,
+    channel,
+    mode: body.mode,
   })
 
   if (!action_result.ok) {
@@ -1076,38 +1107,70 @@ export async function handle_chat_mode_request(
     }
   }
 
+  switch_step_log('mode_updated', step_anchor, {
+    room_uuid: chat_room.room_uuid,
+    mode: action_result.mode,
+  })
+
+  const chat_room_after_mode: chat_room = {
+    ...chat_room,
+    mode: action_result.mode,
+  }
+
+  const switch_bundle = build_room_mode_switch_bundle({
+    mode: body.mode,
+    locale,
+  })
+  const archived_incoming = await archive_message_bundles({
+    room_uuid: chat_room_after_mode.room_uuid,
+    participant_uuid: chat_room_after_mode.participant_uuid,
+    bot_participant_uuid: chat_room_after_mode.bot_participant_uuid,
+    channel,
+    bundles: [switch_bundle],
+  })
+  switch_step_log('incoming_archived', step_anchor, {
+    room_uuid: chat_room_after_mode.room_uuid,
+    message_uuid: archived_incoming[0]?.archive_uuid ?? null,
+  })
+
   const confirmation_bundle = build_room_mode_notice_bundle({
     notice:
-      rule_action.mode === 'concierge'
-        ? 'concierge_requested'
-        : 'resumed_bot',
+      body.mode === 'concierge' ? 'concierge_requested' : 'resumed_bot',
     locale,
   })
   const outgoing_messages = await archive_message_bundles({
-    room_uuid: room_result.room.room_uuid,
-    participant_uuid: room_result.room.participant_uuid,
-    bot_participant_uuid: room_result.room.bot_participant_uuid,
+    room_uuid: chat_room_after_mode.room_uuid,
+    participant_uuid: chat_room_after_mode.participant_uuid,
+    bot_participant_uuid: chat_room_after_mode.bot_participant_uuid,
     channel,
     bundles: [confirmation_bundle],
   })
-  const output_messages = [
-    ...archived_messages,
-    ...outgoing_messages,
-  ]
+  switch_step_log('outgoing_archived', step_anchor, {
+    room_uuid: chat_room_after_mode.room_uuid,
+    message_uuid: outgoing_messages[0]?.archive_uuid ?? null,
+  })
+
+  const output_messages = [...archived_incoming, ...outgoing_messages]
 
   await output_chat_bundles({
-    room: room_result.room,
+    room: chat_room_after_mode,
     channel,
     messages: output_messages,
+  })
+  switch_step_log('switch_api_completed', step_anchor, {
+    room_uuid: chat_room_after_mode.room_uuid,
+    mode: action_result.mode,
+    message_count: output_messages.length,
   })
 
   return {
     status: 200,
     body: {
-      ...action_result,
-      message_uuid: archived_messages[0]?.archive_uuid ?? null,
-      outgoing_message_uuid:
-        outgoing_messages[0]?.archive_uuid ?? null,
+      ok: true,
+      mode: action_result.mode,
+      message_uuid: archived_incoming[0]?.archive_uuid ?? null,
+      outgoing_message_uuid: outgoing_messages[0]?.archive_uuid ?? null,
+      messages: output_messages,
     },
   }
 }

@@ -7,6 +7,7 @@ import {
   useRef,
 } from 'react'
 
+import { UserChatProvider } from '@/components/chat/context'
 import UserFooter from '@/components/user/footer'
 import UserHeader from '@/components/user/header'
 
@@ -48,14 +49,15 @@ export default function UserShell({ children }: UserShellProps) {
           </div>
         </div>
 
-        <main
-          ref={scroll_container_ref}
-          className="min-h-0 flex-1 overflow-y-auto px-0 pt-[calc(env(safe-area-inset-top)+78px)] pb-[calc(220px+env(safe-area-inset-bottom,0px))]"
-        >
-          {children}
-        </main>
+        <UserChatProvider>
+          <main
+            ref={scroll_container_ref}
+            className="min-h-0 flex-1 overflow-y-auto px-0 pt-[calc(env(safe-area-inset-top)+78px)] pb-[calc(220px+env(safe-area-inset-bottom,0px))]"
+          >
+            {children}
+          </main>
 
-        <div className="pointer-events-none fixed inset-x-0 top-[96px] z-40 mx-auto w-full max-w-[430px] px-4">
+          <div className="pointer-events-none fixed inset-x-0 top-[96px] z-40 mx-auto w-full max-w-[430px] px-4">
           <div className="flex justify-end">
             <button
               type="button"
@@ -69,9 +71,10 @@ export default function UserShell({ children }: UserShellProps) {
               />
             </button>
           </div>
-        </div>
+          </div>
 
-        <UserFooter />
+          <UserFooter />
+        </UserChatProvider>
       </div>
     </div>
   )

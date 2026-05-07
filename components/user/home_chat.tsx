@@ -37,6 +37,7 @@ function empty_user_home_chat(): initial_chat_result {
     is_new_room: false,
     is_seeded: false,
     messages: [],
+    locale: 'ja',
   }
 }
 
@@ -79,7 +80,13 @@ export default async function UserHomeChat({
         }
       />
       {chat_state.messages.length > 0 ? (
-        <WebChat messages={chat_state.messages} />
+        <WebChat
+          messages={chat_state.messages}
+          room_uuid={chat_state.room.room_uuid}
+          participant_uuid={chat_state.room.participant_uuid}
+          locale={chat_state.locale}
+          mode={chat_state.room.mode}
+        />
       ) : (
         <section className="px-5 pt-6">
           <div className="rounded-[20px] bg-white px-5 py-6 text-center shadow-[0_2px_14px_rgba(42,29,24,0.06)]">
