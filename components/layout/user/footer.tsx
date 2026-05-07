@@ -117,6 +117,22 @@ const quick_menu_items: quick_menu_item[] = [
 
 type room_mode_segment = 'bot' | 'concierge'
 
+const switch_message_text: Record<
+  room_mode_segment,
+  Record<locale_key, string>
+> = {
+  bot: {
+    ja: 'ボット',
+    en: 'BOT',
+    es: 'BOT',
+  },
+  concierge: {
+    ja: 'コンシェルジュ',
+    en: 'Concierge',
+    es: 'Concierge',
+  },
+}
+
 function now_ms() {
   return performance.now()
 }
@@ -132,11 +148,57 @@ function log_switch_timing(
   })
 }
 
+function is_switch_mode_incoming_message(message: archived_message) {
+  const bundle = message.bundle
+
+  if (bundle.bundle_type !== 'text' || bundle.sender !== 'user') {
+    return false
+  }
+
+  const metadata =
+    bundle.metadata && typeof bundle.metadata === 'object'
+      ? (bundle.metadata as { intent?: string })
+      : null
+
+  return metadata?.intent === 'switch_mode'
+}
+
+function create_optimistic_switch_message(input: {
+  room_uuid: string
+  mode: room_mode_segment
+  locale: locale_key
+}): archived_message {
+  const optimistic_uuid = `optimistic:${crypto.randomUUID()}`
+
+  return {
+    archive_uuid: optimistic_uuid,
+    room_uuid: input.room_uuid,
+    sequence: Number.MAX_SAFE_INTEGER,
+    created_at: new Date().toISOString(),
+    bundle: {
+      bundle_uuid: optimistic_uuid,
+      bundle_type: 'text',
+      sender: 'user',
+      version: 1,
+      locale: input.locale,
+      content_key: `room.mode.switch.${input.mode}`,
+      metadata: {
+        intent: 'switch_mode',
+        mode: input.mode,
+      },
+      payload: {
+        text: switch_message_text[input.mode][input.locale],
+      },
+    },
+  }
+}
+
 export default function UserFooter() {
   const chat = useUserChat()
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
-  const [is_switch_pending, set_is_switch_pending] = useState(false)
+  const [pending_switch_mode, set_pending_switch_mode] =
+    useState<room_mode_segment | null>(null)
   const [mode, set_mode] = useState<footer_mode>('nav')
   const [flip_rotation, set_flip_rotation] = useState(0)
   const [card_scale, set_card_scale] = useState(1)
@@ -195,7 +257,7 @@ export default function UserFooter() {
 
   async function post_room_mode_action(next_mode: room_mode_segment) {
     if (
-      is_switch_pending ||
+      pending_switch_mode ||
       !chat.room_uuid ||
       !chat.participant_uuid
     ) {
@@ -211,7 +273,17 @@ export default function UserFooter() {
 
     const previous_mode = chat.mode
     chat.set_mode(next_mode as room_mode)
-    set_is_switch_pending(true)
+    const optimistic_message = create_optimistic_switch_message({
+      room_uuid: chat.room_uuid,
+      mode: next_mode,
+      locale: render_locale,
+    })
+    chat.append_message(optimistic_message)
+    log_switch_timing('client_message_appended', clicked_at, {
+      archive_uuid: optimistic_message.archive_uuid,
+      optimistic: true,
+    })
+    set_pending_switch_mode(next_mode)
 
     try {
       log_switch_timing('switch_api_started', clicked_at, {
@@ -235,6 +307,7 @@ export default function UserFooter() {
 
       if (!response.ok) {
         chat.set_mode(previous_mode)
+        chat.remove_message(optimistic_message.archive_uuid)
         return
       }
 
@@ -248,7 +321,23 @@ export default function UserFooter() {
         chat.set_mode(payload.mode as room_mode)
 
         const returned_messages = payload.messages ?? []
-        chat.append_messages(returned_messages)
+        const incoming_message = returned_messages.find(
+          is_switch_mode_incoming_message,
+        )
+        const outgoing_messages = returned_messages.filter(
+          (message) => !is_switch_mode_incoming_message(message),
+        )
+
+        if (incoming_message) {
+          chat.replace_message(
+            optimistic_message.archive_uuid,
+            incoming_message,
+          )
+        } else {
+          chat.remove_message(optimistic_message.archive_uuid)
+        }
+
+        chat.append_messages(outgoing_messages)
 
         returned_messages.forEach((message) => {
           log_switch_timing('client_message_appended', clicked_at, {
@@ -263,12 +352,14 @@ export default function UserFooter() {
         })
       } else {
         chat.set_mode(previous_mode)
+        chat.remove_message(optimistic_message.archive_uuid)
       }
     } catch (error) {
       console.error('[chat] switch_api_failed', error)
       chat.set_mode(previous_mode)
+      chat.remove_message(optimistic_message.archive_uuid)
     } finally {
-      set_is_switch_pending(false)
+      set_pending_switch_mode(null)
       // Network errors: leave toggle unchanged.
     }
   }
@@ -466,11 +557,11 @@ export default function UserFooter() {
                   <button
                     type="button"
                     onClick={handle_select_bot}
-                    disabled={is_switch_pending}
+                    disabled={Boolean(pending_switch_mode)}
                     className={[
                       'h-full flex-1 rounded-full',
                       'text-[10px] font-medium tracking-wide',
-                      is_switch_pending ? 'opacity-60' : '',
+                      pending_switch_mode === 'bot' ? 'opacity-60' : '',
                       room_mode_segment === 'bot'
                         ? 'bg-white text-[#2a1d18] shadow-[0_1px_4px_rgba(42,29,24,0.07)]'
                         : 'text-[#8a7467]',
@@ -482,11 +573,13 @@ export default function UserFooter() {
                   <button
                     type="button"
                     onClick={handle_select_concierge}
-                    disabled={is_switch_pending}
+                    disabled={Boolean(pending_switch_mode)}
                     className={[
                       'h-full flex-1 rounded-full',
                       'text-[10px] font-medium tracking-wide',
-                      is_switch_pending ? 'opacity-60' : '',
+                      pending_switch_mode === 'concierge'
+                        ? 'opacity-60'
+                        : '',
                       room_mode_segment === 'concierge'
                         ? 'bg-white text-[#2a1d18] shadow-[0_1px_4px_rgba(42,29,24,0.07)]'
                         : 'text-[#8a7467]',

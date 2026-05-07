@@ -25,9 +25,11 @@ import {
   build_initial_chat_bundles,
   build_line_followup_ack_bundle,
   build_room_mode_notice_bundle,
+  build_room_mode_switch_bundle,
   build_user_text_bundle,
 } from './message'
 import type { chat_locale } from './message'
+import { sync_room_action_context } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
 import {
   ensure_direct_room_for_visitor,
@@ -37,7 +39,10 @@ import {
   type chat_room,
   type room_mode,
 } from './room'
-import { should_seed_initial_messages } from './rules'
+import {
+  resolve_chat_message_action,
+  should_seed_initial_messages,
+} from './rules'
 import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
@@ -703,6 +708,80 @@ function switch_step_log(
   step_anchor.t = now
 }
 
+function switch_action_content(input: {
+  room_uuid: string
+  visitor_uuid: string
+  user_uuid: string | null
+  channel: chat_channel
+  mode: room_mode
+  requested_at: string
+  timeline: string[]
+}) {
+  return [
+    `room_uuid: ${input.room_uuid}`,
+    `visitor_uuid: ${input.visitor_uuid}`,
+    `user_uuid: ${input.user_uuid ?? ''}`,
+    `channel: ${input.channel}`,
+    `mode: ${input.mode}`,
+    `requested_at: ${input.requested_at}`,
+    '',
+    'Timeline:',
+    ...input.timeline.map((item) => `- ${item}`),
+  ].join('\n')
+}
+
+async function sync_concierge_switch_action(input: {
+  room_uuid: string
+  visitor_uuid: string
+  user_uuid: string | null
+  channel: chat_channel
+  action_id: string | null
+}) {
+  try {
+    const action_context = await sync_room_action_context({
+      provider: 'discord',
+      title: `Concierge: ${input.room_uuid}`,
+      action_id: input.action_id,
+      content: switch_action_content({
+        room_uuid: input.room_uuid,
+        visitor_uuid: input.visitor_uuid,
+        user_uuid: input.user_uuid,
+        channel: input.channel,
+        mode: 'concierge',
+        requested_at: new Date().toISOString(),
+        timeline: input.action_id
+          ? ['Concierge requested again']
+          : ['Concierge requested'],
+      }),
+    })
+
+    if (!action_context?.action_id) {
+      return
+    }
+
+    if (action_context.action_id === input.action_id) {
+      return
+    }
+
+    const result = await supabase
+      .from('rooms')
+      .update({
+        action_id: action_context.action_id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('room_uuid', input.room_uuid)
+
+    if (result.error) {
+      throw result.error
+    }
+  } catch (error) {
+    console.error('[chat]', 'concierge_action_sync_failed', {
+      room_uuid: input.room_uuid,
+      error: serialize_error(error),
+    })
+  }
+}
+
 function resolve_session_source_channel(
   browser_channel_cookie: string | null,
   session_channel: browser_session_source_channel,
@@ -782,6 +861,18 @@ export async function handle_chat_mode_request(
   )
   const channel = session_source_to_chat_channel(source_channel)
   const locale = normalize_locale(body.locale) as chat_locale
+  const incoming_bundle = build_room_mode_switch_bundle({
+    mode: body.mode,
+    locale,
+  })
+  const switch_action = resolve_chat_message_action(incoming_bundle)
+
+  if (switch_action.action !== 'switch_room_mode') {
+    return {
+      status: 400,
+      body: { ok: false, error: 'invalid_transition' },
+    }
+  }
 
   const participant_result = await supabase
     .from('participants')
@@ -832,18 +923,18 @@ export async function handle_chat_mode_request(
     user_uuid: participant_result.data.user_uuid ?? null,
     visitor_uuid,
     channel,
-    mode: body.mode,
+    mode: switch_action.mode,
   }
 
   const update_started_at = Date.now()
   const room_update = await supabase
     .from('rooms')
     .update({
-      mode: body.mode,
+      mode: switch_action.mode,
       updated_at: new Date().toISOString(),
     })
     .eq('room_uuid', body.room_uuid)
-    .select('mode')
+    .select('mode, action_id')
     .maybeSingle()
 
   if (room_update.error) {
@@ -870,7 +961,9 @@ export async function handle_chat_mode_request(
 
   const confirmation_bundle = build_room_mode_notice_bundle({
     notice:
-      body.mode === 'concierge' ? 'concierge_requested' : 'resumed_bot',
+      switch_action.mode === 'concierge'
+        ? 'concierge_requested'
+        : 'resumed_bot',
     locale,
   })
   const archived_messages = await archive_message_bundles({
@@ -878,11 +971,15 @@ export async function handle_chat_mode_request(
     participant_uuid: chat_room_after_mode.participant_uuid,
     bot_participant_uuid: chat_room_after_mode.bot_participant_uuid,
     channel,
-    bundles: [confirmation_bundle],
+    bundles: [incoming_bundle, confirmation_bundle],
+  })
+  switch_step_log('incoming_archived', step_anchor, {
+    room_uuid: chat_room_after_mode.room_uuid,
+    message_uuid: archived_messages[0]?.archive_uuid ?? null,
   })
   switch_step_log('outgoing_archived', step_anchor, {
     room_uuid: chat_room_after_mode.room_uuid,
-    message_uuid: archived_messages[0]?.archive_uuid ?? null,
+    message_uuid: archived_messages[1]?.archive_uuid ?? null,
   })
 
   await output_chat_bundles({
@@ -890,6 +987,20 @@ export async function handle_chat_mode_request(
     channel,
     messages: archived_messages,
   })
+
+  if (chat_room_after_mode.mode === 'concierge') {
+    await sync_concierge_switch_action({
+      room_uuid: chat_room_after_mode.room_uuid,
+      visitor_uuid: chat_room_after_mode.visitor_uuid,
+      user_uuid: chat_room_after_mode.user_uuid,
+      channel,
+      action_id:
+        typeof room_update.data.action_id === 'string'
+          ? room_update.data.action_id
+          : null,
+    })
+  }
+
   switch_step_log('switch_api_completed', step_anchor, {
     room_uuid: chat_room_after_mode.room_uuid,
     mode: chat_room_after_mode.mode,

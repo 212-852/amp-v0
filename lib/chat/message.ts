@@ -578,14 +578,14 @@ const room_mode_switch_text: {
   concierge: localized_content
 } = {
   bot: {
-    ja: 'BOTに切り替え',
-    en: 'Switch to BOT',
-    es: 'Cambiar a BOT',
+    ja: 'ボット',
+    en: 'BOT',
+    es: 'BOT',
   },
   concierge: {
-    ja: 'コンシェルジュに切り替え',
-    en: 'Switch to Concierge',
-    es: 'Cambiar a Concierge',
+    ja: 'コンシェルジュ',
+    en: 'Concierge',
+    es: 'Concierge',
   },
 }
 

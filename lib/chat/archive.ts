@@ -420,6 +420,7 @@ export async function archive_message_bundles(
       channel: input.channel,
       body: JSON.stringify({
         type: bundle.bundle_type,
+        sender_role: bundle.sender,
         direction: archive_direction_for_sender(bundle.sender),
         locale: bundle.locale,
         content_key: bundle.content_key,
