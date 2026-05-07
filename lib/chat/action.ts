@@ -725,17 +725,28 @@ async function notify_room_mode_switch(input: {
           },
     )
 
-    const action_id = results.find((result) => result.action_id)
-      ?.action_id
+    const previous_action_id =
+      typeof input.action_id === 'string' && input.action_id.trim().length > 0
+        ? input.action_id.trim()
+        : null
 
-    if (!action_id || action_id === input.action_id) {
+    const discord_delivery = results.find(
+      (item) => item.channel === 'discord' && item.action_id,
+    )
+    const next_action_id =
+      typeof discord_delivery?.action_id === 'string' &&
+      discord_delivery.action_id.trim().length > 0
+        ? discord_delivery.action_id.trim()
+        : null
+
+    if (!next_action_id || next_action_id === previous_action_id) {
       return
     }
 
     const result = await supabase
       .from('rooms')
       .update({
-        action_id,
+        action_id: next_action_id,
         updated_at: new Date().toISOString(),
       })
       .eq('room_uuid', input.room_uuid)

@@ -323,7 +323,7 @@ export async function room_mode_request_concierge(input: {
     }),
   })
 
-  if (action_context) {
+  if (action_context?.action_id) {
     await persist_action_id({
       room_uuid: row.room_uuid,
       action_id: action_context.action_id,
@@ -414,7 +414,7 @@ export async function room_mode_accept_concierge(input: {
     }),
   })
 
-  if (action_context) {
+  if (action_context?.action_id) {
     await persist_action_id({
       room_uuid: row.room_uuid,
       action_id: action_context.action_id,
@@ -501,7 +501,7 @@ export async function room_mode_resume_bot(input: {
     }),
   })
 
-  if (action_context) {
+  if (action_context?.action_id) {
     await persist_action_id({
       room_uuid: row.room_uuid,
       action_id: action_context.action_id,

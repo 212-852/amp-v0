@@ -66,6 +66,33 @@ function discord_action_channel_id() {
   return process.env.DISCORD_ACTION_CHANNEL_ID?.trim() || null
 }
 
+/**
+ * Optional comma-separated forum tag snowflakes when the action forum channel
+ * has REQUIRE_TAG (channel flag). Example: "111,222".
+ */
+function discord_action_forum_applied_tags(): string[] {
+  const raw = process.env.DISCORD_ACTION_FORUM_TAG_IDS?.trim()
+
+  if (!raw) {
+    return []
+  }
+
+  return raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+}
+
+function forum_thread_starter_content(content: string) {
+  const trimmed = content.trim()
+
+  if (trimmed.length > 0) {
+    return trimmed.length > 2000 ? trimmed.slice(0, 2000) : trimmed
+  }
+
+  return '(no content)'
+}
+
 function log_discord_action(
   event: string,
   payload: Record<string, unknown> = {},
@@ -92,16 +119,24 @@ async function create_discord_action_context(input: {
     title: input.title,
   })
 
+  const applied_tags = discord_action_forum_applied_tags()
+  const starter_body: Record<string, unknown> = {
+    name: input.title.slice(0, 100),
+    auto_archive_duration: 1440,
+    message: {
+      content: forum_thread_starter_content(input.content),
+    },
+  }
+
+  if (applied_tags.length > 0) {
+    starter_body.applied_tags = applied_tags
+  }
+
   const response = await discord_action_bot_fetch(
     `/channels/${channel_id}/threads`,
     {
       method: 'POST',
-      body: JSON.stringify({
-        name: input.title.slice(0, 100),
-        message: {
-          content: input.content,
-        },
-      }),
+      body: JSON.stringify(starter_body),
     },
   )
 
@@ -125,22 +160,30 @@ async function create_discord_action_context(input: {
 
   const payload = (await response.json()) as {
     id?: string
+    message?: { id?: string }
   }
-  const action_id = action_id_from_discord_thread_id(payload.id ?? null)
+  const thread_id = payload.id ?? null
+  const action_id = action_id_from_discord_thread_id(thread_id)
+
+  if (!thread_id || !action_id) {
+    console.warn('[discord_action] create_ok_but_missing_thread_id', {
+      payload_keys: payload ? Object.keys(payload) : [],
+    })
+    return null
+  }
 
   log_discord_action('discord_action_thread_created', {
     channel_id,
-    thread_id: payload.id ?? null,
+    thread_id,
     action_id,
   })
 
-  if (payload.id) {
-    log_discord_action('discord_action_message_posted', {
-      thread_id: payload.id,
-      action_id,
-      initial: true,
-    })
-  }
+  log_discord_action('discord_action_message_posted', {
+    thread_id,
+    action_id,
+    initial: true,
+    starter_message_id: payload.message?.id ?? null,
+  })
 
   return {
     action_id,
@@ -152,12 +195,14 @@ async function post_discord_action_thread_message(input: {
   action_id: string
   content: string
 }) {
+  const body_content = forum_thread_starter_content(input.content)
+
   const response = await discord_action_bot_fetch(
     `/channels/${input.thread_id}/messages`,
     {
       method: 'POST',
       body: JSON.stringify({
-        content: input.content,
+        content: body_content,
       }),
     },
   )
