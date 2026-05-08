@@ -4,10 +4,13 @@ import { MessageCircle, MessageCircleOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 const button_class =
-  'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-black shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-colors hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 active:scale-[0.98] sm:h-11 sm:w-11'
+  'relative flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-emerald-700 shadow-[0_2px_8px_rgba(0,0,0,0.06)] ring-2 ring-emerald-400 transition-colors hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 active:scale-[0.98] sm:h-11 sm:px-3.5'
 
 const off_button_class =
-  'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-neutral-100 text-neutral-400 shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-colors hover:bg-neutral-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500 active:scale-[0.98] sm:h-11 sm:w-11'
+  'relative flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-neutral-200 bg-gray-100 px-3 text-gray-400 shadow-[0_2px_8px_rgba(0,0,0,0.04)] ring-0 transition-colors hover:bg-gray-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500 active:scale-[0.98] sm:h-11 sm:px-3.5'
+
+const unknown_button_class =
+  'relative flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-neutral-200 bg-white px-3 text-black shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-colors hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 active:scale-[0.98] sm:h-11 sm:px-3.5'
 
 const reception_label = {
   open: 'チャット ON',
@@ -150,6 +153,16 @@ export default function AdminReceptionButton() {
 
   const is_offline = reception_state === 'offline'
   const is_open = reception_state === 'open'
+  const button_state_class = is_open
+    ? button_class
+    : is_offline
+      ? off_button_class
+      : unknown_button_class
+  const button_label = is_open
+    ? reception_label.open
+    : is_offline
+      ? reception_label.offline
+      : 'チャット'
   const aria_label =
     reception_state === null
       ? 'Chat'
@@ -161,7 +174,7 @@ export default function AdminReceptionButton() {
     <div className="relative">
       <button
         type="button"
-        className={is_offline ? off_button_class : button_class}
+        className={button_state_class}
         aria-label={aria_label}
         aria-pressed={is_open}
         disabled={is_pending}
@@ -174,12 +187,9 @@ export default function AdminReceptionButton() {
         ) : (
           <MessageCircle className="h-5 w-5" strokeWidth={2} />
         )}
-        {is_open ? (
-          <span
-            className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"
-            aria-hidden
-          />
-        ) : null}
+        <span className="whitespace-nowrap text-[12px] font-semibold leading-none sm:text-[13px]">
+          {button_label}
+        </span>
       </button>
 
       {toast_message ? (
