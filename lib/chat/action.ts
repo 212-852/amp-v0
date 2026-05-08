@@ -47,10 +47,10 @@ import {
   type room_mode,
 } from './room'
 import {
-  detect_switch_mode,
   resolve_chat_message_action,
   should_seed_initial_messages,
 } from './rules'
+import { decide_bot_action } from './bot/rules'
 import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
@@ -378,10 +378,28 @@ export async function resolve_initial_chat(
     const normalized_line_text = normalize_dispatch_text(
       incoming_line_text?.text,
     )
-    const line_switch_mode =
+    const line_bot_decision =
       input.channel === 'line' && normalized_line_text
-        ? detect_switch_mode(normalized_line_text)
+        ? decide_bot_action({
+            text: normalized_line_text,
+            locale: input.locale,
+            current_mode: room_result.room.mode,
+            source_channel: room_result.room.channel,
+          })
         : null
+    const line_switch_mode =
+      line_bot_decision?.action === 'switch_mode'
+        ? line_bot_decision.mode ?? null
+        : null
+
+    if (input.channel === 'line') {
+      await chat_action_log('line_bot_decision', {
+        room_uuid: room_result.room.room_uuid,
+        normalized_text: normalized_line_text,
+        decision: line_bot_decision,
+        current_mode: room_result.room.mode,
+      })
+    }
 
     if (
       input.channel === 'line' &&
@@ -1486,7 +1504,16 @@ export async function handle_chat_message_request(
   }
 
   const locale = normalize_locale(body.locale) as chat_locale
-  const detected_switch_mode = detect_switch_mode(text_value)
+  const web_bot_decision = decide_bot_action({
+    text: text_value,
+    locale,
+    current_mode: 'bot',
+    source_channel: 'web',
+  })
+  const detected_switch_mode =
+    web_bot_decision.action === 'switch_mode'
+      ? web_bot_decision.mode ?? null
+      : null
 
   const initial_mode: room_mode = detected_switch_mode ?? 'bot'
 
