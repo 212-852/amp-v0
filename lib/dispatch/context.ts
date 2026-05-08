@@ -4,6 +4,7 @@ import { control } from '@/lib/config/control'
 import { resolve_chat_room } from '@/lib/chat/room'
 import { debug_event, forced_debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
+import { clean_uuid } from '@/lib/db/uuid_payload'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
@@ -78,16 +79,14 @@ export async function resolve_line_dispatch_identity(input: {
     const user_uuid =
       identity &&
       typeof identity === 'object' &&
-      'user_uuid' in identity &&
-      typeof identity.user_uuid === 'string'
-        ? identity.user_uuid
+      'user_uuid' in identity
+        ? clean_uuid(identity.user_uuid)
         : null
     const visitor_uuid =
       identity &&
       typeof identity === 'object' &&
-      'visitor_uuid' in identity &&
-      typeof identity.visitor_uuid === 'string'
-        ? identity.visitor_uuid
+      'visitor_uuid' in identity
+        ? clean_uuid(identity.visitor_uuid)
         : null
 
     await debug_line('line_room_resolve_started', {

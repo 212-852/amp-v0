@@ -15,8 +15,11 @@ import {
 function read_browser_session_cookie_values(
   visitor_cookie: string | null | undefined,
 ) {
+  const trimmed =
+    typeof visitor_cookie === 'string' ? visitor_cookie.trim() : ''
+
   return {
-    visitor_uuid: visitor_cookie ?? null,
+    visitor_uuid: trimmed.length > 0 ? trimmed : null,
   }
 }
 

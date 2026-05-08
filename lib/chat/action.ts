@@ -8,7 +8,7 @@ import {
 } from '@/lib/auth/session'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { supabase } from '@/lib/db/supabase'
-import { uuid_payload_check } from '@/lib/db/uuid_payload'
+import { clean_uuid, uuid_payload_check } from '@/lib/db/uuid_payload'
 import { debug_event, forced_debug_event } from '@/lib/debug'
 import {
   archive_incoming_line_text,
@@ -260,10 +260,11 @@ async function archive_input_line_text_for_room(input: {
   }
 
   return archive_incoming_line_text({
-    room_uuid: input.room.room_uuid,
-    participant_uuid: input.room.participant_uuid,
-    user_uuid: input.room.user_uuid,
-    visitor_uuid: input.room.visitor_uuid,
+    room_uuid: clean_uuid(input.room.room_uuid) ?? input.room.room_uuid,
+    participant_uuid:
+      clean_uuid(input.room.participant_uuid) ?? input.room.participant_uuid,
+    user_uuid: clean_uuid(input.room.user_uuid),
+    visitor_uuid: clean_uuid(input.room.visitor_uuid),
     line_user_id: input.line_user_id,
     line_message_id: input.incoming_line_text.line_message_id,
     text: input.incoming_line_text.text,
@@ -299,8 +300,14 @@ function build_line_mode_switch_bundle(input: {
 }
 
 export async function resolve_initial_chat(
-  input: resolve_initial_chat_input,
+  raw_input: resolve_initial_chat_input,
 ): Promise<initial_chat_result> {
+  const input: resolve_initial_chat_input = {
+    ...raw_input,
+    visitor_uuid: clean_uuid(raw_input.visitor_uuid),
+    user_uuid: clean_uuid(raw_input.user_uuid),
+  }
+
   await chat_action_log('chat_action_entered', {
     channel: input.channel,
     locale: input.locale,

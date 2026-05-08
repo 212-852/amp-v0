@@ -2,7 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
-import { uuid_payload_check } from '@/lib/db/uuid_payload'
+import { clean_uuid, uuid_payload_check } from '@/lib/db/uuid_payload'
 import { debug_event } from '@/lib/debug'
 
 import { room_select_fields } from '@/lib/chat/room/schema'
@@ -82,8 +82,8 @@ function fallback_chat_room(input: resolve_room_input): chat_room {
     room_uuid: '',
     participant_uuid: '',
     bot_participant_uuid: '',
-    user_uuid: input.user_uuid ?? null,
-    visitor_uuid: input.visitor_uuid ?? null,
+    user_uuid: clean_uuid(input.user_uuid),
+    visitor_uuid: clean_uuid(input.visitor_uuid),
     channel: input.channel,
     mode: 'bot',
   }
@@ -99,8 +99,10 @@ function normalize_room(
     room_uuid: row.room_uuid,
     participant_uuid: participant.participant_uuid,
     bot_participant_uuid: bot_participant.participant_uuid,
-    user_uuid: input.user_uuid ?? participant.user_uuid ?? null,
-    visitor_uuid: input.visitor_uuid ?? participant.visitor_uuid ?? null,
+    user_uuid:
+      clean_uuid(input.user_uuid) ?? clean_uuid(participant.user_uuid),
+    visitor_uuid:
+      clean_uuid(input.visitor_uuid) ?? clean_uuid(participant.visitor_uuid),
     channel: input.channel,
     mode: parse_room_mode(row.mode),
   }
@@ -204,9 +206,9 @@ function build_user_participant_insert_row(
   updated_at_iso: string,
 ) {
   return {
-    room_uuid,
-    user_uuid: input.user_uuid ?? null,
-    visitor_uuid: input.visitor_uuid,
+    room_uuid: clean_uuid(room_uuid),
+    user_uuid: clean_uuid(input.user_uuid),
+    visitor_uuid: clean_uuid(input.visitor_uuid),
     role: 'user' as const,
     status: 'active',
     last_channel: input.channel,
@@ -219,8 +221,8 @@ function build_user_participant_touch_update(
   updated_at_iso: string,
 ) {
   return {
-    visitor_uuid: input.visitor_uuid,
-    user_uuid: input.user_uuid ?? null,
+    visitor_uuid: clean_uuid(input.visitor_uuid),
+    user_uuid: clean_uuid(input.user_uuid),
     last_channel: input.channel,
     updated_at: updated_at_iso,
   }
@@ -232,9 +234,9 @@ function build_user_participant_move_update(
   updated_at_iso: string,
 ) {
   return {
-    room_uuid: new_room_uuid,
-    visitor_uuid: input.visitor_uuid,
-    user_uuid: input.user_uuid ?? null,
+    room_uuid: clean_uuid(new_room_uuid),
+    visitor_uuid: clean_uuid(input.visitor_uuid),
+    user_uuid: clean_uuid(input.user_uuid),
     last_channel: input.channel,
     updated_at: updated_at_iso,
   }
@@ -242,7 +244,7 @@ function build_user_participant_move_update(
 
 function build_bot_participant_insert_row(room_uuid: string) {
   return {
-    room_uuid: room_uuid ?? null,
+    room_uuid: clean_uuid(room_uuid),
     role: 'bot' as const,
     status: 'active',
   }
@@ -1153,8 +1155,13 @@ async function handle_existing_participant(
 }
 
 export async function resolve_chat_room(
-  input: resolve_room_input,
+  raw_input: resolve_room_input,
 ): Promise<resolve_chat_room_outcome> {
+  const input: resolve_room_input = {
+    ...raw_input,
+    visitor_uuid: clean_uuid(raw_input.visitor_uuid),
+    user_uuid: clean_uuid(raw_input.user_uuid),
+  }
   const identity = debug_identity_payload(input)
 
   try {

@@ -2,7 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
-import { uuid_payload_check } from '@/lib/db/uuid_payload'
+import { clean_uuid, uuid_payload_check } from '@/lib/db/uuid_payload'
 import { debug_event } from '@/lib/debug'
 import type { chat_channel } from './room'
 import type { bundle_sender, message_bundle } from './message'
@@ -236,6 +236,17 @@ export async function archive_incoming_line_text(
       }
     }
 
+    const sanitized_user_uuid = clean_uuid(input.user_uuid)
+    const sanitized_visitor_uuid = clean_uuid(input.visitor_uuid)
+    const sanitized_participant_uuid = clean_uuid(input.participant_uuid)
+    const sanitized_room_uuid = clean_uuid(input.room_uuid)
+
+    if (!sanitized_room_uuid || !sanitized_participant_uuid) {
+      throw new Error(
+        `archive_incoming_line_text: invalid uuid (room=${input.room_uuid}, participant=${input.participant_uuid})`,
+      )
+    }
+
     const body = {
       type: input.bundle.bundle_type,
       sender_role: 'user' as const,
@@ -244,9 +255,9 @@ export async function archive_incoming_line_text(
       direction: 'incoming' as const,
       message_type: 'text' as const,
       text: input.text,
-      user_uuid: input.user_uuid ?? null,
-      visitor_uuid: input.visitor_uuid,
-      participant_uuid: input.participant_uuid,
+      user_uuid: sanitized_user_uuid,
+      visitor_uuid: sanitized_visitor_uuid,
+      participant_uuid: sanitized_participant_uuid,
       line_message_id: input.line_message_id,
       line_user_id: input.line_user_id,
       metadata: {
@@ -264,17 +275,17 @@ export async function archive_incoming_line_text(
     }
 
     await uuid_payload_check({
-      visitor_uuid: input.visitor_uuid ?? null,
-      user_uuid: input.user_uuid ?? null,
-      room_uuid: input.room_uuid,
-      participant_uuid: input.participant_uuid,
+      visitor_uuid: sanitized_visitor_uuid,
+      user_uuid: sanitized_user_uuid,
+      room_uuid: sanitized_room_uuid,
+      participant_uuid: sanitized_participant_uuid,
     })
 
     const result = await supabase
       .from('messages')
       .insert({
-        room_uuid: input.room_uuid,
-        participant_uuid: input.participant_uuid,
+        room_uuid: sanitized_room_uuid,
+        participant_uuid: sanitized_participant_uuid,
         channel: 'line',
         body: JSON.stringify(body),
         created_at: input.created_at,
@@ -376,20 +387,6 @@ export async function has_initial_messages(room_uuid: string) {
   )
 }
 
-function resolve_participant_uuid(
-  input: {
-    participant_uuid: string
-    bot_participant_uuid: string
-  },
-  sender: bundle_sender,
-) {
-  if (sender === 'bot') {
-    return input.bot_participant_uuid
-  }
-
-  return input.participant_uuid
-}
-
 function archive_direction_for_sender(sender: bundle_sender): 'incoming' | 'outgoing' {
   if (sender === 'user') {
     return 'incoming'
@@ -414,6 +411,20 @@ export async function archive_message_bundles(
   const existing_message_count =
     await count_archived_messages(input.room_uuid)
   const next_sequence = existing_message_count + 1
+  const sanitized_room_uuid = clean_uuid(input.room_uuid)
+  const sanitized_user_participant_uuid = clean_uuid(input.participant_uuid)
+  const sanitized_bot_participant_uuid = clean_uuid(input.bot_participant_uuid)
+
+  if (
+    !sanitized_room_uuid ||
+    !sanitized_user_participant_uuid ||
+    !sanitized_bot_participant_uuid
+  ) {
+    throw new Error(
+      `archive_message_bundles: invalid uuid (room=${input.room_uuid}, user_participant=${input.participant_uuid}, bot_participant=${input.bot_participant_uuid})`,
+    )
+  }
+
   const rows = input.bundles.map((bundle, index) => {
     const bundle_metadata =
       'metadata' in bundle &&
@@ -422,9 +433,14 @@ export async function archive_message_bundles(
         ? bundle.metadata
         : {}
 
+    const sender_participant_uuid =
+      bundle.sender === 'user'
+        ? sanitized_user_participant_uuid
+        : sanitized_bot_participant_uuid
+
     return {
-      room_uuid: input.room_uuid,
-      participant_uuid: resolve_participant_uuid(input, bundle.sender),
+      room_uuid: sanitized_room_uuid,
+      participant_uuid: sender_participant_uuid,
       channel: input.channel,
       body: JSON.stringify({
         type: bundle.bundle_type,
@@ -447,12 +463,12 @@ export async function archive_message_bundles(
   })
 
   await uuid_payload_check({
-    room_uuid: input.room_uuid,
-    participant_uuid: input.participant_uuid,
+    room_uuid: sanitized_room_uuid,
+    participant_uuid: sanitized_user_participant_uuid,
   })
   await uuid_payload_check({
-    room_uuid: input.room_uuid,
-    participant_uuid: input.bot_participant_uuid,
+    room_uuid: sanitized_room_uuid,
+    participant_uuid: sanitized_bot_participant_uuid,
   })
 
   const result = await supabase

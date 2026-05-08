@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
+import { clean_uuid } from '@/lib/db/uuid_payload'
 import {
   resolve_dispatch_locale,
   resolve_line_dispatch_identity,
@@ -412,10 +413,10 @@ export async function POST(request: Request) {
 
         await resolve_initial_chat({
           visitor_uuid:
-            dispatch_context.visitor_uuid ??
-            dispatch_context.room_result?.room.visitor_uuid ??
+            clean_uuid(dispatch_context.visitor_uuid) ??
+            clean_uuid(dispatch_context.room_result?.room.visitor_uuid) ??
             null,
-          user_uuid: dispatch_context.user_uuid,
+          user_uuid: clean_uuid(dispatch_context.user_uuid),
           channel: 'line',
           locale: resolved_locale.locale,
           line_reply_token: event.replyToken ?? null,
@@ -542,8 +543,8 @@ export async function POST(request: Request) {
       })
 
       await resolve_initial_chat({
-        visitor_uuid: access.visitor_uuid,
-        user_uuid: access.user_uuid,
+        visitor_uuid: clean_uuid(access.visitor_uuid),
+        user_uuid: clean_uuid(access.user_uuid),
         channel: 'line',
         locale: resolved_locale.locale,
         line_reply_token: event.replyToken ?? null,

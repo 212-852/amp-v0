@@ -8,6 +8,7 @@ import {
   type browser_session_source_channel,
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
+import { uuid_payload_check } from '@/lib/db/uuid_payload'
 import { sync_room_action_context } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
@@ -75,6 +76,8 @@ async function persist_action_id(input: {
   room_uuid: string
   action_id: string | null
 }) {
+  await uuid_payload_check({ room_uuid: input.room_uuid })
+
   const result = await supabase
     .from('rooms')
     .update({
