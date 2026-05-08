@@ -29,9 +29,6 @@ export type notify_event =
       source_channel: string
       mode: 'concierge'
       action_id: string | null
-      open_admin_count?: number
-      total_admin_count?: number
-      has_open_admin?: boolean
     }
   | {
       event: 'concierge_closed'
@@ -51,7 +48,7 @@ export type notify_event =
       payload: Record<string, unknown>
     }
 
-export type notify_channel = 'discord' | 'line'
+export type notify_channel = 'discord' | 'line' | 'push'
 
 export type notify_target = 'admin' | 'concierge' | 'owner' | 'core'
 
@@ -63,19 +60,20 @@ export type notify_rule = {
 }
 
 /**
- * Decide which roles should receive a `concierge_requested` notification.
- * Admin/concierge are dropped from the target list when the event was raised
- * with a reception summary indicating no `open` admin.
+ * Pure decision: which roles should receive a `concierge_requested`
+ * notification given the current reception summary.
  *
- * Owner/core are always retained as fallback targets so the system never
- * falls fully silent.
+ * - At least one open admin → admins/concierge are the primary targets;
+ *   owner/core stay on the broadcast for visibility.
+ * - No open admin → admin/concierge are dropped, escalation goes to
+ *   owner/core only.
+ *
+ * Logic only. Delivery is performed by `notify/index.ts`.
  */
-function resolve_concierge_targets(
-  event: Extract<notify_event, { event: 'concierge_requested' }>,
-): notify_target[] {
-  const has_open_admin = event.has_open_admin !== false
-
-  if (has_open_admin) {
+export function resolve_concierge_targets(input: {
+  has_open_admin: boolean
+}): notify_target[] {
+  if (input.has_open_admin) {
     return ['admin', 'concierge', 'owner', 'core']
   }
 
@@ -132,8 +130,7 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
     return {
       category: 'concierge_requested',
       priority: 'high',
-      targets: resolve_concierge_targets(event),
-      channels: ['discord'],
+      channels: ['push', 'line', 'discord'],
     }
   }
 

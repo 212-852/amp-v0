@@ -29,22 +29,9 @@ type reception_response = {
   error?: string
 }
 
-function send_admin_reception_debug(
-  event: string,
-  payload: Record<string, unknown>,
-) {
-  void fetch('/api/admin/reception/debug', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ event, payload }),
-  }).catch(() => {})
-}
-
 export default function AdminReceptionButton() {
   const [reception_state, set_reception_state] =
     useState<reception_state_value | null>(null)
-  const [admin_uuid, set_admin_uuid] = useState<string | null>(null)
   const [is_pending, set_is_pending] = useState(false)
   const [toast_message, set_toast_message] = useState<string | null>(null)
   const toast_timer_ref = useRef<number | null>(null)
@@ -75,7 +62,6 @@ export default function AdminReceptionButton() {
           (payload.state === 'open' || payload.state === 'offline')
         ) {
           set_reception_state(payload.state)
-          set_admin_uuid(payload.admin_user_uuid ?? null)
         }
       } catch {
         // Network errors leave the button in its initial unknown state.
@@ -114,19 +100,6 @@ export default function AdminReceptionButton() {
 
     set_is_pending(true)
 
-    const next_state: reception_state_value | null =
-      reception_state === 'open'
-        ? 'offline'
-        : reception_state === 'offline'
-          ? 'open'
-          : null
-
-    send_admin_reception_debug('admin_reception_button_clicked', {
-      admin_user_uuid: admin_uuid,
-      current_state: reception_state,
-      next_state,
-    })
-
     try {
       const response = await fetch('/api/admin/reception', {
         method: 'POST',
@@ -146,7 +119,6 @@ export default function AdminReceptionButton() {
         (payload.state === 'open' || payload.state === 'offline')
       ) {
         set_reception_state(payload.state)
-        set_admin_uuid(payload.admin_user_uuid ?? admin_uuid)
         show_toast(reception_label[payload.state])
       }
     } finally {

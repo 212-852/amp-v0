@@ -5,13 +5,20 @@ import { clean_uuid } from '@/lib/db/uuid_payload'
 
 import { debug_admin_reception } from './debug'
 import {
+  apply_reception_search_filters,
   default_reception_state,
+  is_reception_room_role,
   is_reception_state,
   parse_reception_request,
   resolve_next_reception_state,
+  resolve_reception_status_mode_query,
   should_admin_receive_concierge_notify,
   type reception_record,
   type reception_request_input,
+  type reception_room_mode,
+  type reception_room_role_filter,
+  type reception_room_summary,
+  type reception_search_filters,
   type reception_state,
 } from './rules'
 
@@ -188,29 +195,11 @@ export async function apply_admin_reception_request(input: {
   const next_state = resolve_next_reception_state(current, parsed.request)
 
   if (next_state === current.state) {
-    await debug_admin_reception({
-      event: 'admin_reception_update_completed',
-      payload: {
-        admin_user_uuid: input.admin_user_uuid,
-        state: current.state,
-        no_change: true,
-      },
-    })
-
     return {
       ok: true,
       record: current,
     }
   }
-
-  await debug_admin_reception({
-    event: 'admin_reception_update_started',
-    payload: {
-      admin_user_uuid: input.admin_user_uuid,
-      from_state: current.state,
-      to_state: next_state,
-    },
-  })
 
   let updated: reception_record
 
@@ -232,14 +221,6 @@ export async function apply_admin_reception_request(input: {
 
     throw error
   }
-
-  await debug_admin_reception({
-    event: 'admin_reception_update_completed',
-    payload: {
-      admin_user_uuid: input.admin_user_uuid,
-      state: updated.state,
-    },
-  })
 
   return {
     ok: true,
@@ -328,4 +309,275 @@ export async function summarize_reception(): Promise<reception_summary> {
     total_admin_count: admin_user_uuids.length,
     has_open_admin: open_list.length > 0,
   }
+}
+
+// ============================================================================
+// Reception room inbox / search loader
+// ----------------------------------------------------------------------------
+// Single-core data fetch used by the mini inbox and the full reception list
+// page. Filtering decisions live in rules.ts; here we only execute queries.
+// ============================================================================
+
+const RECEPTION_ROOM_LOAD_HARD_LIMIT = 100
+
+type room_load_query = {
+  statuses: string[] | null
+  modes: reception_room_mode[] | null
+  limit: number
+}
+
+type room_row_min = {
+  room_uuid: string
+  status: string | null
+  mode: string | null
+  action_id: string | null
+  updated_at: string | null
+}
+
+type participant_row_min = {
+  room_uuid: string | null
+  user_uuid: string | null
+  visitor_uuid: string | null
+  role: string | null
+  last_channel: string | null
+  status: string | null
+}
+
+type message_row_min = {
+  room_uuid: string
+  body: string | null
+  created_at: string
+}
+
+type user_row_min = {
+  user_uuid: string
+  display_name: string | null
+}
+
+function normalize_room_mode(value: string | null): reception_room_mode | null {
+  if (value === 'concierge') {
+    return 'concierge'
+  }
+
+  if (value === 'bot') {
+    return 'bot'
+  }
+
+  return null
+}
+
+function extract_text_from_message_body(body: string | null): string | null {
+  if (!body) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(body) as {
+      bundle?: {
+        bundle_type?: string
+        payload?: { text?: string }
+      }
+    }
+
+    const bundle = parsed?.bundle
+
+    if (!bundle) {
+      return null
+    }
+
+    if (bundle.bundle_type === 'text' && typeof bundle.payload?.text === 'string') {
+      return bundle.payload.text
+    }
+
+    if (bundle.bundle_type) {
+      return `[${bundle.bundle_type}]`
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+function unique_participant_roles(
+  rows: participant_row_min[],
+): reception_room_role_filter[] {
+  const set = new Set<reception_room_role_filter>()
+
+  for (const row of rows) {
+    if (is_reception_room_role(row.role)) {
+      set.add(row.role)
+    }
+  }
+
+  return Array.from(set)
+}
+
+async function load_reception_rooms(
+  query: room_load_query,
+): Promise<reception_room_summary[]> {
+  const limit = Math.max(
+    1,
+    Math.min(query.limit, RECEPTION_ROOM_LOAD_HARD_LIMIT),
+  )
+
+  let rooms_query = supabase
+    .from('rooms')
+    .select('room_uuid, status, mode, action_id, updated_at')
+    .eq('room_type', 'direct')
+    .order('updated_at', { ascending: false })
+    .limit(limit)
+
+  if (query.statuses && query.statuses.length > 0) {
+    rooms_query = rooms_query.in('status', query.statuses)
+  }
+
+  if (query.modes && query.modes.length > 0) {
+    rooms_query = rooms_query.in('mode', query.modes)
+  }
+
+  const rooms_result = await rooms_query
+
+  if (rooms_result.error) {
+    throw rooms_result.error
+  }
+
+  const rooms = (rooms_result.data ?? []) as room_row_min[]
+
+  if (rooms.length === 0) {
+    return []
+  }
+
+  const room_uuids = rooms.map((row) => row.room_uuid)
+
+  const participants_result = await supabase
+    .from('participants')
+    .select('room_uuid, user_uuid, visitor_uuid, role, last_channel, status')
+    .in('room_uuid', room_uuids)
+
+  if (participants_result.error) {
+    throw participants_result.error
+  }
+
+  const participants = (participants_result.data ?? []) as participant_row_min[]
+
+  const user_uuids = Array.from(
+    new Set(
+      participants
+        .filter((row) => row.role === 'user' && typeof row.user_uuid === 'string')
+        .map((row) => row.user_uuid as string),
+    ),
+  )
+  const users_by_uuid = new Map<string, user_row_min>()
+
+  if (user_uuids.length > 0) {
+    const users_result = await supabase
+      .from('users')
+      .select('user_uuid, display_name')
+      .in('user_uuid', user_uuids)
+
+    if (users_result.error) {
+      throw users_result.error
+    }
+
+    for (const row of (users_result.data ?? []) as user_row_min[]) {
+      if (row.user_uuid) {
+        users_by_uuid.set(row.user_uuid, row)
+      }
+    }
+  }
+
+  const messages_result = await supabase
+    .from('messages')
+    .select('room_uuid, body, created_at')
+    .in('room_uuid', room_uuids)
+    .order('created_at', { ascending: false })
+    .limit(limit * 8)
+
+  if (messages_result.error) {
+    throw messages_result.error
+  }
+
+  const latest_message_by_room = new Map<string, message_row_min>()
+
+  for (const row of (messages_result.data ?? []) as message_row_min[]) {
+    if (latest_message_by_room.has(row.room_uuid)) {
+      continue
+    }
+
+    latest_message_by_room.set(row.room_uuid, row)
+  }
+
+  return rooms.map((row) => {
+    const room_participants = participants.filter(
+      (p) => p.room_uuid === row.room_uuid,
+    )
+    const user_participant =
+      room_participants.find((p) => p.role === 'user') ?? null
+    const user_uuid = user_participant?.user_uuid ?? null
+    const display_name = user_uuid
+      ? (users_by_uuid.get(user_uuid)?.display_name ?? null)
+      : null
+    const latest = latest_message_by_room.get(row.room_uuid) ?? null
+    const mode = normalize_room_mode(row.mode)
+    const status = row.status
+    const is_pending = status === 'active' && mode === 'concierge'
+
+    return {
+      room_uuid: row.room_uuid,
+      status,
+      mode,
+      channel: user_participant?.last_channel ?? null,
+      user_uuid,
+      visitor_uuid: user_participant?.visitor_uuid ?? null,
+      display_name,
+      latest_message_text: extract_text_from_message_body(latest?.body ?? null),
+      latest_message_at: latest?.created_at ?? null,
+      participant_roles: unique_participant_roles(room_participants),
+      has_typing: false,
+      is_pending,
+      updated_at: row.updated_at,
+      action_id: row.action_id,
+    }
+  })
+}
+
+/**
+ * Latest active concierge rooms for the admin mini inbox.
+ *
+ * "Active" = `rooms.status = 'active'` AND `rooms.mode = 'concierge'`.
+ * Ordered by `rooms.updated_at` desc; capped by `limit`.
+ */
+export async function list_active_reception_rooms(input: {
+  limit: number
+}): Promise<reception_room_summary[]> {
+  const safe_limit = Math.max(1, Math.min(input.limit, 20))
+
+  return load_reception_rooms({
+    statuses: ['active'],
+    modes: ['concierge'],
+    limit: safe_limit,
+  })
+}
+
+/**
+ * Filtered reception room list for the full admin reception page.
+ *
+ * SQL pre-filter: `status_mode` is translated by rules into a single
+ * `rooms.status` / `rooms.mode` predicate so we don't fetch the entire
+ * table. Remaining filters (keyword, role, pending_only, has_typing) run
+ * in-memory via `apply_reception_search_filters` from rules.ts.
+ */
+export async function search_reception_rooms(
+  filters: reception_search_filters,
+): Promise<reception_room_summary[]> {
+  const sql_hint = resolve_reception_status_mode_query(filters.status_mode)
+
+  const candidates = await load_reception_rooms({
+    statuses: sql_hint.statuses,
+    modes: sql_hint.modes,
+    limit: RECEPTION_ROOM_LOAD_HARD_LIMIT,
+  })
+
+  return apply_reception_search_filters(candidates, filters)
 }

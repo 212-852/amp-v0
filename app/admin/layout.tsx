@@ -1,5 +1,6 @@
 import AdminAssistant from '@/components/layout/admin/assistant'
 import AdminHeader from '@/components/layout/admin/header'
+import AdminReceptionInbox from '@/components/layout/admin/reception_inbox'
 import AdminShell from '@/components/layout/admin/shell'
 import { require_admin_route_access } from '@/lib/auth/route'
 
@@ -28,6 +29,9 @@ export default async function AdminLayout({
         </div>
       </div>
       <main className="min-h-0 flex-1 overflow-y-auto px-6 pt-[calc(env(safe-area-inset-top,0px)+108px)] pb-[calc(200px+env(safe-area-inset-bottom,0px))]">
+        <div className="mb-4">
+          <AdminReceptionInbox />
+        </div>
         {children}
       </main>
       <AdminAssistant display_name={access.display_name} />

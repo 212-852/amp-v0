@@ -55,47 +55,19 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  let body: reception_request_input | null = null
-
   try {
-    body = (await request.json().catch(() => null)) as
+    const body = (await request.json().catch(() => null)) as
       | reception_request_input
       | null
-
-    await debug_admin_reception({
-      event: 'admin_reception_api_entered',
-      payload: {
-        method: request.method,
-        body,
-      },
-    })
 
     const context = await resolve_admin_reception_context()
 
     if (!context.ok) {
-      await debug_admin_reception({
-        event: 'admin_reception_failed',
-        payload: {
-          step: 'session',
-          error_message: context.error,
-          error_code: context.status,
-        },
-      })
-
       return NextResponse.json(
         { ok: false, error: context.error },
         { status: context.status },
       )
     }
-
-    await debug_admin_reception({
-      event: 'admin_reception_session_resolved',
-      payload: {
-        admin_user_uuid: context.admin_user_uuid,
-        role: context.role,
-        tier: context.tier,
-      },
-    })
 
     const result = await apply_admin_reception_request({
       admin_user_uuid: context.admin_user_uuid,
@@ -103,15 +75,6 @@ export async function POST(request: Request) {
     })
 
     if (!result.ok) {
-      await debug_admin_reception({
-        event: 'admin_reception_failed',
-        payload: {
-          step: 'apply_request',
-          error_message: result.error,
-          error_code: result.status,
-        },
-      })
-
       return NextResponse.json(
         { ok: false, error: result.error },
         { status: result.status },

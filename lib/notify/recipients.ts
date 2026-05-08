@@ -1,0 +1,182 @@
+import 'server-only'
+
+import { is_reception_state } from '@/lib/admin/reception/rules'
+import { supabase } from '@/lib/db/supabase'
+
+export type notify_recipient = {
+  user_uuid: string
+  display_name: string | null
+  line_user_id: string | null
+}
+
+export type concierge_recipients = {
+  open_admins: notify_recipient[]
+  offline_admin_user_uuids: string[]
+  total_admin_count: number
+  open_admin_count: number
+  has_open_admin: boolean
+  owner_core: notify_recipient[]
+}
+
+type user_row = {
+  user_uuid: string | null
+  display_name: string | null
+  role: string | null
+}
+
+type reception_row_min = {
+  user_uuid: string | null
+  state: string | null
+}
+
+type identity_row_min = {
+  user_uuid: string | null
+  provider_id: string | null
+}
+
+/**
+ * Single core query that loads admins + owner/core users and resolves their
+ * reception state and LINE provider id in one pass.
+ *
+ * - Admins with no `receptions` row are treated as `open` (default).
+ * - Owner/core are returned regardless of reception state (used for
+ *   escalation fallback).
+ */
+export async function load_concierge_recipients(): Promise<concierge_recipients> {
+  const users_result = await supabase
+    .from('users')
+    .select('user_uuid, display_name, role')
+    .in('role', ['admin', 'owner', 'core'])
+
+  if (users_result.error) {
+    throw users_result.error
+  }
+
+  const all_rows = (users_result.data ?? []) as user_row[]
+  const all_users = all_rows.filter(
+    (row): row is user_row & { user_uuid: string; role: string } =>
+      typeof row.user_uuid === 'string' &&
+      row.user_uuid.length > 0 &&
+      typeof row.role === 'string',
+  )
+
+  const admin_users = all_users.filter((row) => row.role === 'admin')
+  const owner_core_users = all_users.filter(
+    (row) => row.role === 'owner' || row.role === 'core',
+  )
+
+  const admin_user_uuids = admin_users.map((row) => row.user_uuid)
+  const reception_state_by_uuid = new Map<string, string>()
+
+  if (admin_user_uuids.length > 0) {
+    const reception_result = await supabase
+      .from('receptions')
+      .select('user_uuid, state')
+      .in('user_uuid', admin_user_uuids)
+
+    if (reception_result.error) {
+      throw reception_result.error
+    }
+
+    for (const row of (reception_result.data ?? []) as reception_row_min[]) {
+      if (typeof row.user_uuid === 'string' && row.user_uuid.length > 0) {
+        reception_state_by_uuid.set(row.user_uuid, row.state ?? '')
+      }
+    }
+  }
+
+  const open_admin_users: typeof admin_users = []
+  const offline_admin_user_uuids: string[] = []
+
+  for (const admin of admin_users) {
+    const raw_state = reception_state_by_uuid.get(admin.user_uuid)
+    const resolved_state = is_reception_state(raw_state) ? raw_state : 'open'
+
+    if (resolved_state === 'open') {
+      open_admin_users.push(admin)
+    } else {
+      offline_admin_user_uuids.push(admin.user_uuid)
+    }
+  }
+
+  const need_line_lookup_uuids = [
+    ...open_admin_users.map((row) => row.user_uuid),
+    ...owner_core_users.map((row) => row.user_uuid),
+  ]
+  const line_user_id_by_uuid = new Map<string, string>()
+
+  if (need_line_lookup_uuids.length > 0) {
+    const identity_result = await supabase
+      .from('identities')
+      .select('user_uuid, provider_id')
+      .eq('provider', 'line')
+      .in('user_uuid', need_line_lookup_uuids)
+
+    if (identity_result.error) {
+      throw identity_result.error
+    }
+
+    for (const row of (identity_result.data ?? []) as identity_row_min[]) {
+      if (
+        typeof row.user_uuid !== 'string' ||
+        row.user_uuid.length === 0 ||
+        typeof row.provider_id !== 'string' ||
+        row.provider_id.length === 0
+      ) {
+        continue
+      }
+
+      if (!line_user_id_by_uuid.has(row.user_uuid)) {
+        line_user_id_by_uuid.set(row.user_uuid, row.provider_id)
+      }
+    }
+  }
+
+  const to_recipient = (row: {
+    user_uuid: string
+    display_name: string | null
+  }): notify_recipient => ({
+    user_uuid: row.user_uuid,
+    display_name: row.display_name,
+    line_user_id: line_user_id_by_uuid.get(row.user_uuid) ?? null,
+  })
+
+  return {
+    open_admins: open_admin_users.map(to_recipient),
+    offline_admin_user_uuids,
+    total_admin_count: admin_users.length,
+    open_admin_count: open_admin_users.length,
+    has_open_admin: open_admin_users.length > 0,
+    owner_core: owner_core_users.map(to_recipient),
+  }
+}
+
+/**
+ * Resolve the requesting user's display_name for the concierge message
+ * template. Falls back to a generic label when the user_uuid is unknown
+ * (anonymous visitors) or no row exists.
+ */
+export async function read_requester_display_name(
+  user_uuid: string | null,
+): Promise<string> {
+  const fallback = 'ユーザー'
+
+  if (!user_uuid) {
+    return fallback
+  }
+
+  const result = await supabase
+    .from('users')
+    .select('display_name')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  if (result.error) {
+    return fallback
+  }
+
+  const data = result.data as { display_name: string | null } | null
+  const name = data?.display_name?.trim()
+
+  return name && name.length > 0 ? name : fallback
+}

@@ -372,36 +372,8 @@ export async function sync_discord_action_context(
   })
 }
 
-function short_room_uuid(room_uuid: string) {
+export function short_room_uuid(room_uuid: string) {
   return room_uuid.replace(/-/g, '').slice(0, 8) || room_uuid.slice(0, 8)
-}
-
-function concierge_start_content(event: Extract<
-  notify_event,
-  { event: 'concierge_requested' }
->) {
-  const lines = [
-    'Concierge requested',
-    `room_uuid: ${event.room_uuid}`,
-    `participant_uuid: ${event.participant_uuid}`,
-    `visitor_uuid: ${event.visitor_uuid}`,
-    `source_channel: ${event.source_channel}`,
-    `mode: ${event.mode}`,
-  ]
-
-  if (typeof event.has_open_admin === 'boolean') {
-    if (event.has_open_admin) {
-      lines.push(
-        `open_admins: ${event.open_admin_count ?? 0}/${event.total_admin_count ?? 0}`,
-      )
-    } else {
-      lines.push(
-        '[FALLBACK] No open admin (all offline). Notifying owner/core only.',
-      )
-    }
-  }
-
-  return lines.join('\n')
 }
 
 function concierge_end_content(event: Extract<
@@ -475,15 +447,13 @@ export async function send_discord_notify(
   event: notify_event,
 ): Promise<discord_notify_result | null> {
   if (event.event === 'concierge_requested') {
-    const result = await sync_discord_action_context({
-      title: `Concierge - ${short_room_uuid(event.room_uuid)}`,
-      action_id: event.action_id,
-      content: concierge_start_content(event),
-    })
-
+    // concierge_requested is orchestrated by notify/index.ts because the
+    // thread title and body depend on the live reception summary and the
+    // outcome of personal push/LINE delivery. The orchestrator calls
+    // `sync_discord_action_context` directly.
     return {
       channel: 'discord',
-      action_id: result ? result.action_id : event.action_id,
+      action_id: event.action_id,
     }
   }
 
