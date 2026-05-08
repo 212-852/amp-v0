@@ -6,7 +6,7 @@ import {
   UserRound,
 } from 'lucide-react'
 
-import AdminChatAvailabilityButton from './chat_availability_button'
+import AdminReceptionButton from './reception_button'
 
 type AdminHeaderProps = {
   display_name: string | null
@@ -61,7 +61,7 @@ export default function AdminHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
-          <AdminChatAvailabilityButton />
+          <AdminReceptionButton />
           <button
             type="button"
             className={icon_button_class}

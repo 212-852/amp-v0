@@ -29,9 +29,9 @@ export type notify_event =
       source_channel: string
       mode: 'concierge'
       action_id: string | null
-      available_admin_count?: number
+      open_admin_count?: number
       total_admin_count?: number
-      has_available_admin?: boolean
+      has_open_admin?: boolean
     }
   | {
       event: 'concierge_closed'
@@ -65,7 +65,7 @@ export type notify_rule = {
 /**
  * Decide which roles should receive a `concierge_requested` notification.
  * Admin/concierge are dropped from the target list when the event was raised
- * with a per-admin-availability summary indicating no available admin.
+ * with a reception summary indicating no `open` admin.
  *
  * Owner/core are always retained as fallback targets so the system never
  * falls fully silent.
@@ -73,9 +73,9 @@ export type notify_rule = {
 function resolve_concierge_targets(
   event: Extract<notify_event, { event: 'concierge_requested' }>,
 ): notify_target[] {
-  const has_available_admin = event.has_available_admin !== false
+  const has_open_admin = event.has_open_admin !== false
 
-  if (has_available_admin) {
+  if (has_open_admin) {
     return ['admin', 'concierge', 'owner', 'core']
   }
 

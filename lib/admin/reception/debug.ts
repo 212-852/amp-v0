@@ -1,6 +1,6 @@
 import 'server-only'
 
-type admin_availability_debug_input = {
+type admin_reception_debug_input = {
   event: string
   payload?: Record<string, unknown>
 }
@@ -14,8 +14,8 @@ function get_debug_user_ids() {
   )
 }
 
-export async function debug_admin_availability(
-  input: admin_availability_debug_input,
+export async function debug_admin_reception(
+  input: admin_reception_debug_input,
 ) {
   const webhook_url = process.env.DISCORD_DEBUG_WEBHOOK_URL
 
@@ -27,7 +27,7 @@ export async function debug_admin_availability(
   const mentions = users.map((id) => `<@${id}>`).join(' ')
   const content = [
     mentions,
-    '**[DEBUG] ADMIN_AVAILABILITY**',
+    '**[DEBUG] ADMIN_RECEPTION**',
     `event: \`${input.event}\``,
     '```json',
     JSON.stringify(input.payload ?? {}, null, 2).slice(0, 1500),

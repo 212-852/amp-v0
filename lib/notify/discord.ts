@@ -389,14 +389,14 @@ function concierge_start_content(event: Extract<
     `mode: ${event.mode}`,
   ]
 
-  if (typeof event.has_available_admin === 'boolean') {
-    if (event.has_available_admin) {
+  if (typeof event.has_open_admin === 'boolean') {
+    if (event.has_open_admin) {
       lines.push(
-        `available_admins: ${event.available_admin_count ?? 0}/${event.total_admin_count ?? 0}`,
+        `open_admins: ${event.open_admin_count ?? 0}/${event.total_admin_count ?? 0}`,
       )
     } else {
       lines.push(
-        '[FALLBACK] No available admin. Notifying owner/core only.',
+        '[FALLBACK] No open admin (all offline). Notifying owner/core only.',
       )
     }
   }

@@ -51,7 +51,7 @@ import {
   should_seed_initial_messages,
 } from './rules'
 import { decide_bot_action } from './bot/rules'
-import { summarize_admin_availability } from '@/lib/admin/availability/action'
+import { summarize_reception } from '@/lib/admin/reception/action'
 import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
@@ -1021,9 +1021,9 @@ async function notify_room_mode_switch(input: {
       action_id: input.action_id,
     })
 
-    const availability_summary =
+    const reception_summary =
       input.mode === 'concierge'
-        ? await summarize_admin_availability().catch(() => null)
+        ? await summarize_reception().catch(() => null)
         : null
 
     const results = await notify(
@@ -1037,10 +1037,9 @@ async function notify_room_mode_switch(input: {
             source_channel: input.channel,
             mode: 'concierge',
             action_id: input.action_id,
-            available_admin_count:
-              availability_summary?.available_admin_count,
-            total_admin_count: availability_summary?.total_admin_count,
-            has_available_admin: availability_summary?.has_available_admin,
+            open_admin_count: reception_summary?.open_admin_count,
+            total_admin_count: reception_summary?.total_admin_count,
+            has_open_admin: reception_summary?.has_open_admin,
           }
         : {
             event: 'concierge_closed',

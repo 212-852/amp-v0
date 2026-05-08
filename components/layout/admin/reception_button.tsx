@@ -9,23 +9,25 @@ const button_class =
 const off_button_class =
   'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-neutral-100 text-neutral-400 shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-colors hover:bg-neutral-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500 active:scale-[0.98] sm:h-11 sm:w-11'
 
-const toast_text = {
-  on: 'チャット受付をONにしました',
-  off: 'チャット受付をOFFにしました',
+const reception_label = {
+  open: 'チャット ON',
+  offline: 'チャット OFF',
 } as const
 
-type availability_response = {
+type reception_state_value = 'open' | 'offline'
+
+type reception_response = {
   ok: boolean
   admin_user_uuid?: string
-  chat_available?: boolean
+  state?: reception_state_value
   error?: string
 }
 
-function send_admin_availability_debug(
+function send_admin_reception_debug(
   event: string,
   payload: Record<string, unknown>,
 ) {
-  void fetch('/api/admin/availability/debug', {
+  void fetch('/api/admin/reception/debug', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
@@ -33,8 +35,9 @@ function send_admin_availability_debug(
   }).catch(() => {})
 }
 
-export default function AdminChatAvailabilityButton() {
-  const [chat_available, set_chat_available] = useState<boolean | null>(null)
+export default function AdminReceptionButton() {
+  const [reception_state, set_reception_state] =
+    useState<reception_state_value | null>(null)
   const [admin_uuid, set_admin_uuid] = useState<string | null>(null)
   const [is_pending, set_is_pending] = useState(false)
   const [toast_message, set_toast_message] = useState<string | null>(null)
@@ -45,7 +48,7 @@ export default function AdminChatAvailabilityButton() {
 
     void (async () => {
       try {
-        const response = await fetch('/api/admin/availability', {
+        const response = await fetch('/api/admin/reception', {
           method: 'GET',
           credentials: 'include',
           cache: 'no-store',
@@ -55,14 +58,17 @@ export default function AdminChatAvailabilityButton() {
           return
         }
 
-        const payload = (await response.json()) as availability_response
+        const payload = (await response.json()) as reception_response
 
         if (cancelled) {
           return
         }
 
-        if (payload.ok && typeof payload.chat_available === 'boolean') {
-          set_chat_available(payload.chat_available)
+        if (
+          payload.ok &&
+          (payload.state === 'open' || payload.state === 'offline')
+        ) {
+          set_reception_state(payload.state)
           set_admin_uuid(payload.admin_user_uuid ?? null)
         }
       } catch {
@@ -101,16 +107,22 @@ export default function AdminChatAvailabilityButton() {
     }
 
     set_is_pending(true)
-    const next_chat_available =
-      typeof chat_available === 'boolean' ? !chat_available : null
 
-    send_admin_availability_debug('admin_availability_api_started', {
-      admin_uuid,
-      next_chat_available,
+    const next_state: reception_state_value | null =
+      reception_state === 'open'
+        ? 'offline'
+        : reception_state === 'offline'
+          ? 'open'
+          : null
+
+    send_admin_reception_debug('admin_reception_button_clicked', {
+      admin_user_uuid: admin_uuid,
+      current_state: reception_state,
+      next_state,
     })
 
     try {
-      const response = await fetch('/api/admin/availability', {
+      const response = await fetch('/api/admin/reception', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
@@ -121,52 +133,48 @@ export default function AdminChatAvailabilityButton() {
         return
       }
 
-      const payload = (await response.json()) as availability_response
+      const payload = (await response.json()) as reception_response
 
-      if (payload.ok && typeof payload.chat_available === 'boolean') {
-        set_chat_available(payload.chat_available)
+      if (
+        payload.ok &&
+        (payload.state === 'open' || payload.state === 'offline')
+      ) {
+        set_reception_state(payload.state)
         set_admin_uuid(payload.admin_user_uuid ?? admin_uuid)
-        show_toast(payload.chat_available ? toast_text.on : toast_text.off)
+        show_toast(reception_label[payload.state])
       }
     } finally {
       set_is_pending(false)
     }
   }
 
-  const is_off = chat_available === false
-  const is_on = chat_available === true
-  const aria_label = is_off
-    ? 'Chat (off)'
-    : is_on
-      ? 'Chat (on)'
-      : 'Chat'
+  const is_offline = reception_state === 'offline'
+  const is_open = reception_state === 'open'
+  const aria_label =
+    reception_state === null
+      ? 'Chat'
+      : reception_state === 'open'
+        ? reception_label.open
+        : reception_label.offline
 
   return (
     <div className="relative">
       <button
         type="button"
-        className={is_off ? off_button_class : button_class}
+        className={is_offline ? off_button_class : button_class}
         aria-label={aria_label}
-        aria-pressed={is_on}
+        aria-pressed={is_open}
         disabled={is_pending}
         onClick={() => {
-          console.log('[ADMIN_AVAILABILITY] button_clicked')
-          send_admin_availability_debug(
-            'admin_availability_button_clicked',
-            {
-              admin_uuid,
-              current_chat_available: chat_available,
-            },
-          )
           void handle_toggle()
         }}
       >
-        {is_off ? (
+        {is_offline ? (
           <MessageCircleOff className="h-5 w-5" strokeWidth={2} />
         ) : (
           <MessageCircle className="h-5 w-5" strokeWidth={2} />
         )}
-        {is_on ? (
+        {is_open ? (
           <span
             className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"
             aria-hidden

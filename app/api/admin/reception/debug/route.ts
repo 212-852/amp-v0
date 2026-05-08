@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 
-import { debug_admin_availability } from '@/lib/admin/availability/debug'
+import { debug_admin_reception } from '@/lib/admin/reception/debug'
 
-type admin_availability_debug_body = {
+type admin_reception_debug_body = {
   event?: unknown
   payload?: unknown
 }
@@ -17,7 +17,7 @@ function normalize_payload(payload: unknown): Record<string, unknown> {
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as
-    admin_availability_debug_body
+    admin_reception_debug_body
   const event = typeof body.event === 'string' ? body.event.trim() : ''
 
   if (!event) {
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     )
   }
 
-  await debug_admin_availability({
+  await debug_admin_reception({
     event,
     payload: normalize_payload(body.payload),
   })

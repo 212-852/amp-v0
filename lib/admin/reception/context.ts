@@ -2,7 +2,7 @@ import 'server-only'
 
 import { get_session_user } from '@/lib/auth/route'
 
-export type admin_availability_context =
+export type admin_reception_context =
   | {
       ok: true
       admin_user_uuid: string
@@ -10,13 +10,17 @@ export type admin_availability_context =
       role: string | null
       tier: string | null
     }
-  | { ok: false; status: 401 | 403; error: 'session_required' | 'admin_required' }
+  | {
+      ok: false
+      status: 401 | 403
+      error: 'session_required' | 'admin_required'
+    }
 
 /**
  * Resolve the current admin user from the session.
- * Pure context layer: no DB writes, no business decisions, no logic.
+ * Pure context layer: no DB writes, no business decisions.
  */
-export async function resolve_admin_availability_context(): Promise<admin_availability_context> {
+export async function resolve_admin_reception_context(): Promise<admin_reception_context> {
   const session = await get_session_user()
 
   if (!session.user_uuid) {
