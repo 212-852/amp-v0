@@ -5,7 +5,7 @@ import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
 import { resolve_dispatch_locale } from '@/lib/dispatch/context'
-import { debug_event } from '@/lib/debug'
+import { debug_event, forced_debug_event } from '@/lib/debug'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
 import { notify_new_user_created } from '@/lib/notify/new_user_created'
 
@@ -115,16 +115,53 @@ function serialize_error(error: unknown) {
 }
 
 export async function POST(request: Request) {
+  const signature = request.headers.get('x-line-signature')
+  const content_length = request.headers.get('content-length')
+
+  await forced_debug_event({
+    category: 'line_webhook',
+    event: 'line_webhook_entered',
+    payload: {
+      method: request.method,
+      has_signature: Boolean(signature),
+      content_length,
+    },
+  })
+
   const body_text = await request.text()
 
-  const signature = request.headers.get('x-line-signature')
+  await forced_debug_event({
+    category: 'line_webhook',
+    event: 'line_webhook_body_received',
+    payload: {
+      body_length: body_text.length,
+      body_preview: body_text.slice(0, 500),
+    },
+  })
 
   if (!verify_line_signature(body_text, signature)) {
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_webhook_signature_failed',
+      payload: {
+        ok: false,
+        error: signature ? 'invalid_signature' : 'missing_signature',
+      },
+    })
+
     return NextResponse.json(
       { error: 'Invalid signature' },
       { status: 401 },
     )
   }
+
+  await forced_debug_event({
+    category: 'line_webhook',
+    event: 'line_webhook_signature_verified',
+    payload: {
+      ok: true,
+    },
+  })
 
   let body: line_webhook_body
 
@@ -138,6 +175,15 @@ export async function POST(request: Request) {
   }
 
   const events = body.events ?? []
+
+  await forced_debug_event({
+    category: 'line_webhook',
+    event: 'line_webhook_events_parsed',
+    payload: {
+      event_count: events.length,
+      event_types: events.map((event) => event.type ?? null),
+    },
+  })
 
   for (const event of events) {
     if (event.deliveryContext?.isRedelivery === true) {
@@ -169,6 +215,22 @@ export async function POST(request: Request) {
           line_user_id: line_user_id ?? null,
           message_type: event.message?.type ?? null,
           message_id: event.message?.id ?? null,
+        })
+      }
+      if (
+        event.type === 'message' &&
+        event.message?.type === 'text' &&
+        typeof event.message.text === 'string'
+      ) {
+        await forced_debug_event({
+          category: 'line_webhook',
+          event: 'line_webhook_text_received',
+          payload: {
+            line_user_id: line_user_id ?? null,
+            text: event.message.text,
+            reply_token_exists: Boolean(event.replyToken),
+            timestamp: event.timestamp ?? null,
+          },
         })
       }
       if (!is_allowed_line_user(line_user_id)) {
@@ -285,6 +347,35 @@ export async function POST(request: Request) {
         }
       }
 
+      const incoming_line_text =
+        event.type === 'message' &&
+        event.message?.type === 'text' &&
+        event.message.id &&
+        typeof event.message.text === 'string'
+          ? {
+              text: event.message.text,
+              line_message_id: event.message.id,
+              created_at: event.timestamp
+                ? new Date(event.timestamp).toISOString()
+                : new Date().toISOString(),
+              webhook_event_id: event.webhookEventId ?? null,
+              delivery_context_redelivery:
+                event.deliveryContext?.isRedelivery ?? null,
+            }
+          : null
+
+      if (incoming_line_text) {
+        await forced_debug_event({
+          category: 'line_webhook',
+          event: 'line_dispatch_started',
+          payload: {
+            source_channel: 'line',
+            line_user_id,
+            text: incoming_line_text.text,
+          },
+        })
+      }
+
       const resolved_locale = await resolve_dispatch_locale({
         source_channel: 'line',
         stored_user_locale: access.locale,
@@ -293,6 +384,7 @@ export async function POST(request: Request) {
           event.source?.locale ?? event.source?.language ?? null,
         line_user_id,
       })
+
       await resolve_initial_chat({
         visitor_uuid: access.visitor_uuid,
         user_uuid: access.user_uuid,
@@ -304,22 +396,7 @@ export async function POST(request: Request) {
           line_user_id,
         line_reply_token: event.replyToken ?? null,
         line_user_id,
-        incoming_line_text:
-          event.type === 'message' &&
-          event.message?.type === 'text' &&
-          event.message.id &&
-          typeof event.message.text === 'string'
-            ? {
-                text: event.message.text,
-                line_message_id: event.message.id,
-                created_at: event.timestamp
-                  ? new Date(event.timestamp).toISOString()
-                  : new Date().toISOString(),
-                webhook_event_id: event.webhookEventId ?? null,
-                delivery_context_redelivery:
-                  event.deliveryContext?.isRedelivery ?? null,
-              }
-            : null,
+        incoming_line_text,
       })
     } catch (error) {
       await line_webhook_debug('webhook_handler_failed', {

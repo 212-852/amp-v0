@@ -3,7 +3,7 @@ import 'server-only'
 import type { archived_message } from '@/lib/chat/archive'
 import { control } from '@/lib/config/control'
 import { env } from '@/lib/config/env'
-import { debug_event } from '@/lib/debug'
+import { debug_event, forced_debug_event } from '@/lib/debug'
 import type { message_bundle } from '@/lib/chat/message'
 import type { chat_room } from '@/lib/chat/room'
 
@@ -209,6 +209,8 @@ async function post_line_reply_messages(input: {
     err.line_body = truncate(body_text, 2000)
     throw err
   }
+
+  return response.status
 }
 
 export async function deliver_line_chat_bundles(
@@ -304,9 +306,27 @@ export async function deliver_line_chat_bundles(
   }
 
   try {
-    await post_line_reply_messages({
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_reply_started',
+      payload: {
+        reply_token_exists: Boolean(reply_token),
+        message_count: line_message_count,
+      },
+    })
+
+    const reply_status = await post_line_reply_messages({
       reply_token,
       messages: line_messages,
+    })
+
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_reply_completed',
+      payload: {
+        ok: true,
+        status: reply_status,
+      },
     })
 
     if (control.debug.line_webhook) {
@@ -346,6 +366,15 @@ export async function deliver_line_chat_bundles(
       error_body: err.line_body,
       bundle_count,
       line_message_count,
+    })
+
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_reply_completed',
+      payload: {
+        ok: false,
+        status: err.line_status ?? null,
+      },
     })
 
     if (control.debug.line_webhook) {

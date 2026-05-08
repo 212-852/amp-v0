@@ -130,3 +130,40 @@ export async function debug(payload: debug_payload) {
     }),
   })
 }
+
+export async function forced_debug_event(input: {
+  category: string
+  event: string
+  payload?: Record<string, unknown>
+}) {
+  const webhook_url = process.env.DISCORD_DEBUG_WEBHOOK_URL
+
+  if (!webhook_url) {
+    return
+  }
+
+  const users = get_allowed_users()
+  const mentions = users.map((id) => `<@${id}>`).join(' ')
+  const content = [
+    mentions,
+    `**[DEBUG] ${input.category.toUpperCase()}**`,
+    `event: \`${input.event}\``,
+    `\`\`\`json\n${JSON.stringify(input.payload ?? {}, null, 2).slice(0, 1500)}\n\`\`\``,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 2000)
+  const body: Record<string, unknown> = { content }
+
+  if (users.length > 0) {
+    body.allowed_mentions = { users }
+  }
+
+  await fetch(webhook_url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  }).catch(() => {})
+}

@@ -8,7 +8,7 @@ import {
 } from '@/lib/auth/session'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { supabase } from '@/lib/db/supabase'
-import { debug_event } from '@/lib/debug'
+import { debug_event, forced_debug_event } from '@/lib/debug'
 import {
   archive_incoming_line_text,
   archive_message_bundles,
@@ -259,6 +259,21 @@ export async function resolve_initial_chat(
     }
   }
 
+  if (input.channel === 'line' && input.incoming_line_text) {
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_dispatch_context_resolved',
+      payload: {
+        visitor_uuid: room_result.room.visitor_uuid,
+        user_uuid: room_result.room.user_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+        room_uuid: room_result.room.room_uuid,
+        locale: input.locale,
+        source_channel: room_result.room.channel,
+      },
+    })
+  }
+
   let archived_messages: archived_message[]
 
   try {
@@ -308,6 +323,16 @@ export async function resolve_initial_chat(
     incoming_line_text &&
     line_switch_mode
   ) {
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_chat_action_started',
+      payload: {
+        room_uuid: room_result.room.room_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+        text: normalized_line_text,
+      },
+    })
+
     const incoming_bundle = build_line_mode_switch_bundle({
       text: normalized_line_text,
       mode: line_switch_mode,
@@ -328,6 +353,17 @@ export async function resolve_initial_chat(
         }),
       line_reply_token: input.line_reply_token,
       line_user_id: input.line_user_id,
+    })
+
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_chat_action_completed',
+      payload: {
+        room_uuid: room_result.room.room_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+        message_count: result.ok ? result.messages.length : 0,
+        mode: result.ok ? result.mode : room_result.room.mode,
+      },
     })
 
     return {
