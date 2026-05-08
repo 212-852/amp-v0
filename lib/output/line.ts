@@ -213,6 +213,25 @@ async function post_line_reply_messages(input: {
   return response.status
 }
 
+export async function deliver_line_text_reply(input: {
+  reply_token: string | null | undefined
+  text: string
+}) {
+  if (!input.reply_token?.trim()) {
+    return null
+  }
+
+  return post_line_reply_messages({
+    reply_token: input.reply_token,
+    messages: [
+      {
+        type: 'text',
+        text: truncate(input.text, 5000),
+      },
+    ],
+  })
+}
+
 export async function deliver_line_chat_bundles(
   input: deliver_line_chat_bundles_input,
 ) {

@@ -4,10 +4,14 @@ import { NextResponse } from 'next/server'
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { control } from '@/lib/config/control'
-import { resolve_dispatch_locale } from '@/lib/dispatch/context'
+import {
+  resolve_dispatch_locale,
+  resolve_line_dispatch_identity,
+} from '@/lib/dispatch/context'
 import { debug_event, forced_debug_event } from '@/lib/debug'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
 import { notify_new_user_created } from '@/lib/notify/new_user_created'
+import { deliver_line_text_reply } from '@/lib/output/line'
 
 type line_webhook_event = {
   type?: string
@@ -111,6 +115,41 @@ function serialize_error(error: unknown) {
     message: error instanceof Error ? error.message : String(error),
     stack: error instanceof Error ? error.stack : null,
     error,
+  }
+}
+
+async function reply_line_webhook_error(input: {
+  reply_token?: string | null
+}) {
+  try {
+    const status = await deliver_line_text_reply({
+      reply_token: input.reply_token,
+      text: 'LINEチャットの準備中にエラーが発生しました。時間をおいてもう一度お試しください。',
+    })
+
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_reply_completed',
+      payload: {
+        ok: Boolean(status),
+        status: status ?? null,
+      },
+    })
+  } catch (reply_error) {
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_reply_completed',
+      payload: {
+        ok: false,
+        status:
+          reply_error &&
+          typeof reply_error === 'object' &&
+          'line_status' in reply_error
+            ? reply_error.line_status ?? null
+            : null,
+        error: serialize_error(reply_error),
+      },
+    })
   }
 }
 
@@ -328,6 +367,40 @@ export async function POST(request: Request) {
         continue
       }
 
+      const incoming_line_text = {
+        text: event.message.text,
+        line_message_id: event.message.id,
+        created_at: event.timestamp
+          ? new Date(event.timestamp).toISOString()
+          : new Date().toISOString(),
+        webhook_event_id: event.webhookEventId ?? null,
+        delivery_context_redelivery:
+          event.deliveryContext?.isRedelivery ?? null,
+      }
+
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_dispatch_started',
+        payload: {
+          source_channel: 'line',
+          line_user_id,
+          text: incoming_line_text.text,
+        },
+      })
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_dispatch_context_started',
+        payload: {
+          source_channel: 'line',
+          line_user_id,
+          text: incoming_line_text.text,
+        },
+      })
+
+      await resolve_line_dispatch_identity({
+        line_user_id,
+      })
+
       await line_webhook_debug('line_profile_fetch_started', {
         line_user_id,
       })
@@ -434,36 +507,6 @@ export async function POST(request: Request) {
         }
       }
 
-      const incoming_line_text = {
-        text: event.message.text,
-        line_message_id: event.message.id,
-        created_at: event.timestamp
-          ? new Date(event.timestamp).toISOString()
-          : new Date().toISOString(),
-        webhook_event_id: event.webhookEventId ?? null,
-        delivery_context_redelivery:
-          event.deliveryContext?.isRedelivery ?? null,
-      }
-
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_dispatch_started',
-        payload: {
-          source_channel: 'line',
-          line_user_id,
-          text: incoming_line_text.text,
-        },
-      })
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_dispatch_context_started',
-        payload: {
-          source_channel: 'line',
-          line_user_id,
-          text: incoming_line_text.text,
-        },
-      })
-
       const resolved_locale = await resolve_dispatch_locale({
         source_channel: 'line',
         stored_user_locale: access.locale,
@@ -487,6 +530,16 @@ export async function POST(request: Request) {
         incoming_line_text,
       })
     } catch (error) {
+      if (
+        event.type === 'message' &&
+        event.message?.type === 'text' &&
+        event.replyToken
+      ) {
+        await reply_line_webhook_error({
+          reply_token: event.replyToken,
+        })
+      }
+
       await line_webhook_debug('webhook_handler_failed', {
         line_user_id: line_user_id ?? null,
         event_type: event.type ?? null,
