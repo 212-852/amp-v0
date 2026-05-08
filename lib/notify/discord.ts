@@ -265,6 +265,7 @@ async function close_discord_action_thread(input: {
       method: 'PATCH',
       body: JSON.stringify({
         archived: true,
+        locked: true,
       }),
     },
   )
@@ -273,6 +274,11 @@ async function close_discord_action_thread(input: {
     log_discord_action('discord_action_closed', {
       thread_id: input.thread_id,
       action_id: input.action_id,
+    })
+    await send_action_trace('discord_thread_closed', {
+      thread_id: input.thread_id,
+      archived: true,
+      locked: true,
     })
     return true
   }
@@ -298,6 +304,7 @@ async function reopen_discord_action_thread(input: {
       method: 'PATCH',
       body: JSON.stringify({
         archived: false,
+        locked: false,
       }),
     },
   )
@@ -306,6 +313,11 @@ async function reopen_discord_action_thread(input: {
     log_discord_action('discord_action_reopened', {
       thread_id: input.thread_id,
       action_id: input.action_id,
+    })
+    await send_action_trace('discord_thread_reopened', {
+      thread_id: input.thread_id,
+      archived: false,
+      locked: false,
     })
     return true
   }
