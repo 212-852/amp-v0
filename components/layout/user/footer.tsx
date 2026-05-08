@@ -6,7 +6,7 @@ import {
   Menu,
 } from 'lucide-react'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FaPaw } from 'react-icons/fa'
 
 import { useUserChat } from '@/components/chat/context'
@@ -27,8 +27,6 @@ import {
   get_locale,
   subscribe_locale,
 } from '@/lib/locale/state'
-
-type footer_mode = 'nav' | 'input'
 
 const content = {
   mypage: {
@@ -180,20 +178,24 @@ function create_optimistic_switch_message(input: {
 
 export default function UserFooter() {
   const chat = useUserChat()
+  const input_ref = useRef<HTMLInputElement | null>(null)
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [pending_switch_mode, set_pending_switch_mode] =
     useState<room_mode_segment | null>(null)
-  const [mode, set_mode] = useState<footer_mode>('nav')
+  const [is_sending_text, set_is_sending_text] = useState(false)
   const [flip_rotation, set_flip_rotation] = useState(0)
   const [card_scale, set_card_scale] = useState(1)
   const [is_mypage_open, set_is_mypage_open] = useState(false)
   const [is_menu_open, set_is_menu_open] = useState(false)
   const [is_quick_menu_open, set_is_quick_menu_open] = useState(false)
   const [is_paw_pressed, set_is_paw_pressed] = useState(false)
-  const is_input_mode = mode === 'input'
+  const is_input_mode = chat.is_chat_open
   const render_locale = mounted ? locale : 'ja'
   const room_mode_segment = chat.mode
+  const flip_rotation_value = is_input_mode
+    ? flip_rotation + 180
+    : flip_rotation
 
   useEffect(() => {
     const mounted_timer = window.setTimeout(() => {
@@ -208,21 +210,37 @@ export default function UserFooter() {
     }
   }, [])
 
+  useEffect(() => {
+    set_card_scale(0.98)
+    const restore_timer = window.setTimeout(() => set_card_scale(1), 40)
+
+    if (is_input_mode) {
+      const focus_timer = window.setTimeout(() => {
+        input_ref.current?.focus()
+      }, 220)
+
+      return () => {
+        window.clearTimeout(restore_timer)
+        window.clearTimeout(focus_timer)
+      }
+    }
+
+    return () => {
+      window.clearTimeout(restore_timer)
+    }
+  }, [is_input_mode])
+
   function open_input() {
     set_is_mypage_open(false)
     set_is_menu_open(false)
     set_is_quick_menu_open(false)
-    set_mode('input')
-    set_card_scale(0.98)
-    set_flip_rotation((current_rotation) => current_rotation + 180)
-    window.setTimeout(() => set_card_scale(1), 40)
+    chat.open_chat()
+    set_flip_rotation((current_rotation) => current_rotation + 360)
   }
 
   function close_input() {
-    set_mode('nav')
-    set_card_scale(0.98)
-    set_flip_rotation((current_rotation) => current_rotation + 180)
-    window.setTimeout(() => set_card_scale(1), 40)
+    chat.close_chat()
+    set_flip_rotation((current_rotation) => current_rotation + 360)
   }
 
   function handle_paw_click() {
@@ -333,6 +351,148 @@ export default function UserFooter() {
     }
   }
 
+  function reset_input_field() {
+    if (input_ref.current) {
+      input_ref.current.value = ''
+    }
+  }
+
+  function build_optimistic_user_text_message(input: {
+    room_uuid: string
+    text: string
+    locale: locale_key
+  }): archived_message {
+    const optimistic_uuid = `optimistic:${crypto.randomUUID()}`
+
+    return {
+      archive_uuid: optimistic_uuid,
+      room_uuid: input.room_uuid,
+      sequence: Number.MAX_SAFE_INTEGER,
+      created_at: new Date().toISOString(),
+      bundle: {
+        bundle_uuid: optimistic_uuid,
+        bundle_type: 'text',
+        sender: 'user',
+        version: 1,
+        locale: input.locale,
+        payload: {
+          text: input.text,
+        },
+      },
+    }
+  }
+
+  async function submit_chat_text(raw_text: string) {
+    const text = raw_text.trim()
+
+    if (
+      !text ||
+      is_sending_text ||
+      pending_switch_mode ||
+      !chat.room_uuid ||
+      !chat.participant_uuid
+    ) {
+      return
+    }
+
+    const previous_mode = chat.mode
+    const optimistic_message = build_optimistic_user_text_message({
+      room_uuid: chat.room_uuid,
+      text,
+      locale: render_locale,
+    })
+
+    set_is_sending_text(true)
+    chat.append_message(optimistic_message)
+    reset_input_field()
+
+    try {
+      const response = await fetch('/api/chat/message', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          locale: render_locale,
+          text,
+        }),
+      })
+
+      if (!response.ok) {
+        chat.remove_message(optimistic_message.archive_uuid)
+        return
+      }
+
+      const payload = (await response.json()) as
+        | {
+            ok: true
+            kind: 'switch_mode'
+            mode: room_mode
+            messages: archived_message[]
+          }
+        | {
+            ok: true
+            kind: 'plain_text'
+            messages: archived_message[]
+          }
+        | { ok: false; error: string }
+
+      if (!payload.ok) {
+        chat.remove_message(optimistic_message.archive_uuid)
+        return
+      }
+
+      const returned_messages = payload.messages ?? []
+      const echoed_user_message =
+        returned_messages.find(is_switch_mode_incoming_message) ??
+        returned_messages.find(
+          (message) => message.bundle.sender === 'user',
+        ) ??
+        null
+      const remaining_messages = echoed_user_message
+        ? returned_messages.filter(
+            (message) => message !== echoed_user_message,
+          )
+        : returned_messages
+
+      if (echoed_user_message) {
+        chat.replace_message(
+          optimistic_message.archive_uuid,
+          echoed_user_message,
+        )
+      } else {
+        chat.remove_message(optimistic_message.archive_uuid)
+      }
+
+      if (remaining_messages.length > 0) {
+        chat.append_messages(remaining_messages)
+      }
+
+      if (payload.kind === 'switch_mode') {
+        chat.set_mode(payload.mode)
+      } else if (chat.mode !== previous_mode) {
+        chat.set_mode(previous_mode)
+      }
+    } catch (error) {
+      console.error('[chat] submit_chat_text_failed', error)
+      chat.remove_message(optimistic_message.archive_uuid)
+    } finally {
+      set_is_sending_text(false)
+    }
+  }
+
+  function handle_chat_text_submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    void submit_chat_text(input_ref.current?.value ?? '')
+  }
+
+  function handle_send_click() {
+    void submit_chat_text(input_ref.current?.value ?? '')
+  }
+
   return (
     <>
       <OverlayRoot
@@ -411,7 +571,7 @@ export default function UserFooter() {
               ease-[cubic-bezier(0.22,1,0.36,1)]
             "
             style={{
-              transform: `rotateY(${flip_rotation}deg) scale(${card_scale})`,
+              transform: `rotateY(${flip_rotation_value}deg) scale(${card_scale})`,
               transformStyle: 'preserve-3d',
             }}
           >
@@ -583,7 +743,10 @@ export default function UserFooter() {
                 transform: 'rotateY(180deg)',
               }}
             >
-              <div className="relative z-10 flex translate-y-[18px] items-center gap-3 px-4">
+              <form
+                className="relative z-10 flex translate-y-[18px] items-center gap-3 px-4"
+                onSubmit={handle_chat_text_submit}
+              >
 
                 {/* back */}
                 <button
@@ -607,10 +770,13 @@ export default function UserFooter() {
 
                 {/* input */}
                 <input
+                  ref={input_ref}
                   id="user_footer_message"
                   name="user_footer_message"
                   type="text"
+                  autoComplete="off"
                   placeholder={content.message[render_locale]}
+                  disabled={is_sending_text}
                   className="
                     h-[48px] min-w-0 flex-1
                     rounded-full
@@ -623,19 +789,23 @@ export default function UserFooter() {
                     outline-none
                     placeholder:text-[#a9968a]
                     shadow-[0_2px_8px_rgba(42,29,24,0.05)]
+                    disabled:opacity-60
                   "
                 />
 
                 {/* send */}
                 <button
-                  type="button"
+                  type="submit"
                   aria-label="send"
+                  onClick={handle_send_click}
+                  disabled={is_sending_text}
                   className="
                     flex h-[48px] w-[48px]
                     items-center justify-center
                     rounded-full
                     bg-[#f3ebe2]
                     shadow-[0_2px_8px_rgba(42,29,24,0.06)]
+                    disabled:opacity-60
                   "
                 >
                   <FaPaw
@@ -645,7 +815,7 @@ export default function UserFooter() {
                     "
                   />
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         </div>

@@ -48,7 +48,7 @@ import {
 } from './room'
 import {
   resolve_chat_message_action,
-  resolve_line_text_mode_switch,
+  resolve_text_mode_switch,
   should_seed_initial_messages,
 } from './rules'
 import { output_chat_bundles } from '@/lib/output'
@@ -380,7 +380,7 @@ export async function resolve_initial_chat(
     )
     const line_switch_mode =
       input.channel === 'line' && normalized_line_text
-        ? resolve_line_text_mode_switch({
+        ? resolve_text_mode_switch({
             text: normalized_line_text,
             locale: input.locale,
           })
@@ -1284,6 +1284,98 @@ function session_source_to_chat_channel(
   return source_channel
 }
 
+type web_chat_room_resolve_error =
+  | 'room_mismatch'
+  | 'room_not_found'
+
+type web_chat_room_resolve_result =
+  | { ok: true; chat_room: chat_room }
+  | {
+      ok: false
+      response: {
+        status: number
+        body: { ok: false; error: web_chat_room_resolve_error }
+      }
+    }
+
+async function resolve_web_chat_room_for_request(input: {
+  visitor_uuid: string
+  room_uuid: string
+  participant_uuid: string
+  mode: room_mode
+}): Promise<web_chat_room_resolve_result> {
+  const header_store = await headers()
+  const cookie_store = await cookies()
+  const user_agent = header_store.get('user-agent')
+  const source_channel = resolve_session_source_channel(
+    cookie_store.get(browser_channel_cookie_name)?.value ?? null,
+    infer_source_channel_from_ua(user_agent),
+    user_agent,
+  )
+  const channel = session_source_to_chat_channel(source_channel)
+
+  const participant_result = await supabase
+    .from('participants')
+    .select('participant_uuid, room_uuid, visitor_uuid, user_uuid')
+    .eq('participant_uuid', input.participant_uuid)
+    .eq('room_uuid', input.room_uuid)
+    .eq('role', 'user')
+    .maybeSingle()
+
+  if (participant_result.error) {
+    throw participant_result.error
+  }
+
+  if (
+    !participant_result.data ||
+    participant_result.data.visitor_uuid !== input.visitor_uuid
+  ) {
+    return {
+      ok: false,
+      response: {
+        status: 403,
+        body: { ok: false, error: 'room_mismatch' },
+      },
+    }
+  }
+
+  const bot_participant_result = await supabase
+    .from('participants')
+    .select('participant_uuid')
+    .eq('room_uuid', input.room_uuid)
+    .eq('role', 'bot')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (bot_participant_result.error) {
+    throw bot_participant_result.error
+  }
+
+  if (!bot_participant_result.data?.participant_uuid) {
+    return {
+      ok: false,
+      response: {
+        status: 404,
+        body: { ok: false, error: 'room_not_found' },
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    chat_room: {
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      bot_participant_uuid: bot_participant_result.data.participant_uuid,
+      user_uuid: clean_uuid(participant_result.data.user_uuid),
+      visitor_uuid: input.visitor_uuid,
+      channel,
+      mode: input.mode,
+    },
+  }
+}
+
 export async function handle_chat_mode_request(
   request: Request,
 ): Promise<{ status: number; body: room_mode_switch_result }> {
@@ -1314,15 +1406,6 @@ export async function handle_chat_mode_request(
     }
   }
 
-  const header_store = await headers()
-  const cookie_store = await cookies()
-  const user_agent = header_store.get('user-agent')
-  const source_channel = resolve_session_source_channel(
-    cookie_store.get(browser_channel_cookie_name)?.value ?? null,
-    infer_source_channel_from_ua(user_agent),
-    user_agent,
-  )
-  const channel = session_source_to_chat_channel(source_channel)
   const locale = normalize_locale(body.locale) as chat_locale
   const incoming_bundle = build_room_mode_switch_bundle({
     mode: body.mode,
@@ -1337,60 +1420,19 @@ export async function handle_chat_mode_request(
     }
   }
 
-  const participant_result = await supabase
-    .from('participants')
-    .select('participant_uuid, room_uuid, visitor_uuid, user_uuid')
-    .eq('participant_uuid', body.participant_uuid)
-    .eq('room_uuid', body.room_uuid)
-    .eq('role', 'user')
-    .maybeSingle()
-
-  if (participant_result.error) {
-    throw participant_result.error
-  }
-
-  if (
-    !participant_result.data ||
-    participant_result.data.visitor_uuid !== visitor_uuid
-  ) {
-    return {
-      status: 403,
-      body: { ok: false, error: 'room_mismatch' },
-    }
-  }
-
-  const bot_participant_result = await supabase
-    .from('participants')
-    .select('participant_uuid')
-    .eq('room_uuid', body.room_uuid)
-    .eq('role', 'bot')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (bot_participant_result.error) {
-    throw bot_participant_result.error
-  }
-
-  if (!bot_participant_result.data?.participant_uuid) {
-    return {
-      status: 404,
-      body: { ok: false, error: 'room_not_found' },
-    }
-  }
-
-  const chat_room: chat_room = {
+  const room_resolved = await resolve_web_chat_room_for_request({
+    visitor_uuid,
     room_uuid: body.room_uuid,
     participant_uuid: body.participant_uuid,
-    bot_participant_uuid: bot_participant_result.data.participant_uuid,
-    user_uuid: participant_result.data.user_uuid ?? null,
-    visitor_uuid,
-    channel,
     mode: switch_action.mode,
+  })
+
+  if (!room_resolved.ok) {
+    return room_resolved.response
   }
 
   const result = await execute_room_mode_switch({
-    room: chat_room,
+    room: room_resolved.chat_room,
     locale,
     incoming_bundle,
   })
@@ -1398,5 +1440,125 @@ export async function handle_chat_mode_request(
   return {
     status: result.ok ? 200 : 400,
     body: result,
+  }
+}
+
+export type chat_message_request_result =
+  | {
+      ok: true
+      kind: 'switch_mode'
+      mode: room_mode
+      messages: archived_message[]
+    }
+  | {
+      ok: true
+      kind: 'plain_text'
+      messages: archived_message[]
+    }
+  | {
+      ok: false
+      error: string
+    }
+
+export async function handle_chat_message_request(
+  request: Request,
+): Promise<{ status: number; body: chat_message_request_result }> {
+  const visitor_uuid = await get_request_visitor_uuid()
+
+  if (!visitor_uuid) {
+    return {
+      status: 401,
+      body: { ok: false, error: 'session_required' },
+    }
+  }
+
+  const body = (await request.json().catch(() => null)) as {
+    room_uuid?: string
+    participant_uuid?: string
+    locale?: string
+    text?: string
+  } | null
+
+  const text_value = typeof body?.text === 'string' ? body.text.trim() : ''
+
+  if (!body?.room_uuid || !body.participant_uuid || text_value.length === 0) {
+    return {
+      status: 400,
+      body: { ok: false, error: 'invalid_message' },
+    }
+  }
+
+  const locale = normalize_locale(body.locale) as chat_locale
+  const detected_switch_mode = resolve_text_mode_switch({
+    text: text_value,
+    locale,
+  })
+
+  const initial_mode: room_mode = detected_switch_mode ?? 'bot'
+
+  const room_resolved = await resolve_web_chat_room_for_request({
+    visitor_uuid,
+    room_uuid: body.room_uuid,
+    participant_uuid: body.participant_uuid,
+    mode: initial_mode,
+  })
+
+  if (!room_resolved.ok) {
+    return room_resolved.response
+  }
+
+  const chat_room = room_resolved.chat_room
+
+  if (detected_switch_mode) {
+    const incoming_bundle = build_line_mode_switch_bundle({
+      text: text_value,
+      mode: detected_switch_mode,
+      locale,
+    })
+
+    const switch_result = await execute_room_mode_switch({
+      room: { ...chat_room, mode: detected_switch_mode },
+      locale,
+      incoming_bundle,
+    })
+
+    if (!switch_result.ok) {
+      return {
+        status: 400,
+        body: { ok: false, error: switch_result.error },
+      }
+    }
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        kind: 'switch_mode',
+        mode: switch_result.mode,
+        messages: switch_result.messages,
+      },
+    }
+  }
+
+  const incoming_bundle = build_user_text_bundle({
+    text: text_value,
+    locale,
+  })
+
+  const archived_messages = await archive_message_bundles({
+    room_uuid: chat_room.room_uuid,
+    participant_uuid: chat_room.participant_uuid,
+    bot_participant_uuid: chat_room.bot_participant_uuid,
+    channel: chat_room.channel,
+    bundles: [incoming_bundle],
+  })
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      kind: 'plain_text',
+      messages: archived_messages,
+    },
   }
 }

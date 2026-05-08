@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -23,6 +24,7 @@ type chat_room_client_state = {
 
 type chat_context_value = chat_room_client_state & {
   messages: archived_message[]
+  is_chat_open: boolean
   hydrate_chat: (input: {
     room_uuid: string
     participant_uuid: string
@@ -38,6 +40,9 @@ type chat_context_value = chat_room_client_state & {
   ) => void
   remove_message: (archive_uuid: string) => void
   set_mode: (mode: room_mode) => void
+  set_chat_open: (open: boolean) => void
+  open_chat: () => void
+  close_chat: () => void
   set_scroll_container: (node: HTMLDivElement | null) => void
   scroll_to_bottom: (behavior?: ScrollBehavior) => void
 }
@@ -101,6 +106,7 @@ export function UserChatProvider({
       mode: 'bot',
     })
   const [messages, set_messages] = useState<archived_message[]>([])
+  const [is_chat_open, set_is_chat_open] = useState(false)
 
   const scroll_to_bottom = useCallback(
     (behavior: ScrollBehavior = 'smooth') => {
@@ -186,6 +192,18 @@ export function UserChatProvider({
     }))
   }, [])
 
+  const set_chat_open = useCallback((open: boolean) => {
+    set_is_chat_open(open)
+  }, [])
+
+  const open_chat = useCallback(() => {
+    set_is_chat_open(true)
+  }, [])
+
+  const close_chat = useCallback(() => {
+    set_is_chat_open(false)
+  }, [])
+
   const set_scroll_container = useCallback(
     (node: HTMLDivElement | null) => {
       scroll_area_ref.current = node
@@ -193,28 +211,52 @@ export function UserChatProvider({
     [],
   )
 
+  useEffect(() => {
+    if (room_state.mode !== 'concierge') {
+      return
+    }
+
+    set_is_chat_open(true)
+
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      scroll_to_bottom('smooth')
+    })
+  }, [room_state.mode, scroll_to_bottom])
+
   const value = useMemo(
     () => ({
       ...room_state,
       messages,
+      is_chat_open,
       hydrate_chat,
       append_message,
       append_messages,
       replace_message,
       remove_message,
       set_mode,
+      set_chat_open,
+      open_chat,
+      close_chat,
       set_scroll_container,
       scroll_to_bottom,
     }),
     [
       room_state,
       messages,
+      is_chat_open,
       hydrate_chat,
       append_message,
       append_messages,
       replace_message,
       remove_message,
       set_mode,
+      set_chat_open,
+      open_chat,
+      close_chat,
       set_scroll_container,
       scroll_to_bottom,
     ],

@@ -77,7 +77,7 @@ export function resolve_chat_message_action(
   return { action: 'none' }
 }
 
-const line_mode_switch_words: Record<chat_locale, Record<room_mode, string[]>> = {
+const text_mode_switch_words: Record<chat_locale, Record<room_mode, string[]>> = {
   ja: {
     concierge: [
       'コンシェルジュ',
@@ -118,12 +118,16 @@ function trigger_matches(input: {
   return input.text.toLowerCase() === input.word.toLowerCase()
 }
 
-export function resolve_line_text_mode_switch(input: {
+/**
+ * Channel-agnostic chat-text mode switch detector.
+ * Used by both LINE webhook and Web chat input. Do not duplicate in UI.
+ */
+export function resolve_text_mode_switch(input: {
   text: string
   locale: chat_locale
 }): room_mode | null {
   const text = normalize_trigger_text(input.text)
-  const words = line_mode_switch_words[input.locale] ?? line_mode_switch_words.ja
+  const words = text_mode_switch_words[input.locale] ?? text_mode_switch_words.ja
 
   for (const mode of ['concierge', 'bot'] as const) {
     if (
@@ -141,3 +145,8 @@ export function resolve_line_text_mode_switch(input: {
 
   return null
 }
+
+/**
+ * @deprecated Use resolve_text_mode_switch (kept for backwards compatibility).
+ */
+export const resolve_line_text_mode_switch = resolve_text_mode_switch
