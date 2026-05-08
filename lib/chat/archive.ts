@@ -24,6 +24,7 @@ type archive_row = {
 
 type parsed_archive_body = {
   type?: string
+  actor_type?: 'user' | 'bot' | 'system'
   direction?: string
   sender_role?: string
   line_message_id?: string
@@ -34,6 +35,7 @@ type parsed_archive_body = {
   }
   metadata?: {
     bundle_type?: string
+    actor_type?: 'user' | 'bot' | 'system'
     initial_seed?: boolean
     line_message_id?: string
     intent?: string
@@ -249,15 +251,18 @@ export async function archive_incoming_line_text(
 
     const body = {
       type: input.bundle.bundle_type,
+      actor_type: 'user' as const,
       sender_role: 'user' as const,
       source_channel: 'line' as const,
       channel: 'line' as const,
       direction: 'incoming' as const,
       message_type: 'text' as const,
       text: input.text,
-      user_uuid: sanitized_user_uuid,
-      visitor_uuid: sanitized_visitor_uuid,
       participant_uuid: sanitized_participant_uuid,
+      ...(sanitized_user_uuid ? { user_uuid: sanitized_user_uuid } : {}),
+      ...(sanitized_visitor_uuid
+        ? { visitor_uuid: sanitized_visitor_uuid }
+        : {}),
       line_message_id: input.line_message_id,
       line_user_id: input.line_user_id,
       metadata: {
@@ -387,6 +392,45 @@ export async function has_initial_messages(room_uuid: string) {
   )
 }
 
+type actor_type = 'user' | 'bot' | 'system'
+
+const SYSTEM_BUNDLE_CONTENT_KEY_PREFIXES: ReadonlyArray<string> = [
+  'room.mode.',
+  'initial.',
+  'line.followup.',
+]
+
+const SYSTEM_BUNDLE_TYPES: ReadonlySet<string> = new Set([
+  'welcome',
+  'initial_carousel',
+])
+
+function resolve_actor_type(bundle: message_bundle): actor_type {
+  if (SYSTEM_BUNDLE_TYPES.has(bundle.bundle_type)) {
+    return 'system'
+  }
+
+  const content_key =
+    'content_key' in bundle && typeof bundle.content_key === 'string'
+      ? bundle.content_key
+      : null
+
+  if (
+    content_key &&
+    SYSTEM_BUNDLE_CONTENT_KEY_PREFIXES.some((prefix) =>
+      content_key.startsWith(prefix),
+    )
+  ) {
+    return 'system'
+  }
+
+  if (bundle.sender === 'user') {
+    return 'user'
+  }
+
+  return 'bot'
+}
+
 function archive_direction_for_sender(sender: bundle_sender): 'incoming' | 'outgoing' {
   if (sender === 'user') {
     return 'incoming'
@@ -438,12 +482,15 @@ export async function archive_message_bundles(
         ? sanitized_user_participant_uuid
         : sanitized_bot_participant_uuid
 
+    const actor_type = resolve_actor_type(bundle)
+
     return {
       room_uuid: sanitized_room_uuid,
       participant_uuid: sender_participant_uuid,
       channel: input.channel,
       body: JSON.stringify({
         type: bundle.bundle_type,
+        actor_type,
         sender_role: bundle.sender,
         direction: archive_direction_for_sender(bundle.sender),
         locale: bundle.locale,
@@ -453,6 +500,7 @@ export async function archive_message_bundles(
         metadata: {
           ...bundle_metadata,
           bundle_type: bundle.bundle_type,
+          actor_type,
           initial_seed:
             bundle.bundle_type === 'welcome' ||
             bundle.bundle_type === 'initial_carousel',

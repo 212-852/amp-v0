@@ -205,14 +205,20 @@ function build_user_participant_insert_row(
   room_uuid: string,
   updated_at_iso: string,
 ) {
+  const sanitized_room_uuid = clean_uuid(room_uuid)
+  const sanitized_user_uuid = clean_uuid(input.user_uuid)
+  const sanitized_visitor_uuid = clean_uuid(input.visitor_uuid)
+
   return {
-    room_uuid: clean_uuid(room_uuid),
-    user_uuid: clean_uuid(input.user_uuid),
-    visitor_uuid: clean_uuid(input.visitor_uuid),
     role: 'user' as const,
     status: 'active',
     last_channel: input.channel,
     updated_at: updated_at_iso,
+    ...(sanitized_room_uuid ? { room_uuid: sanitized_room_uuid } : {}),
+    ...(sanitized_user_uuid ? { user_uuid: sanitized_user_uuid } : {}),
+    ...(sanitized_visitor_uuid
+      ? { visitor_uuid: sanitized_visitor_uuid }
+      : {}),
   }
 }
 
@@ -220,11 +226,16 @@ function build_user_participant_touch_update(
   input: resolve_room_input,
   updated_at_iso: string,
 ) {
+  const sanitized_user_uuid = clean_uuid(input.user_uuid)
+  const sanitized_visitor_uuid = clean_uuid(input.visitor_uuid)
+
   return {
-    visitor_uuid: clean_uuid(input.visitor_uuid),
-    user_uuid: clean_uuid(input.user_uuid),
     last_channel: input.channel,
     updated_at: updated_at_iso,
+    ...(sanitized_user_uuid ? { user_uuid: sanitized_user_uuid } : {}),
+    ...(sanitized_visitor_uuid
+      ? { visitor_uuid: sanitized_visitor_uuid }
+      : {}),
   }
 }
 
@@ -233,20 +244,28 @@ function build_user_participant_move_update(
   new_room_uuid: string,
   updated_at_iso: string,
 ) {
+  const sanitized_room_uuid = clean_uuid(new_room_uuid)
+  const sanitized_user_uuid = clean_uuid(input.user_uuid)
+  const sanitized_visitor_uuid = clean_uuid(input.visitor_uuid)
+
   return {
-    room_uuid: clean_uuid(new_room_uuid),
-    visitor_uuid: clean_uuid(input.visitor_uuid),
-    user_uuid: clean_uuid(input.user_uuid),
     last_channel: input.channel,
     updated_at: updated_at_iso,
+    ...(sanitized_room_uuid ? { room_uuid: sanitized_room_uuid } : {}),
+    ...(sanitized_user_uuid ? { user_uuid: sanitized_user_uuid } : {}),
+    ...(sanitized_visitor_uuid
+      ? { visitor_uuid: sanitized_visitor_uuid }
+      : {}),
   }
 }
 
 function build_bot_participant_insert_row(room_uuid: string) {
+  const sanitized_room_uuid = clean_uuid(room_uuid)
+
   return {
-    room_uuid: clean_uuid(room_uuid),
     role: 'bot' as const,
     status: 'active',
+    ...(sanitized_room_uuid ? { room_uuid: sanitized_room_uuid } : {}),
   }
 }
 

@@ -401,8 +401,8 @@ async function attach_preferred_visitor(input: {
   const updated = await input.supabase
     .from('visitors')
     .update({
-      user_uuid: input.user_uuid,
       updated_at: new Date().toISOString(),
+      ...(input.user_uuid ? { user_uuid: input.user_uuid } : {}),
     })
     .eq('visitor_uuid', input.visitor_uuid)
     .select('visitor_uuid')
@@ -425,7 +425,7 @@ async function attach_preferred_visitor(input: {
     .from('visitors')
     .insert({
       visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
+      ...(input.user_uuid ? { user_uuid: input.user_uuid } : {}),
     })
     .select('visitor_uuid')
     .single()
@@ -685,7 +685,6 @@ async function ensure_browser_visitor(input: {
     .from('visitors')
     .insert({
       visitor_uuid: input.visitor_uuid,
-      user_uuid: null,
       ...access_patch,
     })
     .select('visitor_uuid')
