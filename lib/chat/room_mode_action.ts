@@ -60,8 +60,8 @@ function action_content(input: {
 }) {
   return [
     `room_uuid: ${input.room_uuid}`,
-    `visitor_uuid: ${input.visitor_uuid ?? ''}`,
-    `user_uuid: ${input.user_uuid ?? ''}`,
+    `visitor_uuid: ${input.visitor_uuid ?? 'null'}`,
+    `user_uuid: ${input.user_uuid ?? 'null'}`,
     `channel: ${input.channel}`,
     `mode: ${input.mode}`,
     `requested_at: ${input.requested_at ?? ''}`,

@@ -16,7 +16,7 @@ export type notify_event =
   | {
       event: 'concierge_room_request'
       room_uuid: string
-      visitor_uuid: string
+      visitor_uuid: string | null
       user_uuid: string | null
       channel: string
     }
@@ -24,7 +24,7 @@ export type notify_event =
       event: 'concierge_requested'
       room_uuid: string
       participant_uuid: string
-      visitor_uuid: string
+      visitor_uuid: string | null
       user_uuid: string | null
       source_channel: string
       mode: 'concierge'

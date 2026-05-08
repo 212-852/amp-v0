@@ -84,7 +84,7 @@ export type read_session_result = {
 }
 
 export type identity_promotion_result = {
-  visitor_uuid: string
+  visitor_uuid: string | null
   user_uuid: string
   existing_room_uuid: string | null
   participant_uuid: string | null
@@ -1014,7 +1014,7 @@ export async function promote_browser_visitor_to_user(input: {
     })
 
     return {
-      visitor_uuid: '',
+      visitor_uuid: null,
       user_uuid: input.user_uuid,
       existing_room_uuid: null,
       participant_uuid: null,

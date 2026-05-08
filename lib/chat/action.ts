@@ -8,6 +8,7 @@ import {
 } from '@/lib/auth/session'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { supabase } from '@/lib/db/supabase'
+import { uuid_payload_check } from '@/lib/db/uuid_payload'
 import { debug_event, forced_debug_event } from '@/lib/debug'
 import {
   archive_incoming_line_text,
@@ -765,7 +766,7 @@ export async function load_user_home_chat() {
     participant_uuid: '',
     bot_participant_uuid: '',
     user_uuid: null,
-    visitor_uuid: '',
+    visitor_uuid: null,
     channel: 'web' as const,
     mode: 'bot' as const,
   }
@@ -1028,7 +1029,7 @@ type room_mode_switch_result =
 async function notify_room_mode_switch(input: {
   room_uuid: string
   participant_uuid: string
-  visitor_uuid: string
+  visitor_uuid: string | null
   user_uuid: string | null
   channel: chat_channel
   mode: room_mode
@@ -1113,6 +1114,13 @@ async function notify_room_mode_switch(input: {
       return
     }
 
+    await uuid_payload_check({
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid,
+    })
+
     const result = await supabase
       .from('rooms')
       .update({
@@ -1170,6 +1178,13 @@ async function execute_room_mode_switch(input: {
         : [],
     }
   }
+
+  await uuid_payload_check({
+    room_uuid: input.room.room_uuid,
+    participant_uuid: input.room.participant_uuid,
+    visitor_uuid: input.room.visitor_uuid,
+    user_uuid: input.room.user_uuid,
+  })
 
   const room_update = await supabase
     .from('rooms')

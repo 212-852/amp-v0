@@ -2,6 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
+import { uuid_payload_check } from '@/lib/db/uuid_payload'
 import { debug_event } from '@/lib/debug'
 import type { chat_channel } from './room'
 import type { bundle_sender, message_bundle } from './message'
@@ -44,7 +45,7 @@ export type archive_incoming_line_text_input = {
   room_uuid: string
   participant_uuid: string
   user_uuid?: string | null
-  visitor_uuid: string
+  visitor_uuid: string | null
   line_user_id: string
   line_message_id: string
   text: string
@@ -262,6 +263,13 @@ export async function archive_incoming_line_text(
       bundle: input.bundle,
     }
 
+    await uuid_payload_check({
+      visitor_uuid: input.visitor_uuid ?? null,
+      user_uuid: input.user_uuid ?? null,
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+    })
+
     const result = await supabase
       .from('messages')
       .insert({
@@ -436,6 +444,15 @@ export async function archive_message_bundles(
         bundle,
       }),
     }
+  })
+
+  await uuid_payload_check({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+  })
+  await uuid_payload_check({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.bot_participant_uuid,
   })
 
   const result = await supabase

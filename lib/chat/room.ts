@@ -2,6 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
+import { uuid_payload_check } from '@/lib/db/uuid_payload'
 import { debug_event } from '@/lib/debug'
 
 import { room_select_fields } from '@/lib/chat/room/schema'
@@ -19,7 +20,7 @@ export type chat_room = {
   participant_uuid: string
   bot_participant_uuid: string
   user_uuid: string | null
-  visitor_uuid: string
+  visitor_uuid: string | null
   channel: chat_channel
   mode: room_mode
 }
@@ -82,7 +83,7 @@ function fallback_chat_room(input: resolve_room_input): chat_room {
     participant_uuid: '',
     bot_participant_uuid: '',
     user_uuid: input.user_uuid ?? null,
-    visitor_uuid: input.visitor_uuid ?? '',
+    visitor_uuid: input.visitor_uuid ?? null,
     channel: input.channel,
     mode: 'bot',
   }
@@ -99,7 +100,7 @@ function normalize_room(
     participant_uuid: participant.participant_uuid,
     bot_participant_uuid: bot_participant.participant_uuid,
     user_uuid: input.user_uuid ?? participant.user_uuid ?? null,
-    visitor_uuid: input.visitor_uuid ?? participant.visitor_uuid ?? '',
+    visitor_uuid: input.visitor_uuid ?? participant.visitor_uuid ?? null,
     channel: input.channel,
     mode: parse_room_mode(row.mode),
   }
@@ -378,6 +379,11 @@ async function insert_direct_room_row(
 
   const now = new Date().toISOString()
 
+  await uuid_payload_check({
+    visitor_uuid: input.visitor_uuid ?? null,
+    user_uuid: input.user_uuid ?? null,
+  })
+
   const room_result = await supabase
     .from('rooms')
     .insert({
@@ -427,6 +433,7 @@ async function insert_direct_room_row(
 
 async function touch_room_row(room_uuid: string) {
   const now = new Date().toISOString()
+  await uuid_payload_check({ room_uuid })
   const room_result = await supabase
     .from('rooms')
     .update({
@@ -455,6 +462,12 @@ async function update_user_participant_identity(input: {
     ...(input.visitor_uuid ? { visitor_uuid: input.visitor_uuid } : {}),
     ...(input.room_uuid ? { room_uuid: input.room_uuid } : {}),
   }
+  await uuid_payload_check({
+    visitor_uuid: input.visitor_uuid ?? null,
+    user_uuid: input.user_uuid,
+    room_uuid: input.room_uuid ?? null,
+    participant_uuid: input.participant_uuid,
+  })
   const result = await supabase
     .from('participants')
     .update(update)
@@ -481,6 +494,13 @@ async function move_room_messages(input: {
     return 0
   }
 
+  await uuid_payload_check({
+    room_uuid: input.from_room_uuid,
+  })
+  await uuid_payload_check({
+    room_uuid: input.to_room_uuid,
+  })
+
   const result = await supabase
     .from('messages')
     .update({
@@ -504,6 +524,13 @@ async function move_participants_to_room(input: {
     return
   }
 
+  await uuid_payload_check({
+    room_uuid: input.from_room_uuid,
+  })
+  await uuid_payload_check({
+    room_uuid: input.to_room_uuid,
+  })
+
   const result = await supabase
     .from('participants')
     .update({
@@ -518,6 +545,7 @@ async function move_participants_to_room(input: {
 }
 
 async function close_duplicate_room(room_uuid: string) {
+  await uuid_payload_check({ room_uuid })
   const result = await supabase
     .from('rooms')
     .update({
@@ -653,6 +681,12 @@ async function try_insert_participant_and_direct_room(
   const room = room_result.room
   const now = new Date().toISOString()
 
+  await uuid_payload_check({
+    visitor_uuid: input.visitor_uuid ?? null,
+    user_uuid: input.user_uuid ?? null,
+    room_uuid: room.room_uuid,
+  })
+
   const participant_result = await supabase
     .from('participants')
     .insert(build_user_participant_insert_row(input, room.room_uuid, now))
@@ -694,6 +728,13 @@ async function touch_direct_participant_and_room(
 ) {
   const now = new Date().toISOString()
 
+  await uuid_payload_check({
+    visitor_uuid: input.visitor_uuid ?? null,
+    user_uuid: input.user_uuid ?? null,
+    room_uuid: room.room_uuid,
+    participant_uuid: participant.participant_uuid,
+  })
+
   const participant_result = await supabase
     .from('participants')
     .update(build_user_participant_touch_update(input, now))
@@ -709,6 +750,7 @@ async function touch_direct_participant_and_room(
     throw new Error('touch_direct_participant: update returned no row')
   }
 
+  await uuid_payload_check({ room_uuid: room.room_uuid })
   const room_result = await supabase
     .from('rooms')
     .update({
@@ -778,6 +820,13 @@ async function assign_participant_to_direct_room(
     participant_update = participant_update.is('room_uuid', null)
   }
 
+  await uuid_payload_check({
+    visitor_uuid: input.visitor_uuid ?? null,
+    user_uuid: input.user_uuid ?? null,
+    room_uuid: new_room.room_uuid,
+    participant_uuid: participant.participant_uuid,
+  })
+
   const participant_result = await participant_update
     .select(PARTICIPANT_DB_SELECT)
     .maybeSingle()
@@ -843,6 +892,7 @@ async function find_bot_participant(room_uuid: string) {
 }
 
 async function create_bot_participant(room_uuid: string) {
+  await uuid_payload_check({ room_uuid })
   const result = await supabase
     .from('participants')
     .insert(build_bot_participant_insert_row(room_uuid))
