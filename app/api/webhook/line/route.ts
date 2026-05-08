@@ -185,22 +185,96 @@ export async function POST(request: Request) {
     },
   })
 
-  for (const event of events) {
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index]
+    const line_user_id = event.source?.userId
+
+    await forced_debug_event({
+      category: 'line_webhook',
+      event: 'line_webhook_event_seen',
+      payload: {
+        index,
+        type: event.type ?? null,
+        message_type: event.message?.type ?? null,
+        source_type: event.source?.type ?? null,
+        user_id: line_user_id ?? null,
+        has_reply_token: Boolean(event.replyToken),
+      },
+    })
+
     if (event.deliveryContext?.isRedelivery === true) {
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_webhook_event_skipped',
+        payload: {
+          index,
+          reason: 'redelivery',
+          type: event.type ?? null,
+          message_type: event.message?.type ?? null,
+        },
+      })
       continue
     }
 
-    const line_user_id = event.source?.userId
-
     if (event.type !== 'message') {
-      const event_key = get_line_event_key(event)
-
-      if (processed_line_event_keys.has(event_key)) {
-        continue
-      }
-
-      processed_line_event_keys.add(event_key)
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_webhook_event_skipped',
+        payload: {
+          index,
+          reason: 'not_message_event',
+          type: event.type ?? null,
+          message_type: event.message?.type ?? null,
+        },
+      })
+      continue
     }
+
+    if (event.message?.type !== 'text') {
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_webhook_event_skipped',
+        payload: {
+          index,
+          reason: 'not_text_message',
+          type: event.type ?? null,
+          message_type: event.message?.type ?? null,
+        },
+      })
+      continue
+    }
+
+    if (!event.message.id || typeof event.message.text !== 'string') {
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_webhook_event_skipped',
+        payload: {
+          index,
+          reason: 'invalid_text_message',
+          type: event.type ?? null,
+          message_type: event.message?.type ?? null,
+        },
+      })
+      continue
+    }
+
+    const event_key = get_line_event_key(event)
+
+    if (processed_line_event_keys.has(event_key)) {
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_webhook_event_skipped',
+        payload: {
+          index,
+          reason: 'duplicate_event',
+          type: event.type ?? null,
+          message_type: event.message?.type ?? null,
+        },
+      })
+      continue
+    }
+
+    processed_line_event_keys.add(event_key)
 
     try {
       await line_webhook_debug('webhook_reached', {
@@ -210,34 +284,47 @@ export async function POST(request: Request) {
         message_id: event.message?.id ?? null,
       })
 
-      if (event.type === 'message') {
-        await line_webhook_debug('message_received', {
+      await line_webhook_debug('message_received', {
+        line_user_id: line_user_id ?? null,
+        message_type: event.message.type,
+        message_id: event.message.id,
+      })
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_webhook_text_received',
+        payload: {
           line_user_id: line_user_id ?? null,
-          message_type: event.message?.type ?? null,
-          message_id: event.message?.id ?? null,
-        })
-      }
-      if (
-        event.type === 'message' &&
-        event.message?.type === 'text' &&
-        typeof event.message.text === 'string'
-      ) {
+          text: event.message.text,
+          reply_token_exists: Boolean(event.replyToken),
+          timestamp: event.timestamp ?? null,
+        },
+      })
+
+      if (!is_allowed_line_user(line_user_id)) {
         await forced_debug_event({
           category: 'line_webhook',
-          event: 'line_webhook_text_received',
+          event: 'line_webhook_event_skipped',
           payload: {
-            line_user_id: line_user_id ?? null,
-            text: event.message.text,
-            reply_token_exists: Boolean(event.replyToken),
-            timestamp: event.timestamp ?? null,
+            index,
+            reason: 'line_user_not_allowed',
+            type: event.type ?? null,
+            message_type: event.message?.type ?? null,
           },
         })
-      }
-      if (!is_allowed_line_user(line_user_id)) {
         continue
       }
 
       if (!line_user_id) {
+        await forced_debug_event({
+          category: 'line_webhook',
+          event: 'line_webhook_event_skipped',
+          payload: {
+            index,
+            reason: 'missing_line_user_id',
+            type: event.type ?? null,
+            message_type: event.message?.type ?? null,
+          },
+        })
         continue
       }
 
@@ -347,34 +434,35 @@ export async function POST(request: Request) {
         }
       }
 
-      const incoming_line_text =
-        event.type === 'message' &&
-        event.message?.type === 'text' &&
-        event.message.id &&
-        typeof event.message.text === 'string'
-          ? {
-              text: event.message.text,
-              line_message_id: event.message.id,
-              created_at: event.timestamp
-                ? new Date(event.timestamp).toISOString()
-                : new Date().toISOString(),
-              webhook_event_id: event.webhookEventId ?? null,
-              delivery_context_redelivery:
-                event.deliveryContext?.isRedelivery ?? null,
-            }
-          : null
-
-      if (incoming_line_text) {
-        await forced_debug_event({
-          category: 'line_webhook',
-          event: 'line_dispatch_started',
-          payload: {
-            source_channel: 'line',
-            line_user_id,
-            text: incoming_line_text.text,
-          },
-        })
+      const incoming_line_text = {
+        text: event.message.text,
+        line_message_id: event.message.id,
+        created_at: event.timestamp
+          ? new Date(event.timestamp).toISOString()
+          : new Date().toISOString(),
+        webhook_event_id: event.webhookEventId ?? null,
+        delivery_context_redelivery:
+          event.deliveryContext?.isRedelivery ?? null,
       }
+
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_dispatch_started',
+        payload: {
+          source_channel: 'line',
+          line_user_id,
+          text: incoming_line_text.text,
+        },
+      })
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_dispatch_context_started',
+        payload: {
+          source_channel: 'line',
+          line_user_id,
+          text: incoming_line_text.text,
+        },
+      })
 
       const resolved_locale = await resolve_dispatch_locale({
         source_channel: 'line',
