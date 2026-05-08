@@ -9,8 +9,8 @@ import {
 } from '@/lib/auth/session'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { supabase } from '@/lib/db/supabase'
-import { clean_uuid, uuid_payload_check } from '@/lib/db/uuid_payload'
-import { debug_event, forced_debug_event } from '@/lib/debug'
+import { clean_uuid } from '@/lib/db/uuid_payload'
+import { debug_event } from '@/lib/debug'
 import {
   archive_incoming_line_text,
   archive_message_bundles,
@@ -105,15 +105,11 @@ async function chat_action_log(
   event: string,
   payload: Record<string, unknown>,
 ) {
-  console.log('[chat_action]', event, payload)
-  try {
-    await forced_debug_event({
-      category: 'line_webhook',
-      event,
-      payload,
-    })
-  } catch {
-    /* never block chat action */
+  if (
+    event.endsWith('_failed') ||
+    String(payload.reason ?? '').includes('failed')
+  ) {
+    console.error('[chat_action_failed]', event, payload)
   }
 }
 
@@ -311,16 +307,6 @@ export async function resolve_initial_chat(
     user_uuid: clean_uuid(raw_input.user_uuid),
   }
 
-  await chat_action_log('chat_action_entered', {
-    channel: input.channel,
-    locale: input.locale,
-    visitor_uuid: input.visitor_uuid,
-    user_uuid: input.user_uuid ?? null,
-    line_user_id: input.line_user_id ?? null,
-    has_reply_token: Boolean(input.line_reply_token),
-    incoming_text: input.incoming_line_text?.text ?? null,
-  })
-
   try {
     const room_result = await resolve_chat_room({
       visitor_uuid: input.visitor_uuid,
@@ -347,21 +333,6 @@ export async function resolve_initial_chat(
       })
 
       return fallback
-    }
-
-    if (input.channel === 'line' && input.incoming_line_text) {
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_dispatch_context_resolved',
-        payload: {
-          visitor_uuid: room_result.room.visitor_uuid,
-          user_uuid: room_result.room.user_uuid,
-          participant_uuid: room_result.room.participant_uuid,
-          room_uuid: room_result.room.room_uuid,
-          locale: input.locale,
-          source_channel: room_result.room.channel,
-        },
-      })
     }
 
     let archived_messages: archived_message[]
@@ -415,17 +386,6 @@ export async function resolve_initial_chat(
           })
         : null
 
-    if (input.channel === 'line') {
-      await chat_action_log('chat_action_mode_detected', {
-        room_uuid: room_result.room.room_uuid,
-        normalized_text: normalized_line_text,
-        switch_mode: line_switch_mode,
-        current_mode: room_result.room.mode,
-        should_seed,
-        has_reply_token: Boolean(input.line_reply_token),
-      })
-    }
-
     if (
       input.channel === 'line' &&
       input.line_reply_token &&
@@ -446,16 +406,7 @@ export async function resolve_initial_chat(
         locale: input.locale,
       })
 
-      const reply_started_at = Date.now()
-      await chat_action_log('line_reply_started', {
-        room_uuid: room_result.room.room_uuid,
-        line_user_id: input.line_user_id,
-        switch_mode: line_switch_mode,
-        confirmation_text,
-      })
-
       let reply_status: number | null = null
-      let reply_error: unknown = null
 
       try {
         reply_status = await deliver_line_text_reply({
@@ -463,18 +414,13 @@ export async function resolve_initial_chat(
           text: confirmation_text,
         })
       } catch (error) {
-        reply_error = error
+        console.error('[line_reply_failed]', {
+          room_uuid: room_result.room.room_uuid,
+          line_user_id: input.line_user_id,
+          switch_mode: line_switch_mode,
+          error: serialize_error(error),
+        })
       }
-
-      await chat_action_log('line_reply_completed', {
-        room_uuid: room_result.room.room_uuid,
-        line_user_id: input.line_user_id,
-        switch_mode: line_switch_mode,
-        reply_status,
-        duration_ms: Date.now() - reply_started_at,
-        ok: reply_error === null,
-        error: reply_error ? serialize_error(reply_error) : null,
-      })
 
       const post_reply_input = {
         room: room_result.room,
@@ -561,19 +507,6 @@ export async function resolve_initial_chat(
           bundles: ack_bundles,
         })
 
-        await chat_action_log('chat_action_archive_completed', {
-          reason: 'line_followup_ack',
-          room_uuid: room_result.room.room_uuid,
-          archive_count: outgoing.length,
-        })
-
-        await chat_action_log('chat_action_output_started', {
-          reason: 'line_followup_ack',
-          room_uuid: room_result.room.room_uuid,
-          channel: 'line',
-          message_count: outgoing.length,
-        })
-
         await output_chat_bundles({
           room: room_result.room,
           channel: 'line',
@@ -611,14 +544,9 @@ export async function resolve_initial_chat(
         await archive_input_line_text_for_room({
           room: room_result.room,
           locale: input.locale,
-          line_user_id: input.line_user_id,
-          incoming_line_text: input.incoming_line_text,
-        })
-
-        await chat_action_log('chat_action_archive_completed', {
-          reason: 'line_incoming_archive_only',
-          room_uuid: room_result.room.room_uuid,
-        })
+              line_user_id: input.line_user_id,
+              incoming_line_text: input.incoming_line_text,
+            })
       }
 
       const messages = await load_archived_messages(
@@ -704,19 +632,6 @@ export async function resolve_initial_chat(
         bot_participant_uuid: room_result.room.bot_participant_uuid,
         channel: input.channel,
         bundles,
-      })
-
-      await chat_action_log('chat_action_archive_completed', {
-        reason: 'seed_initial_bundles',
-        room_uuid: room_result.room.room_uuid,
-        archive_count: seeded_messages.length,
-      })
-
-      await chat_action_log('chat_action_output_started', {
-        reason: 'seed_initial_bundles',
-        room_uuid: room_result.room.room_uuid,
-        channel: input.channel,
-        message_count: seeded_messages.length,
       })
 
       await output_chat_bundles({
@@ -1138,14 +1053,6 @@ async function notify_room_mode_switch(input: {
     if (!next_action_id || next_action_id === previous_action_id) {
       return
     }
-
-    await uuid_payload_check({
-      room_uuid: input.room_uuid,
-      participant_uuid: input.participant_uuid,
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
-    })
-
     const result = await supabase
       .from('rooms')
       .update({
@@ -1200,14 +1107,8 @@ async function run_post_reply_switch_mode(
 ): Promise<void> {
   const started_at = Date.now()
 
-  await chat_action_log('post_reply_action_started', {
-    room_uuid: input.room.room_uuid,
-    line_user_id: input.line_user_id,
-    switch_mode: input.switch_mode,
-  })
-
   try {
-    const result = await execute_room_mode_switch({
+    await execute_room_mode_switch({
       room: input.room,
       locale: input.locale,
       incoming_bundle: input.incoming_bundle,
@@ -1224,14 +1125,6 @@ async function run_post_reply_switch_mode(
       skip_output: true,
     })
 
-    await chat_action_log('post_reply_action_completed', {
-      room_uuid: input.room.room_uuid,
-      line_user_id: input.line_user_id,
-      switch_mode: input.switch_mode,
-      ok: result.ok,
-      message_count: result.ok ? result.messages.length : 0,
-      duration_ms: Date.now() - started_at,
-    })
   } catch (error) {
     await chat_action_log('post_reply_action_failed', {
       room_uuid: input.room.room_uuid,
@@ -1275,14 +1168,6 @@ async function execute_room_mode_switch(input: {
         : [],
     }
   }
-
-  await uuid_payload_check({
-    room_uuid: input.room.room_uuid,
-    participant_uuid: input.room.participant_uuid,
-    visitor_uuid: input.room.visitor_uuid,
-    user_uuid: input.room.user_uuid,
-  })
-
   const room_update = await supabase
     .from('rooms')
     .update({

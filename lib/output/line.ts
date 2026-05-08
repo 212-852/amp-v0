@@ -1,9 +1,7 @@
 import 'server-only'
 
 import type { archived_message } from '@/lib/chat/archive'
-import { control } from '@/lib/config/control'
 import { env } from '@/lib/config/env'
-import { debug_event, forced_debug_event } from '@/lib/debug'
 import type { message_bundle } from '@/lib/chat/message'
 import type { chat_room } from '@/lib/chat/room'
 
@@ -238,34 +236,10 @@ export async function deliver_line_chat_bundles(
   const reply_token = input.line_reply_token
 
   if (!reply_token?.trim()) {
-    if (control.debug.line_webhook) {
-      await debug_event({
-        category: 'line_webhook',
-        event: 'line_reply_skipped',
-        payload: {
-          reason: 'no_reply_token',
-          room_uuid: input.room.room_uuid,
-          line_user_id: input.line_user_id ?? null,
-        },
-      })
-    }
-
     return
   }
 
   if (input.messages.length === 0) {
-    if (control.debug.line_webhook) {
-      await debug_event({
-        category: 'line_webhook',
-        event: 'line_reply_skipped',
-        payload: {
-          reason: 'no_messages',
-          room_uuid: input.room.room_uuid,
-          line_user_id: input.line_user_id ?? null,
-        },
-      })
-    }
-
     return
   }
 
@@ -279,7 +253,6 @@ export async function deliver_line_chat_bundles(
   }
 
   let line_messages: line_api_message[]
-  let flex_bubble_count = 0
 
   try {
     const built = build_seed_carousel_line_messages({
@@ -287,7 +260,6 @@ export async function deliver_line_chat_bundles(
       absolute_url: to_absolute_asset_url,
     })
     line_messages = built.messages
-    flex_bubble_count = built.flex_bubble_count
   } catch (flex_error) {
     console.error(
       '[line_flex_render_failed]',
@@ -296,86 +268,15 @@ export async function deliver_line_chat_bundles(
     )
 
     line_messages = build_flex_failure_text_fallback(bundles)
-    flex_bubble_count = 0
   }
 
   const line_message_count = line_messages.length
 
-  if (control.debug.line_webhook) {
-    await debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_attempted',
-      payload: {
-        ...line_trace_base,
-        bundle_count,
-        line_message_count,
-        flex_bubble_count,
-      },
-    })
-    await debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_started',
-      payload: {
-        ...line_trace_base,
-        bundle_count,
-        line_message_count,
-        flex_bubble_count,
-      },
-    })
-  }
-
   try {
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_started',
-      payload: {
-        reply_token_exists: Boolean(reply_token),
-        message_count: line_message_count,
-      },
-    })
-
-    const reply_status = await post_line_reply_messages({
+    await post_line_reply_messages({
       reply_token,
       messages: line_messages,
     })
-
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_completed',
-      payload: {
-        ok: true,
-        status: reply_status,
-      },
-    })
-
-    if (control.debug.line_webhook) {
-      await debug_event({
-        category: 'line_webhook',
-        event: 'line_reply_succeeded',
-        payload: {
-          ...line_trace_base,
-          bundle_count,
-          line_message_count,
-          line_reply_message_count: line_message_count,
-          flex_bubble_count,
-          line_flex_bubble_count: flex_bubble_count,
-        },
-      })
-    }
-    if (control.debug.line_webhook) {
-      await debug_event({
-        category: 'line_webhook',
-        event: 'line_reply_completed',
-        payload: {
-          ...line_trace_base,
-          bundle_count,
-          line_message_count,
-          line_reply_message_count: line_message_count,
-          flex_bubble_count,
-          line_flex_bubble_count: flex_bubble_count,
-        },
-      })
-    }
   } catch (reply_error) {
     const err = reply_error as line_reply_error
 
@@ -386,31 +287,5 @@ export async function deliver_line_chat_bundles(
       bundle_count,
       line_message_count,
     })
-
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_completed',
-      payload: {
-        ok: false,
-        status: err.line_status ?? null,
-      },
-    })
-
-    if (control.debug.line_webhook) {
-      await debug_event({
-        category: 'line_webhook',
-        event: 'line_reply_failed',
-        payload: {
-          ...line_trace_base,
-          bundle_count,
-          line_message_count,
-          error: serialize_error(reply_error),
-          error_message:
-            reply_error instanceof Error ? reply_error.message : null,
-          line_status: err.line_status ?? null,
-          line_body_preview: err.line_body ?? null,
-        },
-      })
-    }
   }
 }

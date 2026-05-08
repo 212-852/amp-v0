@@ -1,7 +1,6 @@
 import { cache } from 'react'
 
 import { control } from '@/lib/config/control'
-import { uuid_payload_check } from '@/lib/db/uuid_payload'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 
@@ -393,11 +392,6 @@ async function attach_preferred_visitor(input: {
   visitor_uuid: string
   user_uuid: string
 }) {
-  await uuid_payload_check({
-    visitor_uuid: input.visitor_uuid,
-    user_uuid: input.user_uuid,
-  })
-
   const updated = await input.supabase
     .from('visitors')
     .update({
@@ -415,12 +409,6 @@ async function attach_preferred_visitor(input: {
   if (updated.error && !is_unique_violation(updated.error)) {
     throw updated.error
   }
-
-  await uuid_payload_check({
-    visitor_uuid: input.visitor_uuid,
-    user_uuid: input.user_uuid,
-  })
-
   const created = await input.supabase
     .from('visitors')
     .insert({
@@ -678,9 +666,6 @@ async function ensure_browser_visitor(input: {
     error_code: null,
     error_message: null,
   })
-
-  await uuid_payload_check({ visitor_uuid: input.visitor_uuid })
-
   const created_visitor = await input.supabase
     .from('visitors')
     .insert({

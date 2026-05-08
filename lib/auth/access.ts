@@ -3,7 +3,7 @@ import 'server-only'
 import { control } from '@/lib/config/control'
 import { resolve_user_visitor } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
-import { clean_uuid, uuid_payload_check } from '@/lib/db/uuid_payload'
+import { clean_uuid } from '@/lib/db/uuid_payload'
 import { normalize_locale } from '@/lib/locale/action'
 import { debug_event } from '@/lib/debug'
 
@@ -94,7 +94,6 @@ export async function resolve_auth_access(
 
   if (existing_identity.data?.user_uuid) {
     const user_uuid = existing_identity.data.user_uuid
-    await uuid_payload_check({ user_uuid })
     const user_result = await supabase
       .from('users')
       .select('locale')
@@ -223,9 +222,6 @@ export async function resolve_auth_access(
 
     throw error
   }
-
-  await uuid_payload_check({ user_uuid })
-
   const created_identity = await supabase
     .from('identities')
     .insert({

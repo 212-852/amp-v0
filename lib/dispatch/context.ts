@@ -2,7 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { resolve_chat_room } from '@/lib/chat/room'
-import { debug_event, forced_debug_event } from '@/lib/debug'
+import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid_payload'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
@@ -26,51 +26,16 @@ export function normalize_dispatch_text(value: string | null | undefined) {
   return value?.trim().replace(/\s+/g, ' ') ?? ''
 }
 
-async function debug_line(
-  event: string,
-  payload: Record<string, unknown>,
-) {
-  await forced_debug_event({
-    category: 'line_webhook',
-    event,
-    payload,
-  })
-}
-
 export async function resolve_line_dispatch_identity(input: {
   line_user_id: string
-  text?: string | null
 }) {
   try {
-    await debug_line('line_identity_resolve_started', {
-      line_user_id: input.line_user_id,
-    })
-
     const { data: identity, error: identity_error } = await supabase
       .from('identities')
       .select('*')
       .eq('provider', 'line')
       .eq('provider_id', input.line_user_id)
       .maybeSingle()
-
-    await debug_line('line_identity_resolve_completed', {
-      line_user_id: input.line_user_id,
-      identity_found: Boolean(identity),
-      identity_error_code: identity_error?.code ?? null,
-      identity_error_message: identity_error?.message ?? null,
-      user_uuid:
-        identity &&
-        typeof identity === 'object' &&
-        'user_uuid' in identity
-          ? identity.user_uuid ?? null
-          : null,
-      visitor_uuid:
-        identity &&
-        typeof identity === 'object' &&
-        'visitor_uuid' in identity
-          ? identity.visitor_uuid ?? null
-          : null,
-    })
 
     if (identity_error) {
       throw identity_error
@@ -89,12 +54,6 @@ export async function resolve_line_dispatch_identity(input: {
         ? clean_uuid(identity.visitor_uuid)
         : null
 
-    await debug_line('line_room_resolve_started', {
-      user_uuid,
-      visitor_uuid,
-      source_channel: 'line',
-    })
-
     let resolved_room: Awaited<ReturnType<typeof resolve_chat_room>> | null =
       null
 
@@ -107,22 +66,8 @@ export async function resolve_line_dispatch_identity(input: {
         })
         resolved_room = room_result
 
-        await debug_line('line_room_resolve_completed', {
-          room_uuid: room_result.room.room_uuid || null,
-          participant_uuid: room_result.room.participant_uuid || null,
-          room_ok: room_result.ok && Boolean(room_result.room.room_uuid),
-          participant_ok:
-            room_result.ok && Boolean(room_result.room.participant_uuid),
-        })
-
-        await debug_line('line_chat_action_started', {
-          room_uuid: room_result.room.room_uuid || null,
-          participant_uuid: room_result.room.participant_uuid || null,
-          text: input.text ?? null,
-        })
-
         if (!room_result.ok) {
-          await debug_line('line_room_resolve_failed', {
+          console.error('[line_room_resolve_failed]', {
             user_uuid,
             visitor_uuid,
             error_message: 'resolve_chat_room returned ok false',
@@ -130,7 +75,7 @@ export async function resolve_line_dispatch_identity(input: {
           })
         }
       } catch (room_error) {
-        await debug_line('line_room_resolve_failed', {
+        console.error('[line_room_resolve_failed]', {
           user_uuid,
           visitor_uuid,
           error_message:
@@ -148,17 +93,11 @@ export async function resolve_line_dispatch_identity(input: {
         throw room_error
       }
     } else {
-      await debug_line('line_room_resolve_failed', {
+      console.error('[line_room_resolve_failed]', {
         user_uuid,
         visitor_uuid,
         error_message: 'line identity has no user_uuid or visitor_uuid',
         error_code: 'identity_missing_room_key',
-      })
-    }
-
-    if (!identity) {
-      await debug_line('line_identity_missing', {
-        line_user_id: input.line_user_id,
       })
     }
 
@@ -170,7 +109,7 @@ export async function resolve_line_dispatch_identity(input: {
       error: null,
     }
   } catch (error) {
-    await debug_line('line_dispatch_context_failed', {
+    console.error('[line_dispatch_context_failed]', {
       line_user_id: input.line_user_id,
       error_message:
         error instanceof Error ? error.message : String(error),

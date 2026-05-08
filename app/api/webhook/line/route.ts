@@ -3,13 +3,11 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
-import { control } from '@/lib/config/control'
 import { clean_uuid } from '@/lib/db/uuid_payload'
 import {
   resolve_dispatch_locale,
   resolve_line_dispatch_identity,
 } from '@/lib/dispatch/context'
-import { debug_event, forced_debug_event } from '@/lib/debug'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
 import { notify_new_user_created } from '@/lib/notify/new_user_created'
 import { deliver_line_text_reply } from '@/lib/output/line'
@@ -43,21 +41,6 @@ type line_webhook_body = {
 }
 
 const processed_line_event_keys = new Set<string>()
-
-async function line_webhook_debug(
-  event: string,
-  payload: Record<string, unknown>,
-) {
-  if (!control.debug.line_webhook) {
-    return
-  }
-
-  await debug_event({
-    category: 'line_webhook',
-    event,
-    payload,
-  })
-}
 
 function verify_line_signature(body: string, signature: string | null) {
   const channel_secret = process.env.LINE_MESSAGING_CHANNEL_SECRET
@@ -123,70 +106,25 @@ async function reply_line_webhook_error(input: {
   reply_token?: string | null
 }) {
   try {
-    const status = await deliver_line_text_reply({
+    await deliver_line_text_reply({
       reply_token: input.reply_token,
-      text: 'LINEチャットの準備中にエラーが発生しました。時間をおいてもう一度お試しください。',
-    })
-
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_completed',
-      payload: {
-        ok: Boolean(status),
-        status: status ?? null,
-      },
+      text: 'LINE chat is temporarily unavailable. Please try again later.',
     })
   } catch (reply_error) {
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_reply_completed',
-      payload: {
-        ok: false,
-        status:
-          reply_error &&
-          typeof reply_error === 'object' &&
-          'line_status' in reply_error
-            ? reply_error.line_status ?? null
-            : null,
-        error: serialize_error(reply_error),
-      },
+    console.error('[line_reply_failed]', {
+      error: serialize_error(reply_error),
     })
   }
 }
 
 export async function POST(request: Request) {
   const signature = request.headers.get('x-line-signature')
-  const content_length = request.headers.get('content-length')
-
-  await forced_debug_event({
-    category: 'line_webhook',
-    event: 'line_webhook_entered',
-    payload: {
-      method: request.method,
-      has_signature: Boolean(signature),
-      content_length,
-    },
-  })
-
   const body_text = await request.text()
 
-  await forced_debug_event({
-    category: 'line_webhook',
-    event: 'line_webhook_body_received',
-    payload: {
-      body_length: body_text.length,
-      body_preview: body_text.slice(0, 500),
-    },
-  })
-
   if (!verify_line_signature(body_text, signature)) {
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_webhook_signature_failed',
-      payload: {
-        ok: false,
-        error: signature ? 'invalid_signature' : 'missing_signature',
-      },
+    console.error('[line_webhook_signature_failed]', {
+      ok: false,
+      error: signature ? 'invalid_signature' : 'missing_signature',
     })
 
     return NextResponse.json(
@@ -194,14 +132,6 @@ export async function POST(request: Request) {
       { status: 401 },
     )
   }
-
-  await forced_debug_event({
-    category: 'line_webhook',
-    event: 'line_webhook_signature_verified',
-    payload: {
-      ok: true,
-    },
-  })
 
   let body: line_webhook_body
 
@@ -216,155 +146,39 @@ export async function POST(request: Request) {
 
   const events = body.events ?? []
 
-  await forced_debug_event({
-    category: 'line_webhook',
-    event: 'line_webhook_events_parsed',
-    payload: {
-      event_count: events.length,
-      event_types: events.map((event) => event.type ?? null),
-    },
-  })
-
-  for (let index = 0; index < events.length; index++) {
-    const event = events[index]
+  for (const event of events) {
     const line_user_id = event.source?.userId
 
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_webhook_event_seen',
-      payload: {
-        index,
-        type: event.type ?? null,
-        message_type: event.message?.type ?? null,
-        source_type: event.source?.type ?? null,
-        user_id: line_user_id ?? null,
-        has_reply_token: Boolean(event.replyToken),
-      },
-    })
-
     if (event.deliveryContext?.isRedelivery === true) {
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_webhook_event_skipped',
-        payload: {
-          index,
-          reason: 'redelivery',
-          type: event.type ?? null,
-          message_type: event.message?.type ?? null,
-        },
-      })
       continue
     }
 
     if (event.type !== 'message') {
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_webhook_event_skipped',
-        payload: {
-          index,
-          reason: 'not_message_event',
-          type: event.type ?? null,
-          message_type: event.message?.type ?? null,
-        },
-      })
       continue
     }
 
     if (event.message?.type !== 'text') {
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_webhook_event_skipped',
-        payload: {
-          index,
-          reason: 'not_text_message',
-          type: event.type ?? null,
-          message_type: event.message?.type ?? null,
-        },
-      })
       continue
     }
 
     if (!event.message.id || typeof event.message.text !== 'string') {
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_webhook_event_skipped',
-        payload: {
-          index,
-          reason: 'invalid_text_message',
-          type: event.type ?? null,
-          message_type: event.message?.type ?? null,
-        },
-      })
       continue
     }
 
     const event_key = get_line_event_key(event)
 
     if (processed_line_event_keys.has(event_key)) {
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_webhook_event_skipped',
-        payload: {
-          index,
-          reason: 'duplicate_event',
-          type: event.type ?? null,
-          message_type: event.message?.type ?? null,
-        },
-      })
       continue
     }
 
     processed_line_event_keys.add(event_key)
 
     try {
-      await line_webhook_debug('webhook_reached', {
-        event_type: event.type ?? null,
-        line_user_id: line_user_id ?? null,
-        has_reply_token: Boolean(event.replyToken),
-        message_id: event.message?.id ?? null,
-      })
-
-      await line_webhook_debug('message_received', {
-        line_user_id: line_user_id ?? null,
-        message_type: event.message.type,
-        message_id: event.message.id,
-      })
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_webhook_text_received',
-        payload: {
-          line_user_id: line_user_id ?? null,
-          text: event.message.text,
-          reply_token_exists: Boolean(event.replyToken),
-          timestamp: event.timestamp ?? null,
-        },
-      })
-
       if (!is_allowed_line_user(line_user_id)) {
-        await forced_debug_event({
-          category: 'line_webhook',
-          event: 'line_webhook_event_skipped',
-          payload: {
-            index,
-            reason: 'line_user_not_allowed',
-            type: event.type ?? null,
-            message_type: event.message?.type ?? null,
-          },
-        })
         continue
       }
 
       if (!line_user_id) {
-        await forced_debug_event({
-          category: 'line_webhook',
-          event: 'line_webhook_event_skipped',
-          payload: {
-            index,
-            reason: 'missing_line_user_id',
-            type: event.type ?? null,
-            message_type: event.message?.type ?? null,
-          },
-        })
         continue
       }
 
@@ -379,28 +193,8 @@ export async function POST(request: Request) {
           event.deliveryContext?.isRedelivery ?? null,
       }
 
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_dispatch_started',
-        payload: {
-          source_channel: 'line',
-          line_user_id,
-          text: incoming_line_text.text,
-        },
-      })
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_dispatch_context_started',
-        payload: {
-          source_channel: 'line',
-          line_user_id,
-          text: incoming_line_text.text,
-        },
-      })
-
       const dispatch_context = await resolve_line_dispatch_identity({
         line_user_id,
-        text: incoming_line_text.text,
       })
 
       if (dispatch_context.user_uuid) {
@@ -427,21 +221,7 @@ export async function POST(request: Request) {
         continue
       }
 
-      await line_webhook_debug('line_profile_fetch_started', {
-        line_user_id,
-      })
-
       const msg_profile = await fetch_line_messaging_profile(line_user_id)
-
-      await line_webhook_debug('line_profile_fetch_completed', {
-        line_user_id,
-        ok: Boolean(msg_profile),
-        has_display_name: Boolean(msg_profile?.displayName),
-        has_picture_url: Boolean(msg_profile?.pictureUrl),
-        has_language: Boolean(msg_profile?.language),
-        has_status_message: Boolean(msg_profile?.statusMessage),
-      })
-
       const profile_locale = await resolve_dispatch_locale({
         source_channel: 'line',
         line_user_id,
@@ -449,24 +229,8 @@ export async function POST(request: Request) {
         webhook_source_locale:
           event.source?.locale ?? event.source?.language ?? null,
       })
-
       const line_display_name = msg_profile?.displayName?.trim() || null
       const line_image_url = msg_profile?.pictureUrl?.trim() || null
-
-      await line_webhook_debug('line_identity_lookup_completed', {
-        line_user_id,
-        locale: profile_locale.locale,
-        has_display_name: Boolean(line_display_name),
-        has_image_url: Boolean(line_image_url),
-      })
-
-      await line_webhook_debug('line_identity_create_started', {
-        line_user_id,
-        locale: profile_locale.locale,
-        has_display_name: Boolean(line_display_name),
-        has_image_url: Boolean(line_image_url),
-      })
-
       let access: Awaited<ReturnType<typeof resolve_auth_access>>
 
       try {
@@ -477,16 +241,8 @@ export async function POST(request: Request) {
           display_name: line_display_name,
           image_url: line_image_url,
         })
-
-        await line_webhook_debug('line_identity_create_completed', {
-          line_user_id,
-          user_uuid: access.user_uuid,
-          visitor_uuid: access.visitor_uuid,
-          is_new_user: access.is_new_user,
-          is_new_visitor: access.is_new_visitor,
-        })
       } catch (identity_error) {
-        await line_webhook_debug('line_identity_create_failed', {
+        console.error('[line_identity_create_failed]', {
           line_user_id,
           locale: profile_locale.locale,
           error: serialize_error(identity_error),
@@ -496,18 +252,6 @@ export async function POST(request: Request) {
       }
 
       if (access.is_new_user) {
-        await line_webhook_debug('line_identity_created', {
-          line_user_id,
-          user_uuid: access.user_uuid,
-          visitor_uuid: access.visitor_uuid,
-        })
-
-        await line_webhook_debug('new_user_notify_started', {
-          line_user_id,
-          user_uuid: access.user_uuid,
-          visitor_uuid: access.visitor_uuid,
-        })
-
         try {
           await notify_new_user_created({
             provider: 'line',
@@ -518,13 +262,8 @@ export async function POST(request: Request) {
             is_new_user: access.is_new_user,
             is_new_visitor: access.is_new_visitor,
           })
-          await line_webhook_debug('new_user_notify_completed', {
-            line_user_id,
-            user_uuid: access.user_uuid,
-            visitor_uuid: access.visitor_uuid,
-          })
         } catch (notify_error) {
-          await line_webhook_debug('new_user_notify_failed', {
+          console.error('[new_user_notify_failed]', {
             line_user_id,
             user_uuid: access.user_uuid,
             visitor_uuid: access.visitor_uuid,
@@ -552,17 +291,13 @@ export async function POST(request: Request) {
         incoming_line_text,
       })
     } catch (error) {
-      if (
-        event.type === 'message' &&
-        event.message?.type === 'text' &&
-        event.replyToken
-      ) {
+      if (event.replyToken) {
         await reply_line_webhook_error({
           reply_token: event.replyToken,
         })
       }
 
-      await line_webhook_debug('webhook_handler_failed', {
+      console.error('[line_webhook_handler_failed]', {
         line_user_id: line_user_id ?? null,
         event_type: event.type ?? null,
         message_id: event.message?.id ?? null,
