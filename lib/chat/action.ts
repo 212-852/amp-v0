@@ -795,6 +795,15 @@ async function notify_room_mode_switch(input: {
     if (result.error) {
       throw result.error
     }
+
+    console.log('[chat] discord_action_id_saved', {
+      room_uuid: input.room_uuid,
+      action_id: next_action_id,
+    })
+    await send_action_trace('discord_action_id_saved', {
+      room_uuid: input.room_uuid,
+      action_id: next_action_id,
+    })
   } catch (error) {
     console.error('[chat] notify_action_failed', {
       room_uuid: input.room_uuid,
