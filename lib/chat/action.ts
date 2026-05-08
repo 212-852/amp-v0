@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { after } from 'next/server'
 import { cookies, headers } from 'next/headers'
 
 import {
@@ -31,7 +32,9 @@ import {
   build_room_mode_notice_bundle,
   build_room_mode_switch_bundle,
   build_user_text_bundle,
+  pick_room_mode_notice_text,
 } from './message'
+import { deliver_line_text_reply } from '@/lib/output/line'
 import type { chat_locale } from './message'
 import { notify } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
@@ -435,63 +438,78 @@ export async function resolve_initial_chat(
         mode: line_switch_mode,
         locale: input.locale,
       })
+      const confirmation_text = pick_room_mode_notice_text({
+        notice:
+          line_switch_mode === 'concierge'
+            ? 'concierge_requested'
+            : 'resumed_bot',
+        locale: input.locale,
+      })
 
-      const result = await execute_room_mode_switch({
+      const reply_started_at = Date.now()
+      await chat_action_log('line_reply_started', {
+        room_uuid: room_result.room.room_uuid,
+        line_user_id: input.line_user_id,
+        switch_mode: line_switch_mode,
+        confirmation_text,
+      })
+
+      let reply_status: number | null = null
+      let reply_error: unknown = null
+
+      try {
+        reply_status = await deliver_line_text_reply({
+          reply_token: input.line_reply_token,
+          text: confirmation_text,
+        })
+      } catch (error) {
+        reply_error = error
+      }
+
+      await chat_action_log('line_reply_completed', {
+        room_uuid: room_result.room.room_uuid,
+        line_user_id: input.line_user_id,
+        switch_mode: line_switch_mode,
+        reply_status,
+        duration_ms: Date.now() - reply_started_at,
+        ok: reply_error === null,
+        error: reply_error ? serialize_error(reply_error) : null,
+      })
+
+      const post_reply_input = {
         room: room_result.room,
         locale: input.locale,
-        incoming_bundle,
-        archive_incoming: () =>
-          archive_input_line_text_for_room({
-            room: room_result.room,
-            locale: input.locale,
-            line_user_id: input.line_user_id,
-            incoming_line_text,
-            bundle: incoming_bundle,
-          }),
-        line_reply_token: input.line_reply_token,
         line_user_id: input.line_user_id,
-      })
+        switch_mode: line_switch_mode,
+        incoming_bundle,
+        incoming_line_text,
+      } as const
 
-      await chat_action_log('chat_action_archive_completed', {
-        reason: 'mode_switch',
-        room_uuid: room_result.room.room_uuid,
-        ok: result.ok,
-        message_count: result.ok ? result.messages.length : 0,
-      })
+      schedule_post_reply_switch_mode(post_reply_input)
 
-      const switched_room: chat_room = {
+      const optimistic_room: chat_room = {
         ...room_result.room,
-        mode: result.ok ? result.mode : room_result.room.mode,
+        mode: line_switch_mode,
       }
-      const final_messages = result.ok
-        ? result.messages
-        : await load_archived_messages(room_result.room.room_uuid)
 
-      await forced_debug_event({
-        category: 'line_webhook',
-        event: 'line_chat_action_completed',
-        payload: {
-          room_uuid: switched_room.room_uuid,
-          participant_uuid: switched_room.participant_uuid,
-          message_count: final_messages.length,
-          mode: switched_room.mode,
+      await emit_chat_action_completed({
+        reason: 'mode_switch_fast_reply',
+        room: optimistic_room,
+        channel: input.channel,
+        is_seeded: false,
+        message_count: 0,
+        extra: {
+          switch_mode: line_switch_mode,
+          reply_status,
+          deferred: true,
         },
       })
 
-      await emit_chat_action_completed({
-        reason: 'mode_switch',
-        room: switched_room,
-        channel: input.channel,
-        is_seeded: false,
-        message_count: final_messages.length,
-        extra: { switch_mode: line_switch_mode },
-      })
-
       return make_initial_chat_result({
-        room: switched_room,
+        room: optimistic_room,
         is_new_room: room_result.is_new_room,
         is_seeded: false,
-        messages: final_messages,
+        messages: [],
         locale: input.locale,
       })
     }
@@ -1154,6 +1172,77 @@ async function notify_room_mode_switch(input: {
   }
 }
 
+type post_reply_switch_mode_input = {
+  room: chat_room
+  locale: chat_locale
+  line_user_id: string
+  switch_mode: room_mode
+  incoming_bundle: ReturnType<typeof build_user_text_bundle>
+  incoming_line_text: NonNullable<
+    resolve_initial_chat_input['incoming_line_text']
+  >
+}
+
+function schedule_post_reply_switch_mode(
+  input: post_reply_switch_mode_input,
+): void {
+  try {
+    after(() => run_post_reply_switch_mode(input))
+  } catch {
+    void run_post_reply_switch_mode(input).catch(() => {
+      /* never crash request lifecycle */
+    })
+  }
+}
+
+async function run_post_reply_switch_mode(
+  input: post_reply_switch_mode_input,
+): Promise<void> {
+  const started_at = Date.now()
+
+  await chat_action_log('post_reply_action_started', {
+    room_uuid: input.room.room_uuid,
+    line_user_id: input.line_user_id,
+    switch_mode: input.switch_mode,
+  })
+
+  try {
+    const result = await execute_room_mode_switch({
+      room: input.room,
+      locale: input.locale,
+      incoming_bundle: input.incoming_bundle,
+      archive_incoming: () =>
+        archive_input_line_text_for_room({
+          room: input.room,
+          locale: input.locale,
+          line_user_id: input.line_user_id,
+          incoming_line_text: input.incoming_line_text,
+          bundle: input.incoming_bundle,
+        }),
+      line_reply_token: null,
+      line_user_id: input.line_user_id,
+      skip_output: true,
+    })
+
+    await chat_action_log('post_reply_action_completed', {
+      room_uuid: input.room.room_uuid,
+      line_user_id: input.line_user_id,
+      switch_mode: input.switch_mode,
+      ok: result.ok,
+      message_count: result.ok ? result.messages.length : 0,
+      duration_ms: Date.now() - started_at,
+    })
+  } catch (error) {
+    await chat_action_log('post_reply_action_failed', {
+      room_uuid: input.room.room_uuid,
+      line_user_id: input.line_user_id,
+      switch_mode: input.switch_mode,
+      error: serialize_error(error),
+      duration_ms: Date.now() - started_at,
+    })
+  }
+}
+
 async function execute_room_mode_switch(input: {
   room: chat_room
   locale: chat_locale
@@ -1164,6 +1253,7 @@ async function execute_room_mode_switch(input: {
   } | null>) | null
   line_reply_token?: string | null
   line_user_id?: string | null
+  skip_output?: boolean
 }): Promise<room_mode_switch_result> {
   const switch_action = resolve_chat_message_action(input.incoming_bundle)
 
@@ -1239,16 +1329,18 @@ async function execute_room_mode_switch(input: {
     ...outgoing_messages,
   ]
 
-  await output_chat_bundles({
-    room: chat_room_after_mode,
-    channel: chat_room_after_mode.channel,
-    messages:
-      chat_room_after_mode.channel === 'line'
-        ? outgoing_messages
-        : archived_messages,
-    line_reply_token: input.line_reply_token ?? null,
-    line_user_id: input.line_user_id ?? null,
-  })
+  if (!input.skip_output) {
+    await output_chat_bundles({
+      room: chat_room_after_mode,
+      channel: chat_room_after_mode.channel,
+      messages:
+        chat_room_after_mode.channel === 'line'
+          ? outgoing_messages
+          : archived_messages,
+      line_reply_token: input.line_reply_token ?? null,
+      line_user_id: input.line_user_id ?? null,
+    })
+  }
 
   await notify_room_mode_switch({
     room_uuid: chat_room_after_mode.room_uuid,

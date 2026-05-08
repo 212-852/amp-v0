@@ -620,6 +620,13 @@ const room_mode_notice: {
   },
 }
 
+export function pick_room_mode_notice_text(input: {
+  notice: 'concierge_requested' | 'resumed_bot'
+  locale: chat_locale
+}): string {
+  return pick_text(room_mode_notice[input.notice], input.locale)
+}
+
 export function build_room_mode_notice_bundle(input: {
   notice: 'concierge_requested' | 'resumed_bot'
   locale: chat_locale
