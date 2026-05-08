@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { control } from '@/lib/config/control'
+import { resolve_chat_room } from '@/lib/chat/room'
 import { debug_event, forced_debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
@@ -71,6 +72,78 @@ export async function resolve_line_dispatch_identity(input: {
 
     if (identity_error) {
       throw identity_error
+    }
+
+    const user_uuid =
+      identity &&
+      typeof identity === 'object' &&
+      'user_uuid' in identity &&
+      typeof identity.user_uuid === 'string'
+        ? identity.user_uuid
+        : null
+    const visitor_uuid =
+      identity &&
+      typeof identity === 'object' &&
+      'visitor_uuid' in identity &&
+      typeof identity.visitor_uuid === 'string'
+        ? identity.visitor_uuid
+        : null
+
+    await debug_line('line_room_resolve_started', {
+      user_uuid,
+      visitor_uuid,
+      source_channel: 'line',
+    })
+
+    if (user_uuid || visitor_uuid) {
+      try {
+        const room_result = await resolve_chat_room({
+          visitor_uuid,
+          user_uuid,
+          channel: 'line',
+        })
+
+        await debug_line('line_room_resolve_completed', {
+          room_uuid: room_result.room.room_uuid || null,
+          participant_uuid: room_result.room.participant_uuid || null,
+          room_ok: room_result.ok && Boolean(room_result.room.room_uuid),
+          participant_ok:
+            room_result.ok && Boolean(room_result.room.participant_uuid),
+        })
+
+        if (!room_result.ok) {
+          await debug_line('line_room_resolve_failed', {
+            user_uuid,
+            visitor_uuid,
+            error_message: 'resolve_chat_room returned ok false',
+            error_code: 'room_resolve_not_ok',
+          })
+        }
+      } catch (room_error) {
+        await debug_line('line_room_resolve_failed', {
+          user_uuid,
+          visitor_uuid,
+          error_message:
+            room_error instanceof Error
+              ? room_error.message
+              : String(room_error),
+          error_code:
+            room_error &&
+            typeof room_error === 'object' &&
+            'code' in room_error
+              ? room_error.code ?? null
+              : null,
+        })
+
+        throw room_error
+      }
+    } else {
+      await debug_line('line_room_resolve_failed', {
+        user_uuid,
+        visitor_uuid,
+        error_message: 'line identity has no user_uuid or visitor_uuid',
+        error_code: 'identity_missing_room_key',
+      })
     }
 
     if (!identity) {

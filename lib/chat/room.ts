@@ -41,7 +41,7 @@ export type resolve_chat_room_outcome =
     }
 
 type resolve_room_input = {
-  visitor_uuid: string
+  visitor_uuid: string | null
   user_uuid?: string | null
   channel: chat_channel
   external_room_id?: string | null
@@ -82,7 +82,7 @@ function fallback_chat_room(input: resolve_room_input): chat_room {
     participant_uuid: '',
     bot_participant_uuid: '',
     user_uuid: input.user_uuid ?? null,
-    visitor_uuid: input.visitor_uuid,
+    visitor_uuid: input.visitor_uuid ?? '',
     channel: input.channel,
     mode: 'bot',
   }
@@ -99,7 +99,7 @@ function normalize_room(
     participant_uuid: participant.participant_uuid,
     bot_participant_uuid: bot_participant.participant_uuid,
     user_uuid: input.user_uuid ?? participant.user_uuid ?? null,
-    visitor_uuid: input.visitor_uuid,
+    visitor_uuid: input.visitor_uuid ?? participant.visitor_uuid ?? '',
     channel: input.channel,
     mode: parse_room_mode(row.mode),
   }
@@ -290,6 +290,10 @@ async function find_canonical_user_participant(
     if (by_user) {
       return by_user
     }
+  }
+
+  if (!input.visitor_uuid) {
+    return null
   }
 
   return find_user_participant_by_visitor(input.visitor_uuid)
@@ -534,6 +538,10 @@ async function merge_identity_rooms(
 
   if (!user_uuid) {
     return null
+  }
+
+  if (!input.visitor_uuid) {
+    return find_user_participant_by_user(user_uuid)
   }
 
   const visitor_participant =
