@@ -47,8 +47,8 @@ import {
   type room_mode,
 } from './room'
 import {
+  detect_switch_mode,
   resolve_chat_message_action,
-  resolve_text_mode_switch,
   should_seed_initial_messages,
 } from './rules'
 import { output_chat_bundles } from '@/lib/output'
@@ -380,10 +380,7 @@ export async function resolve_initial_chat(
     )
     const line_switch_mode =
       input.channel === 'line' && normalized_line_text
-        ? resolve_text_mode_switch({
-            text: normalized_line_text,
-            locale: input.locale,
-          })
+        ? detect_switch_mode(normalized_line_text)
         : null
 
     if (
@@ -1489,10 +1486,7 @@ export async function handle_chat_message_request(
   }
 
   const locale = normalize_locale(body.locale) as chat_locale
-  const detected_switch_mode = resolve_text_mode_switch({
-    text: text_value,
-    locale,
-  })
+  const detected_switch_mode = detect_switch_mode(text_value)
 
   const initial_mode: room_mode = detected_switch_mode ?? 'bot'
 

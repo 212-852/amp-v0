@@ -77,68 +77,92 @@ export function resolve_chat_message_action(
   return { action: 'none' }
 }
 
-const text_mode_switch_words: Record<chat_locale, Record<room_mode, string[]>> = {
-  ja: {
-    concierge: [
-      'コンシェルジュ',
-      'コンシェルジュに切り替え',
-      '担当者',
-      '人に相談',
-    ],
-    bot: ['ボット', 'bot', 'BOT'],
-  },
-  en: {
-    concierge: [
-      'concierge',
-      'switch to concierge',
-      'human',
-      'agent',
-    ],
-    bot: ['bot', 'switch to bot'],
-  },
-  es: {
-    concierge: ['concierge', 'humano', 'agente'],
-    bot: ['bot'],
-  },
-}
-
-function normalize_trigger_text(value: string) {
-  return value.trim().replace(/\s+/g, ' ')
-}
-
-function trigger_matches(input: {
-  text: string
-  word: string
-  locale: chat_locale
-}) {
-  if (input.locale === 'ja') {
-    return input.text === input.word
-  }
-
-  return input.text.toLowerCase() === input.word.toLowerCase()
+/**
+ * Cross-locale switch-mode keyword list.
+ * Single source of truth for both LINE and Web chat triggers.
+ * Do not duplicate this in React components or UI layers.
+ */
+const switch_mode_words: Record<room_mode, string[]> = {
+  concierge: [
+    'concierge',
+    'コンシェルジュ',
+    '担当者',
+    '人に相談',
+    '人と話す',
+    'オペレーター',
+    '有人',
+  ],
+  bot: [
+    'bot',
+    'ボット',
+    'ぼっと',
+    '自動応答',
+    'ai',
+    'AI',
+  ],
 }
 
 /**
- * Channel-agnostic chat-text mode switch detector.
- * Used by both LINE webhook and Web chat input. Do not duplicate in UI.
+ * Short phrase patterns (matched after normalization) that imply a transition.
+ * Anchor each side so we do not accidentally match unrelated longer text.
  */
-export function resolve_text_mode_switch(input: {
-  text: string
-  locale: chat_locale
-}): room_mode | null {
-  const text = normalize_trigger_text(input.text)
-  const words = text_mode_switch_words[input.locale] ?? text_mode_switch_words.ja
+const switch_mode_phrases: Record<room_mode, RegExp[]> = {
+  concierge: [
+    /^コンシェルジュ(に切り替え(て)?|にする|に変更|に戻す|に切替|に変える|に繋いで|につないで)$/,
+    /^(担当者|オペレーター|有人)(に切り替え(て)?|にする|に変更|に繋いで|につないで|に相談)$/,
+    /^switch\s+to\s+concierge$/,
+  ],
+  bot: [
+    /^ボット(に切り替え(て)?|にする|に変更|に戻す|に切替|に変える)$/,
+    /^自動応答(に切り替え(て)?|にする|に変更|に戻す|に切替|に変える)$/,
+    /^switch\s+to\s+bot$/,
+  ],
+}
+
+/**
+ * Normalize incoming text so detection is locale-agnostic:
+ * - trim outer whitespace
+ * - convert full-width spaces / digits / katakana to normal width via NFKC
+ * - collapse whitespace runs to a single space
+ * - lowercase (Japanese is unaffected)
+ */
+function normalize_trigger_text(value: string): string {
+  return value
+    .normalize('NFKC')
+    .trim()
+    .replace(/[\u3000\s]+/g, ' ')
+    .toLowerCase()
+}
+
+const normalized_switch_mode_words: Record<room_mode, string[]> = {
+  concierge: switch_mode_words.concierge.map(normalize_trigger_text),
+  bot: switch_mode_words.bot.map(normalize_trigger_text),
+}
+
+/**
+ * Locale-agnostic switch-mode detector.
+ * Returns the target room_mode if the user message asks to switch,
+ * otherwise null. Used by chat/action.ts for both LINE and Web flows.
+ */
+export function detect_switch_mode(text: string): room_mode | null {
+  if (typeof text !== 'string' || text.length === 0) {
+    return null
+  }
+
+  const normalized = normalize_trigger_text(text)
+
+  if (normalized.length === 0) {
+    return null
+  }
 
   for (const mode of ['concierge', 'bot'] as const) {
-    if (
-      words[mode].some((word) =>
-        trigger_matches({
-          text,
-          word,
-          locale: input.locale,
-        }),
-      )
-    ) {
+    if (normalized_switch_mode_words[mode].includes(normalized)) {
+      return mode
+    }
+  }
+
+  for (const mode of ['concierge', 'bot'] as const) {
+    if (switch_mode_phrases[mode].some((pattern) => pattern.test(normalized))) {
       return mode
     }
   }
@@ -147,6 +171,19 @@ export function resolve_text_mode_switch(input: {
 }
 
 /**
- * @deprecated Use resolve_text_mode_switch (kept for backwards compatibility).
+ * Channel-agnostic chat-text mode switch detector.
+ * Locale parameter is accepted for API compatibility but no longer
+ * affects detection (all keywords are matched across languages).
+ */
+export function resolve_text_mode_switch(input: {
+  text: string
+  locale?: chat_locale
+}): room_mode | null {
+  void input.locale
+  return detect_switch_mode(input.text)
+}
+
+/**
+ * @deprecated Use detect_switch_mode (kept for backwards compatibility).
  */
 export const resolve_line_text_mode_switch = resolve_text_mode_switch
