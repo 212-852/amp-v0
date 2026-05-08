@@ -772,13 +772,43 @@ async function notify_room_mode_switch(input: {
         : null
 
     const discord_delivery = results.find(
-      (item) => item.channel === 'discord' && item.action_id,
+      (item) => item.channel === 'discord',
     )
     const next_action_id =
       typeof discord_delivery?.action_id === 'string' &&
       discord_delivery.action_id.trim().length > 0
         ? discord_delivery.action_id.trim()
         : null
+
+    if (
+      input.mode === 'bot' &&
+      previous_action_id &&
+      discord_delivery &&
+      !next_action_id
+    ) {
+      const result = await supabase
+        .from('rooms')
+        .update({
+          action_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('room_uuid', input.room_uuid)
+
+      if (result.error) {
+        throw result.error
+      }
+
+      console.log('[ACTION_TRACE] action_id_cleared', {
+        room_uuid: input.room_uuid,
+        previous_action_id,
+      })
+      await send_action_trace('action_id_cleared', {
+        room_uuid: input.room_uuid,
+        previous_action_id,
+      })
+
+      return
+    }
 
     if (!next_action_id || next_action_id === previous_action_id) {
       return

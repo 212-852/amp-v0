@@ -65,12 +65,14 @@ export async function sync_room_action_context(input: {
   title: string
   content: string
   action_id: string | null
+  close?: boolean
 }) {
   if (input.provider === 'discord') {
     return sync_discord_action_context({
       title: input.title,
       content: input.content,
       action_id: input.action_id,
+      close: input.close,
     })
   }
 

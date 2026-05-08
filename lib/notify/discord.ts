@@ -274,7 +274,7 @@ async function close_discord_action_thread(input: {
       thread_id: input.thread_id,
       action_id: input.action_id,
     })
-    return
+    return true
   }
 
   if (response && !response.ok) {
@@ -284,6 +284,8 @@ async function close_discord_action_thread(input: {
       await response.text(),
     )
   }
+
+  return false
 }
 
 async function update_discord_action_context(input: {
@@ -308,10 +310,18 @@ async function update_discord_action_context(input: {
   }
 
   if (input.close) {
-    await close_discord_action_thread({
+    const closed = await close_discord_action_thread({
       thread_id,
       action_id: input.action_id,
     })
+
+    if (!closed) {
+      return null
+    }
+
+    return {
+      action_id: null,
+    }
   }
 
   return {
@@ -322,6 +332,10 @@ async function update_discord_action_context(input: {
 export async function sync_discord_action_context(
   input: discord_action_context_input,
 ): Promise<discord_action_context_result | null> {
+  if (input.close && !input.action_id) {
+    return null
+  }
+
   if (input.action_id) {
     const updated = await update_discord_action_context({
       action_id: input.action_id,
@@ -453,7 +467,7 @@ export async function send_discord_notify(
 
     return {
       channel: 'discord',
-      action_id: result?.action_id ?? event.action_id,
+      action_id: result ? result.action_id : event.action_id,
     }
   }
 
@@ -469,7 +483,7 @@ export async function send_discord_notify(
 
     return {
       channel: 'discord',
-      action_id: result?.action_id ?? event.action_id,
+      action_id: result ? result.action_id : event.action_id,
     }
   }
 
