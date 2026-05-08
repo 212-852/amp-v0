@@ -380,14 +380,28 @@ function concierge_start_content(event: Extract<
   notify_event,
   { event: 'concierge_requested' }
 >) {
-  return [
+  const lines = [
     'Concierge requested',
     `room_uuid: ${event.room_uuid}`,
     `participant_uuid: ${event.participant_uuid}`,
     `visitor_uuid: ${event.visitor_uuid}`,
     `source_channel: ${event.source_channel}`,
     `mode: ${event.mode}`,
-  ].join('\n')
+  ]
+
+  if (typeof event.has_available_admin === 'boolean') {
+    if (event.has_available_admin) {
+      lines.push(
+        `available_admins: ${event.available_admin_count ?? 0}/${event.total_admin_count ?? 0}`,
+      )
+    } else {
+      lines.push(
+        '[FALLBACK] No available admin. Notifying owner/core only.',
+      )
+    }
+  }
+
+  return lines.join('\n')
 }
 
 function concierge_end_content(event: Extract<

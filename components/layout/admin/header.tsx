@@ -2,10 +2,11 @@ import Image from 'next/image'
 import {
   Bell,
   ChevronDown,
-  MessageCircle,
   Settings,
   UserRound,
 } from 'lucide-react'
+
+import AdminChatAvailabilityButton from './chat_availability_button'
 
 type AdminHeaderProps = {
   display_name: string | null
@@ -60,13 +61,7 @@ export default function AdminHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
-          <button
-            type="button"
-            className={icon_button_class}
-            aria-label="Chat"
-          >
-            <MessageCircle className="h-5 w-5" strokeWidth={2} />
-          </button>
+          <AdminChatAvailabilityButton />
           <button
             type="button"
             className={icon_button_class}

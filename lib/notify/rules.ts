@@ -29,6 +29,9 @@ export type notify_event =
       source_channel: string
       mode: 'concierge'
       action_id: string | null
+      available_admin_count?: number
+      total_admin_count?: number
+      has_available_admin?: boolean
     }
   | {
       event: 'concierge_closed'
@@ -50,11 +53,33 @@ export type notify_event =
 
 export type notify_channel = 'discord' | 'line'
 
+export type notify_target = 'admin' | 'concierge' | 'owner' | 'core'
+
 export type notify_rule = {
   category?: 'concierge_requested' | 'concierge_closed'
   priority?: 'high' | 'normal'
-  targets?: Array<'admin' | 'concierge' | 'owner' | 'core'>
+  targets?: notify_target[]
   channels: notify_channel[]
+}
+
+/**
+ * Decide which roles should receive a `concierge_requested` notification.
+ * Admin/concierge are dropped from the target list when the event was raised
+ * with a per-admin-availability summary indicating no available admin.
+ *
+ * Owner/core are always retained as fallback targets so the system never
+ * falls fully silent.
+ */
+function resolve_concierge_targets(
+  event: Extract<notify_event, { event: 'concierge_requested' }>,
+): notify_target[] {
+  const has_available_admin = event.has_available_admin !== false
+
+  if (has_available_admin) {
+    return ['admin', 'concierge', 'owner', 'core']
+  }
+
+  return ['owner', 'core']
 }
 
 export function should_send_notify(event: notify_event) {
@@ -107,7 +132,7 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
     return {
       category: 'concierge_requested',
       priority: 'high',
-      targets: ['admin', 'concierge', 'owner', 'core'],
+      targets: resolve_concierge_targets(event),
       channels: ['discord'],
     }
   }
