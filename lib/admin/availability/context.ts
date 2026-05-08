@@ -3,7 +3,13 @@ import 'server-only'
 import { get_session_user } from '@/lib/auth/route'
 
 export type admin_availability_context =
-  | { ok: true; admin_user_uuid: string }
+  | {
+      ok: true
+      admin_user_uuid: string
+      user_uuid: string
+      role: string | null
+      tier: string | null
+    }
   | { ok: false; status: 401 | 403; error: 'session_required' | 'admin_required' }
 
 /**
@@ -32,5 +38,8 @@ export async function resolve_admin_availability_context(): Promise<admin_availa
   return {
     ok: true,
     admin_user_uuid: session.user_uuid,
+    user_uuid: session.user_uuid,
+    role: session.role,
+    tier: session.tier,
   }
 }

@@ -3,6 +3,7 @@ import 'server-only'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid_payload'
 
+import { debug_admin_availability } from './debug'
 import {
   default_admin_chat_available,
   parse_admin_availability_request,
@@ -19,6 +20,16 @@ type admin_availability_row = {
 }
 
 const admin_availability_select = 'admin_uuid, chat_available, updated_at'
+
+function serialize_error(error: unknown) {
+  return {
+    error_message: error instanceof Error ? error.message : String(error),
+    error_code:
+      error && typeof error === 'object' && 'code' in error
+        ? error.code ?? null
+        : null,
+  }
+}
 
 function row_to_state(row: admin_availability_row | null): admin_availability_state {
   if (!row) {
@@ -110,22 +121,78 @@ export async function apply_admin_availability_request(input: {
     }
   }
 
-  const current = await read_admin_chat_availability(input.admin_user_uuid)
+  let current: admin_availability_state
+
+  try {
+    current = await read_admin_chat_availability(input.admin_user_uuid)
+  } catch (error) {
+    await debug_admin_availability({
+      event: 'admin_availability_failed',
+      payload: {
+        step: 'read_current',
+        ...serialize_error(error),
+      },
+    })
+
+    throw error
+  }
   const next_chat_available = resolve_next_admin_availability(
     current,
     parsed.request,
   )
 
   if (next_chat_available === current.chat_available) {
+    await debug_admin_availability({
+      event: 'admin_availability_update_completed',
+      payload: {
+        admin_uuid: input.admin_user_uuid,
+        chat_available: current.chat_available,
+        ok: true,
+      },
+    })
+
     return {
       ok: true,
       state: current,
     }
   }
 
-  const updated = await upsert_admin_chat_availability({
-    admin_user_uuid: input.admin_user_uuid,
-    chat_available: next_chat_available,
+  await debug_admin_availability({
+    event: 'admin_availability_update_started',
+    payload: {
+      admin_uuid: input.admin_user_uuid,
+      chat_available: next_chat_available,
+    },
+  })
+
+  let updated: admin_availability_state
+
+  try {
+    updated = await upsert_admin_chat_availability({
+      admin_user_uuid: input.admin_user_uuid,
+      chat_available: next_chat_available,
+    })
+  } catch (error) {
+    await debug_admin_availability({
+      event: 'admin_availability_failed',
+      payload: {
+        step: 'update',
+        admin_uuid: input.admin_user_uuid,
+        chat_available: next_chat_available,
+        ...serialize_error(error),
+      },
+    })
+
+    throw error
+  }
+
+  await debug_admin_availability({
+    event: 'admin_availability_update_completed',
+    payload: {
+      admin_uuid: input.admin_user_uuid,
+      chat_available: updated.chat_available,
+      ok: true,
+    },
   })
 
   return {

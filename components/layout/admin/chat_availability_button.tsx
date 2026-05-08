@@ -16,12 +16,26 @@ const toast_text = {
 
 type availability_response = {
   ok: boolean
+  admin_user_uuid?: string
   chat_available?: boolean
   error?: string
 }
 
+function send_admin_availability_debug(
+  event: string,
+  payload: Record<string, unknown>,
+) {
+  void fetch('/api/admin/availability/debug', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ event, payload }),
+  }).catch(() => {})
+}
+
 export default function AdminChatAvailabilityButton() {
   const [chat_available, set_chat_available] = useState<boolean | null>(null)
+  const [admin_uuid, set_admin_uuid] = useState<string | null>(null)
   const [is_pending, set_is_pending] = useState(false)
   const [toast_message, set_toast_message] = useState<string | null>(null)
   const toast_timer_ref = useRef<number | null>(null)
@@ -49,6 +63,7 @@ export default function AdminChatAvailabilityButton() {
 
         if (payload.ok && typeof payload.chat_available === 'boolean') {
           set_chat_available(payload.chat_available)
+          set_admin_uuid(payload.admin_user_uuid ?? null)
         }
       } catch {
         // Network errors leave the button in its initial unknown state.
@@ -86,6 +101,13 @@ export default function AdminChatAvailabilityButton() {
     }
 
     set_is_pending(true)
+    const next_chat_available =
+      typeof chat_available === 'boolean' ? !chat_available : null
+
+    send_admin_availability_debug('admin_availability_api_started', {
+      admin_uuid,
+      next_chat_available,
+    })
 
     try {
       const response = await fetch('/api/admin/availability', {
@@ -103,6 +125,7 @@ export default function AdminChatAvailabilityButton() {
 
       if (payload.ok && typeof payload.chat_available === 'boolean') {
         set_chat_available(payload.chat_available)
+        set_admin_uuid(payload.admin_user_uuid ?? admin_uuid)
         show_toast(payload.chat_available ? toast_text.on : toast_text.off)
       }
     } finally {
@@ -127,6 +150,14 @@ export default function AdminChatAvailabilityButton() {
         aria-pressed={is_on}
         disabled={is_pending}
         onClick={() => {
+          console.log('[ADMIN_AVAILABILITY] button_clicked')
+          send_admin_availability_debug(
+            'admin_availability_button_clicked',
+            {
+              admin_uuid,
+              current_chat_available: chat_available,
+            },
+          )
           void handle_toggle()
         }}
       >
