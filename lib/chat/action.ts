@@ -69,10 +69,68 @@ type resolve_initial_chat_input = {
 
 export type initial_chat_result = {
   room: chat_room
+  room_uuid: string
+  participant_uuid: string
+  mode: room_mode
   is_new_room: boolean
   is_seeded: boolean
   messages: archived_message[]
   locale: chat_locale
+}
+
+function make_initial_chat_result(input: {
+  room: chat_room
+  is_new_room: boolean
+  is_seeded: boolean
+  messages: archived_message[]
+  locale: chat_locale
+}): initial_chat_result {
+  return {
+    room: input.room,
+    room_uuid: input.room.room_uuid,
+    participant_uuid: input.room.participant_uuid,
+    mode: input.room.mode,
+    is_new_room: input.is_new_room,
+    is_seeded: input.is_seeded,
+    messages: input.messages,
+    locale: input.locale,
+  }
+}
+
+async function chat_action_log(
+  event: string,
+  payload: Record<string, unknown>,
+) {
+  console.log('[chat_action]', event, payload)
+  try {
+    await forced_debug_event({
+      category: 'line_webhook',
+      event,
+      payload,
+    })
+  } catch {
+    /* never block chat action */
+  }
+}
+
+async function emit_chat_action_completed(input: {
+  reason: string
+  room: chat_room
+  message_count: number
+  is_seeded: boolean
+  channel: chat_channel
+  extra?: Record<string, unknown>
+}) {
+  await chat_action_log('chat_action_completed', {
+    reason: input.reason,
+    room_uuid: input.room.room_uuid || null,
+    participant_uuid: input.room.participant_uuid || null,
+    mode: input.room.mode,
+    channel: input.channel,
+    is_seeded: input.is_seeded,
+    message_count: input.message_count,
+    ...input.extra,
+  })
 }
 
 type user_page_debug_payload = {
@@ -242,313 +300,482 @@ function build_line_mode_switch_bundle(input: {
 export async function resolve_initial_chat(
   input: resolve_initial_chat_input,
 ): Promise<initial_chat_result> {
-  const room_result = await resolve_chat_room({
+  await chat_action_log('chat_action_entered', {
+    channel: input.channel,
+    locale: input.locale,
     visitor_uuid: input.visitor_uuid,
     user_uuid: input.user_uuid ?? null,
-    channel: input.channel,
-    external_room_id: input.external_room_id ?? null,
+    line_user_id: input.line_user_id ?? null,
+    has_reply_token: Boolean(input.line_reply_token),
+    incoming_text: input.incoming_line_text?.text ?? null,
   })
 
-  if (!room_result.ok || !room_result.room.room_uuid) {
-    return {
-      room: room_result.room,
-      is_new_room: false,
-      is_seeded: false,
-      messages: [],
-      locale: input.locale,
-    }
-  }
-
-  if (input.channel === 'line' && input.incoming_line_text) {
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_dispatch_context_resolved',
-      payload: {
-        visitor_uuid: room_result.room.visitor_uuid,
-        user_uuid: room_result.room.user_uuid,
-        participant_uuid: room_result.room.participant_uuid,
-        room_uuid: room_result.room.room_uuid,
-        locale: input.locale,
-        source_channel: room_result.room.channel,
-      },
-    })
-  }
-
-  let archived_messages: archived_message[]
-
   try {
-    archived_messages = await load_archived_messages(
+    const room_result = await resolve_chat_room({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid ?? null,
+      channel: input.channel,
+      external_room_id: input.external_room_id ?? null,
+    })
+
+    if (!room_result.ok || !room_result.room.room_uuid) {
+      const fallback = make_initial_chat_result({
+        room: room_result.room,
+        is_new_room: false,
+        is_seeded: false,
+        messages: [],
+        locale: input.locale,
+      })
+
+      await emit_chat_action_completed({
+        reason: 'room_resolve_failed',
+        room: room_result.room,
+        channel: input.channel,
+        is_seeded: false,
+        message_count: 0,
+      })
+
+      return fallback
+    }
+
+    if (input.channel === 'line' && input.incoming_line_text) {
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_dispatch_context_resolved',
+        payload: {
+          visitor_uuid: room_result.room.visitor_uuid,
+          user_uuid: room_result.room.user_uuid,
+          participant_uuid: room_result.room.participant_uuid,
+          room_uuid: room_result.room.room_uuid,
+          locale: input.locale,
+          source_channel: room_result.room.channel,
+        },
+      })
+    }
+
+    let archived_messages: archived_message[]
+
+    try {
+      archived_messages = await load_archived_messages(
+        room_result.room.room_uuid,
+      )
+    } catch (error) {
+      const e = error as { code?: string; message?: string }
+      console.error('[chat_room]', 'room_failed', 'load_archived_messages', {
+        error,
+        error_code: e.code,
+        error_message: e.message,
+        room_uuid: room_result.room.room_uuid,
+      })
+
+      await emit_chat_action_completed({
+        reason: 'load_archived_messages_failed',
+        room: room_result.room,
+        channel: input.channel,
+        is_seeded: false,
+        message_count: 0,
+        extra: { error: serialize_error(error) },
+      })
+
+      return make_initial_chat_result({
+        room: room_result.room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages: [],
+        locale: input.locale,
+      })
+    }
+
+    const room_has_initial_messages = await has_initial_messages(
       room_result.room.room_uuid,
     )
-  } catch (error) {
-    const e = error as { code?: string; message?: string }
-    console.error('[chat_room]', 'room_failed', 'load_archived_messages', {
-      error,
-      error_code: e.code,
-      error_message: e.message,
-      room_uuid: room_result.room.room_uuid,
-    })
+    const should_seed =
+      !room_has_initial_messages &&
+      should_seed_initial_messages(archived_messages)
+    const incoming_line_text = input.incoming_line_text
+    const normalized_line_text = normalize_dispatch_text(
+      incoming_line_text?.text,
+    )
+    const line_switch_mode =
+      input.channel === 'line' && normalized_line_text
+        ? resolve_line_text_mode_switch({
+            text: normalized_line_text,
+            locale: input.locale,
+          })
+        : null
 
-    return {
-      room: room_result.room,
-      is_new_room: room_result.is_new_room,
-      is_seeded: false,
-      messages: [],
-      locale: input.locale,
-    }
-  }
-
-  const room_has_initial_messages = await has_initial_messages(
-    room_result.room.room_uuid,
-  )
-  const should_seed =
-    !room_has_initial_messages &&
-    should_seed_initial_messages(archived_messages)
-  const incoming_line_text = input.incoming_line_text
-  const normalized_line_text = normalize_dispatch_text(
-    incoming_line_text?.text,
-  )
-  const line_switch_mode =
-    input.channel === 'line' && normalized_line_text
-      ? resolve_line_text_mode_switch({
-          text: normalized_line_text,
-          locale: input.locale,
-        })
-      : null
-
-  if (
-    input.channel === 'line' &&
-    input.line_reply_token &&
-    input.line_user_id &&
-    incoming_line_text &&
-    line_switch_mode
-  ) {
-    const incoming_bundle = build_line_mode_switch_bundle({
-      text: normalized_line_text,
-      mode: line_switch_mode,
-      locale: input.locale,
-    })
-
-    const result = await execute_room_mode_switch({
-      room: room_result.room,
-      locale: input.locale,
-      incoming_bundle,
-      archive_incoming: () =>
-        archive_input_line_text_for_room({
-          room: room_result.room,
-          locale: input.locale,
-          line_user_id: input.line_user_id,
-          incoming_line_text,
-          bundle: incoming_bundle,
-        }),
-      line_reply_token: input.line_reply_token,
-      line_user_id: input.line_user_id,
-    })
-
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_chat_action_completed',
-      payload: {
+    if (input.channel === 'line') {
+      await chat_action_log('chat_action_mode_detected', {
         room_uuid: room_result.room.room_uuid,
-        participant_uuid: room_result.room.participant_uuid,
-        message_count: result.ok ? result.messages.length : 0,
-        mode: result.ok ? result.mode : room_result.room.mode,
-      },
-    })
-
-    return {
-      room: {
-        ...room_result.room,
-        mode: result.ok ? result.mode : room_result.room.mode,
-      },
-      is_new_room: room_result.is_new_room,
-      is_seeded: false,
-      messages: result.ok
-        ? result.messages
-        : await load_archived_messages(room_result.room.room_uuid),
-      locale: input.locale,
+        normalized_text: normalized_line_text,
+        switch_mode: line_switch_mode,
+        current_mode: room_result.room.mode,
+        should_seed,
+        has_reply_token: Boolean(input.line_reply_token),
+      })
     }
-  }
 
-  if (!should_seed) {
     if (
       input.channel === 'line' &&
       input.line_reply_token &&
       input.line_user_id &&
-      input.incoming_line_text
+      incoming_line_text &&
+      line_switch_mode
     ) {
-      const archived_incoming = await archive_input_line_text_for_room({
-        room: room_result.room,
+      const incoming_bundle = build_line_mode_switch_bundle({
+        text: normalized_line_text,
+        mode: line_switch_mode,
         locale: input.locale,
-        line_user_id: input.line_user_id,
-        incoming_line_text: input.incoming_line_text,
       })
 
-      if (archived_incoming?.is_duplicate) {
-        return {
+      const result = await execute_room_mode_switch({
+        room: room_result.room,
+        locale: input.locale,
+        incoming_bundle,
+        archive_incoming: () =>
+          archive_input_line_text_for_room({
+            room: room_result.room,
+            locale: input.locale,
+            line_user_id: input.line_user_id,
+            incoming_line_text,
+            bundle: incoming_bundle,
+          }),
+        line_reply_token: input.line_reply_token,
+        line_user_id: input.line_user_id,
+      })
+
+      await chat_action_log('chat_action_archive_completed', {
+        reason: 'mode_switch',
+        room_uuid: room_result.room.room_uuid,
+        ok: result.ok,
+        message_count: result.ok ? result.messages.length : 0,
+      })
+
+      const switched_room: chat_room = {
+        ...room_result.room,
+        mode: result.ok ? result.mode : room_result.room.mode,
+      }
+      const final_messages = result.ok
+        ? result.messages
+        : await load_archived_messages(room_result.room.room_uuid)
+
+      await forced_debug_event({
+        category: 'line_webhook',
+        event: 'line_chat_action_completed',
+        payload: {
+          room_uuid: switched_room.room_uuid,
+          participant_uuid: switched_room.participant_uuid,
+          message_count: final_messages.length,
+          mode: switched_room.mode,
+        },
+      })
+
+      await emit_chat_action_completed({
+        reason: 'mode_switch',
+        room: switched_room,
+        channel: input.channel,
+        is_seeded: false,
+        message_count: final_messages.length,
+        extra: { switch_mode: line_switch_mode },
+      })
+
+      return make_initial_chat_result({
+        room: switched_room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages: final_messages,
+        locale: input.locale,
+      })
+    }
+
+    if (!should_seed) {
+      if (
+        input.channel === 'line' &&
+        input.line_reply_token &&
+        input.line_user_id &&
+        input.incoming_line_text
+      ) {
+        const archived_incoming = await archive_input_line_text_for_room({
+          room: room_result.room,
+          locale: input.locale,
+          line_user_id: input.line_user_id,
+          incoming_line_text: input.incoming_line_text,
+        })
+
+        if (archived_incoming?.is_duplicate) {
+          const messages = await load_archived_messages(
+            room_result.room.room_uuid,
+          )
+
+          await emit_chat_action_completed({
+            reason: 'line_duplicate_incoming_skipped',
+            room: room_result.room,
+            channel: input.channel,
+            is_seeded: false,
+            message_count: messages.length,
+          })
+
+          return make_initial_chat_result({
+            room: room_result.room,
+            is_new_room: room_result.is_new_room,
+            is_seeded: false,
+            messages,
+            locale: input.locale,
+          })
+        }
+
+        const ack_bundles = [
+          build_line_followup_ack_bundle({ locale: input.locale }),
+        ]
+        const outgoing = await archive_message_bundles({
+          room_uuid: room_result.room.room_uuid,
+          participant_uuid: room_result.room.participant_uuid,
+          bot_participant_uuid: room_result.room.bot_participant_uuid,
+          channel: 'line',
+          bundles: ack_bundles,
+        })
+
+        await chat_action_log('chat_action_archive_completed', {
+          reason: 'line_followup_ack',
+          room_uuid: room_result.room.room_uuid,
+          archive_count: outgoing.length,
+        })
+
+        await chat_action_log('chat_action_output_started', {
+          reason: 'line_followup_ack',
+          room_uuid: room_result.room.room_uuid,
+          channel: 'line',
+          message_count: outgoing.length,
+        })
+
+        await output_chat_bundles({
+          room: room_result.room,
+          channel: 'line',
+          messages: outgoing,
+          line_reply_token: input.line_reply_token,
+          line_user_id: input.line_user_id ?? null,
+        })
+
+        const messages = await load_archived_messages(
+          room_result.room.room_uuid,
+        )
+
+        await emit_chat_action_completed({
+          reason: 'line_followup_ack',
+          room: room_result.room,
+          channel: input.channel,
+          is_seeded: false,
+          message_count: messages.length,
+        })
+
+        return make_initial_chat_result({
           room: room_result.room,
           is_new_room: room_result.is_new_room,
           is_seeded: false,
-          messages: await load_archived_messages(
-            room_result.room.room_uuid,
-          ),
+          messages,
           locale: input.locale,
-        }
+        })
       }
 
-      const ack_bundles = [
-        build_line_followup_ack_bundle({ locale: input.locale }),
-      ]
-      const outgoing = await archive_message_bundles({
+      if (
+        input.channel === 'line' &&
+        input.line_user_id &&
+        input.incoming_line_text
+      ) {
+        await archive_input_line_text_for_room({
+          room: room_result.room,
+          locale: input.locale,
+          line_user_id: input.line_user_id,
+          incoming_line_text: input.incoming_line_text,
+        })
+
+        await chat_action_log('chat_action_archive_completed', {
+          reason: 'line_incoming_archive_only',
+          room_uuid: room_result.room.room_uuid,
+        })
+      }
+
+      const messages = await load_archived_messages(
+        room_result.room.room_uuid,
+      )
+
+      await emit_chat_action_completed({
+        reason: input.channel === 'line'
+          ? 'line_no_output'
+          : 'no_seed_no_output',
+        room: room_result.room,
+        channel: input.channel,
+        is_seeded: false,
+        message_count: messages.length,
+      })
+
+      return make_initial_chat_result({
+        room: room_result.room,
+        is_new_room: room_result.is_new_room,
+        is_seeded: false,
+        messages,
+        locale: input.locale,
+      })
+    }
+
+    try {
+      if (input.channel === 'line' && !input.line_reply_token?.trim()) {
+        await emit_chat_action_completed({
+          reason: 'line_seed_skipped_missing_reply_token',
+          room: room_result.room,
+          channel: input.channel,
+          is_seeded: false,
+          message_count: archived_messages.length,
+        })
+
+        return make_initial_chat_result({
+          room: room_result.room,
+          is_new_room: room_result.is_new_room,
+          is_seeded: false,
+          messages: archived_messages,
+          locale: input.locale,
+        })
+      }
+
+      const archived_incoming =
+        input.channel === 'line'
+          ? await archive_input_line_text_for_room({
+              room: room_result.room,
+              locale: input.locale,
+              line_user_id: input.line_user_id,
+              incoming_line_text: input.incoming_line_text,
+            })
+          : null
+
+      if (archived_incoming?.is_duplicate) {
+        const messages = await load_archived_messages(
+          room_result.room.room_uuid,
+        )
+
+        await emit_chat_action_completed({
+          reason: 'line_duplicate_incoming_skipped_seed',
+          room: room_result.room,
+          channel: input.channel,
+          is_seeded: false,
+          message_count: messages.length,
+        })
+
+        return make_initial_chat_result({
+          room: room_result.room,
+          is_new_room: room_result.is_new_room,
+          is_seeded: false,
+          messages,
+          locale: input.locale,
+        })
+      }
+
+      const bundles = build_initial_chat_bundles({
+        locale: input.locale,
+      })
+      const seeded_messages = await archive_message_bundles({
         room_uuid: room_result.room.room_uuid,
         participant_uuid: room_result.room.participant_uuid,
         bot_participant_uuid: room_result.room.bot_participant_uuid,
-        channel: 'line',
-        bundles: ack_bundles,
+        channel: input.channel,
+        bundles,
+      })
+
+      await chat_action_log('chat_action_archive_completed', {
+        reason: 'seed_initial_bundles',
+        room_uuid: room_result.room.room_uuid,
+        archive_count: seeded_messages.length,
+      })
+
+      await chat_action_log('chat_action_output_started', {
+        reason: 'seed_initial_bundles',
+        room_uuid: room_result.room.room_uuid,
+        channel: input.channel,
+        message_count: seeded_messages.length,
       })
 
       await output_chat_bundles({
         room: room_result.room,
-        channel: 'line',
-        messages: outgoing,
-        line_reply_token: input.line_reply_token,
+        channel: input.channel,
+        messages: seeded_messages,
+        line_reply_token: input.line_reply_token ?? null,
         line_user_id: input.line_user_id ?? null,
       })
 
-      return {
+      const messages = [
+        ...(archived_incoming?.archived_message
+          ? [archived_incoming.archived_message]
+          : []),
+        ...seeded_messages,
+      ]
+
+      await emit_chat_action_completed({
+        reason: 'seed_initial_bundles',
+        room: room_result.room,
+        channel: input.channel,
+        is_seeded: true,
+        message_count: messages.length,
+      })
+
+      return make_initial_chat_result({
         room: room_result.room,
         is_new_room: room_result.is_new_room,
-        is_seeded: false,
-        messages: await load_archived_messages(
-          room_result.room.room_uuid,
-        ),
+        is_seeded: true,
+        messages,
         locale: input.locale,
-      }
-    }
-
-    if (
-      input.channel === 'line' &&
-      input.line_user_id &&
-      input.incoming_line_text
-    ) {
-      await archive_input_line_text_for_room({
-        room: room_result.room,
-        locale: input.locale,
-        line_user_id: input.line_user_id,
-        incoming_line_text: input.incoming_line_text,
       })
-    }
+    } catch (error) {
+      const e = error as { code?: string; message?: string }
+      console.error('[chat_room]', 'room_failed', 'seed_initial_messages', {
+        error,
+        error_code: e.code,
+        error_message: e.message,
+        room_uuid: room_result.room.room_uuid,
+      })
 
-    return {
-      room: room_result.room,
-      is_new_room: room_result.is_new_room,
-      is_seeded: false,
-      messages: await load_archived_messages(
-        room_result.room.room_uuid,
-      ),
-      locale: input.locale,
-    }
-  }
+      await chat_action_log('chat_action_failed', {
+        reason: 'seed_initial_messages',
+        room_uuid: room_result.room.room_uuid,
+        error: serialize_error(error),
+      })
 
-  try {
-    if (input.channel === 'line' && !input.line_reply_token?.trim()) {
-      return {
+      return make_initial_chat_result({
         room: room_result.room,
         is_new_room: room_result.is_new_room,
         is_seeded: false,
         messages: archived_messages,
         locale: input.locale,
-      }
-    }
-
-    const archived_incoming =
-      input.channel === 'line'
-        ? await archive_input_line_text_for_room({
-            room: room_result.room,
-            locale: input.locale,
-            line_user_id: input.line_user_id,
-            incoming_line_text: input.incoming_line_text,
-          })
-        : null
-
-    if (archived_incoming?.is_duplicate) {
-      return {
-        room: room_result.room,
-        is_new_room: room_result.is_new_room,
-        is_seeded: false,
-        messages: await load_archived_messages(
-          room_result.room.room_uuid,
-        ),
-        locale: input.locale,
-      }
-    }
-
-    const bundles = build_initial_chat_bundles({
-      locale: input.locale,
-    })
-    const seeded_messages = await archive_message_bundles({
-      room_uuid: room_result.room.room_uuid,
-      participant_uuid: room_result.room.participant_uuid,
-      bot_participant_uuid: room_result.room.bot_participant_uuid,
-      channel: input.channel,
-      bundles,
-    })
-
-    await output_chat_bundles({
-      room: room_result.room,
-      channel: input.channel,
-      messages: seeded_messages,
-      line_reply_token: input.line_reply_token ?? null,
-      line_user_id: input.line_user_id ?? null,
-    })
-
-    return {
-      room: room_result.room,
-      is_new_room: room_result.is_new_room,
-      is_seeded: true,
-      messages: [
-        ...(archived_incoming?.archived_message
-          ? [archived_incoming.archived_message]
-          : []),
-        ...seeded_messages,
-      ],
-      locale: input.locale,
+      })
     }
   } catch (error) {
-    const e = error as { code?: string; message?: string }
-    console.error('[chat_room]', 'room_failed', 'seed_initial_messages', {
-      error,
-      error_code: e.code,
-      error_message: e.message,
-      room_uuid: room_result.room.room_uuid,
+    await chat_action_log('chat_action_failed', {
+      reason: 'unexpected',
+      channel: input.channel,
+      visitor_uuid: input.visitor_uuid,
+      line_user_id: input.line_user_id ?? null,
+      error: serialize_error(error),
     })
 
-    return {
-      room: room_result.room,
-      is_new_room: room_result.is_new_room,
-      is_seeded: false,
-      messages: archived_messages,
-      locale: input.locale,
-    }
+    throw error
   }
 }
 
 export async function load_user_home_chat() {
-  const fallback_result: initial_chat_result = {
-    room: {
-      room_uuid: '',
-      participant_uuid: '',
-      bot_participant_uuid: '',
-      user_uuid: null,
-      visitor_uuid: '',
-      channel: 'web' as const,
-      mode: 'bot' as const,
-    },
+  const fallback_room: chat_room = {
+    room_uuid: '',
+    participant_uuid: '',
+    bot_participant_uuid: '',
+    user_uuid: null,
+    visitor_uuid: '',
+    channel: 'web' as const,
+    mode: 'bot' as const,
+  }
+  const fallback_result: initial_chat_result = make_initial_chat_result({
+    room: fallback_room,
     is_new_room: false,
     is_seeded: false,
     messages: [],
     locale: 'ja',
-  }
+  })
 
   await emit_user_page_debug('render_started', {})
 
@@ -689,13 +916,13 @@ export async function load_user_home_chat() {
         has_initial_messages: room_has_initial_messages,
       })
 
-      return {
+      return make_initial_chat_result({
         room,
         is_new_room: room_result.is_new_room,
         is_seeded: false,
         messages: archived_messages,
         locale,
-      }
+      })
     }
 
     const bundles = build_initial_chat_bundles({ locale })
@@ -745,13 +972,13 @@ export async function load_user_home_chat() {
         error: { message: 'empty_messages_after_seed' },
       })
 
-      return {
+      return make_initial_chat_result({
         room,
         is_new_room: room_result.is_new_room,
         is_seeded: false,
         messages: [],
         locale,
-      }
+      })
     }
 
     await emit_user_page_debug('render_completed', {
@@ -765,13 +992,13 @@ export async function load_user_home_chat() {
       has_initial_messages: room_has_initial_messages,
     })
 
-    return {
+    return make_initial_chat_result({
       room,
       is_new_room: room_result.is_new_room,
       is_seeded: true,
       messages: final_messages,
       locale,
-    }
+    })
   } catch (error) {
     await emit_user_page_debug('render_failed', {
       error,

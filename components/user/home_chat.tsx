@@ -24,16 +24,21 @@ const page_copy = {
 } as const
 
 function empty_user_home_chat(): initial_chat_result {
+  const empty_room = {
+    room_uuid: '',
+    participant_uuid: '',
+    bot_participant_uuid: '',
+    user_uuid: null,
+    visitor_uuid: '',
+    channel: 'web' as const,
+    mode: 'bot' as const,
+  }
+
   return {
-    room: {
-      room_uuid: '',
-      participant_uuid: '',
-      bot_participant_uuid: '',
-      user_uuid: null,
-      visitor_uuid: '',
-      channel: 'web',
-      mode: 'bot',
-    },
+    room: empty_room,
+    room_uuid: empty_room.room_uuid,
+    participant_uuid: empty_room.participant_uuid,
+    mode: empty_room.mode,
     is_new_room: false,
     is_seeded: false,
     messages: [],
