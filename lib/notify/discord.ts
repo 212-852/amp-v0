@@ -288,6 +288,39 @@ async function close_discord_action_thread(input: {
   return false
 }
 
+async function reopen_discord_action_thread(input: {
+  thread_id: string
+  action_id: string
+}) {
+  const response = await discord_action_bot_fetch(
+    `/channels/${input.thread_id}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        archived: false,
+      }),
+    },
+  )
+
+  if (response?.ok) {
+    log_discord_action('discord_action_reopened', {
+      thread_id: input.thread_id,
+      action_id: input.action_id,
+    })
+    return true
+  }
+
+  if (response && !response.ok) {
+    console.warn(
+      '[discord_action] reopen_failed',
+      response.status,
+      await response.text(),
+    )
+  }
+
+  return false
+}
+
 async function update_discord_action_context(input: {
   action_id: string
   content: string
@@ -297,6 +330,17 @@ async function update_discord_action_context(input: {
 
   if (!thread_id) {
     return null
+  }
+
+  if (!input.close) {
+    const reopened = await reopen_discord_action_thread({
+      thread_id,
+      action_id: input.action_id,
+    })
+
+    if (!reopened) {
+      return null
+    }
   }
 
   const posted = await post_discord_action_thread_message({
@@ -317,10 +361,6 @@ async function update_discord_action_context(input: {
 
     if (!closed) {
       return null
-    }
-
-    return {
-      action_id: null,
     }
   }
 

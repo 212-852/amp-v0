@@ -75,7 +75,6 @@ function action_content(input: {
 async function persist_action_id(input: {
   room_uuid: string
   action_id: string | null
-  previous_action_id?: string | null
 }) {
   const result = await supabase
     .from('rooms')
@@ -97,17 +96,6 @@ async function persist_action_id(input: {
     await send_action_trace('discord_action_id_saved', {
       room_uuid: input.room_uuid,
       action_id: input.action_id,
-    })
-  }
-
-  if (input.action_id === null && input.previous_action_id) {
-    console.log('[ACTION_TRACE] action_id_cleared', {
-      room_uuid: input.room_uuid,
-      previous_action_id: input.previous_action_id,
-    })
-    await send_action_trace('action_id_cleared', {
-      room_uuid: input.room_uuid,
-      previous_action_id: input.previous_action_id,
     })
   }
 }
@@ -526,11 +514,10 @@ export async function room_mode_resume_bot(input: {
     close: true,
   })
 
-  if (action_context && action_context.action_id !== row.action_id) {
+  if (action_context?.action_id && action_context.action_id !== row.action_id) {
     await persist_action_id({
       room_uuid: row.room_uuid,
       action_id: action_context.action_id,
-      previous_action_id: row.action_id,
     })
   }
 
