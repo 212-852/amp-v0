@@ -51,7 +51,7 @@ import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
 type resolve_initial_chat_input = {
-  visitor_uuid: string
+  visitor_uuid: string | null
   user_uuid?: string | null
   channel: chat_channel
   locale: chat_locale
@@ -323,16 +323,6 @@ export async function resolve_initial_chat(
     incoming_line_text &&
     line_switch_mode
   ) {
-    await forced_debug_event({
-      category: 'line_webhook',
-      event: 'line_chat_action_started',
-      payload: {
-        room_uuid: room_result.room.room_uuid,
-        participant_uuid: room_result.room.participant_uuid,
-        text: normalized_line_text,
-      },
-    })
-
     const incoming_bundle = build_line_mode_switch_bundle({
       text: normalized_line_text,
       mode: line_switch_mode,

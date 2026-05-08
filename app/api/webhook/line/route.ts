@@ -397,9 +397,34 @@ export async function POST(request: Request) {
         },
       })
 
-      await resolve_line_dispatch_identity({
+      const dispatch_context = await resolve_line_dispatch_identity({
         line_user_id,
+        text: incoming_line_text.text,
       })
+
+      if (dispatch_context.user_uuid) {
+        const resolved_locale = await resolve_dispatch_locale({
+          source_channel: 'line',
+          webhook_source_locale:
+            event.source?.locale ?? event.source?.language ?? null,
+          line_user_id,
+        })
+
+        await resolve_initial_chat({
+          visitor_uuid:
+            dispatch_context.visitor_uuid ??
+            dispatch_context.room_result?.room.visitor_uuid ??
+            null,
+          user_uuid: dispatch_context.user_uuid,
+          channel: 'line',
+          locale: resolved_locale.locale,
+          line_reply_token: event.replyToken ?? null,
+          line_user_id,
+          incoming_line_text,
+        })
+
+        continue
+      }
 
       await line_webhook_debug('line_profile_fetch_started', {
         line_user_id,
@@ -521,10 +546,6 @@ export async function POST(request: Request) {
         user_uuid: access.user_uuid,
         channel: 'line',
         locale: resolved_locale.locale,
-        external_room_id:
-          event.source?.roomId ??
-          event.source?.groupId ??
-          line_user_id,
         line_reply_token: event.replyToken ?? null,
         line_user_id,
         incoming_line_text,

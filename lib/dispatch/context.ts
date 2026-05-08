@@ -38,6 +38,7 @@ async function debug_line(
 
 export async function resolve_line_dispatch_identity(input: {
   line_user_id: string
+  text?: string | null
 }) {
   try {
     await debug_line('line_identity_resolve_started', {
@@ -95,6 +96,9 @@ export async function resolve_line_dispatch_identity(input: {
       source_channel: 'line',
     })
 
+    let resolved_room: Awaited<ReturnType<typeof resolve_chat_room>> | null =
+      null
+
     if (user_uuid || visitor_uuid) {
       try {
         const room_result = await resolve_chat_room({
@@ -102,6 +106,7 @@ export async function resolve_line_dispatch_identity(input: {
           user_uuid,
           channel: 'line',
         })
+        resolved_room = room_result
 
         await debug_line('line_room_resolve_completed', {
           room_uuid: room_result.room.room_uuid || null,
@@ -109,6 +114,12 @@ export async function resolve_line_dispatch_identity(input: {
           room_ok: room_result.ok && Boolean(room_result.room.room_uuid),
           participant_ok:
             room_result.ok && Boolean(room_result.room.participant_uuid),
+        })
+
+        await debug_line('line_chat_action_started', {
+          room_uuid: room_result.room.room_uuid || null,
+          participant_uuid: room_result.room.participant_uuid || null,
+          text: input.text ?? null,
         })
 
         if (!room_result.ok) {
@@ -154,6 +165,9 @@ export async function resolve_line_dispatch_identity(input: {
 
     return {
       identity,
+      user_uuid,
+      visitor_uuid,
+      room_result: resolved_room,
       error: null,
     }
   } catch (error) {
