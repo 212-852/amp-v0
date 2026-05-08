@@ -1,6 +1,5 @@
 import Image from 'next/image'
 import {
-  Bell,
   ChevronDown,
   Settings,
   UserRound,
@@ -62,17 +61,6 @@ export default function AdminHeader({
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
           <AdminReceptionButton />
-          <button
-            type="button"
-            className={icon_button_class}
-            aria-label="Notifications"
-          >
-            <Bell className="h-5 w-5" strokeWidth={2} />
-            <span
-              className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"
-              aria-hidden
-            />
-          </button>
           <button
             type="button"
             className={icon_button_class}

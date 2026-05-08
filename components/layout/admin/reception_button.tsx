@@ -3,18 +3,21 @@
 import { MessageCircle, MessageCircleOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-const button_class =
-  'relative flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-emerald-700 shadow-[0_2px_8px_rgba(0,0,0,0.06)] ring-2 ring-emerald-400 transition-colors hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 active:scale-[0.98] sm:h-11 sm:px-3.5'
+const base_button_class =
+  'relative flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[12px] font-semibold tracking-wide transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 active:scale-[0.98] disabled:opacity-60 sm:h-11 sm:px-3.5'
 
-const off_button_class =
-  'relative flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-neutral-200 bg-gray-100 px-3 text-gray-400 shadow-[0_2px_8px_rgba(0,0,0,0.04)] ring-0 transition-colors hover:bg-gray-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500 active:scale-[0.98] sm:h-11 sm:px-3.5'
+const open_button_class =
+  'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_2px_8px_rgba(16,185,129,0.16)] hover:bg-emerald-100 focus-visible:outline-emerald-500'
 
-const unknown_button_class =
-  'relative flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-neutral-200 bg-white px-3 text-black shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-colors hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 active:scale-[0.98] sm:h-11 sm:px-3.5'
+const offline_button_class =
+  'border-neutral-200 bg-neutral-100 text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:bg-neutral-200 focus-visible:outline-neutral-500'
+
+const idle_button_class =
+  'border-neutral-200 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.04)] focus-visible:outline-neutral-500'
 
 const reception_label = {
-  open: 'チャット ON',
-  offline: 'チャット OFF',
+  open: 'ON',
+  offline: 'OFF',
 } as const
 
 type reception_state_value = 'open' | 'offline'
@@ -151,30 +154,33 @@ export default function AdminReceptionButton() {
     }
   }
 
-  const is_offline = reception_state === 'offline'
   const is_open = reception_state === 'open'
-  const button_state_class = is_open
-    ? button_class
-    : is_offline
-      ? off_button_class
-      : unknown_button_class
-  const button_label = is_open
+  const is_offline = reception_state === 'offline'
+
+  const button_class = `${base_button_class} ${
+    is_open
+      ? open_button_class
+      : is_offline
+        ? offline_button_class
+        : idle_button_class
+  }`
+
+  const label = is_open
     ? reception_label.open
     : is_offline
       ? reception_label.offline
-      : 'チャット'
+      : '...'
+
   const aria_label =
     reception_state === null
-      ? 'Chat'
-      : reception_state === 'open'
-        ? reception_label.open
-        : reception_label.offline
+      ? 'Reception'
+      : `Reception ${reception_label[reception_state]}`
 
   return (
     <div className="relative">
       <button
         type="button"
-        className={button_state_class}
+        className={button_class}
         aria-label={aria_label}
         aria-pressed={is_open}
         disabled={is_pending}
@@ -183,13 +189,11 @@ export default function AdminReceptionButton() {
         }}
       >
         {is_offline ? (
-          <MessageCircleOff className="h-5 w-5" strokeWidth={2} />
+          <MessageCircleOff className="h-4 w-4" strokeWidth={2} />
         ) : (
-          <MessageCircle className="h-5 w-5" strokeWidth={2} />
+          <MessageCircle className="h-4 w-4" strokeWidth={2} />
         )}
-        <span className="whitespace-nowrap text-[12px] font-semibold leading-none sm:text-[13px]">
-          {button_label}
-        </span>
+        <span className="leading-none">{label}</span>
       </button>
 
       {toast_message ? (
