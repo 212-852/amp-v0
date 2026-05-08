@@ -1,5 +1,3 @@
-import 'server-only'
-
 export type reception_state = 'open' | 'offline'
 
 export type reception_record = {
