@@ -3,6 +3,7 @@ import 'server-only'
 import type { archived_message } from './archive'
 import type { message_bundle } from './message'
 import type { room_mode } from './room'
+import type { chat_locale } from './message'
 
 function room_has_line_initial_or_ack(archived_messages: archived_message[]) {
   return archived_messages.some((row) => {
@@ -74,4 +75,69 @@ export function resolve_chat_message_action(
   }
 
   return { action: 'none' }
+}
+
+const line_mode_switch_words: Record<chat_locale, Record<room_mode, string[]>> = {
+  ja: {
+    concierge: [
+      'コンシェルジュ',
+      'コンシェルジュに切り替え',
+      '担当者',
+      '人に相談',
+    ],
+    bot: ['ボット', 'bot', 'BOT'],
+  },
+  en: {
+    concierge: [
+      'concierge',
+      'switch to concierge',
+      'human',
+      'agent',
+    ],
+    bot: ['bot', 'switch to bot'],
+  },
+  es: {
+    concierge: ['concierge', 'humano', 'agente'],
+    bot: ['bot'],
+  },
+}
+
+function normalize_trigger_text(value: string) {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function trigger_matches(input: {
+  text: string
+  word: string
+  locale: chat_locale
+}) {
+  if (input.locale === 'ja') {
+    return input.text === input.word
+  }
+
+  return input.text.toLowerCase() === input.word.toLowerCase()
+}
+
+export function resolve_line_text_mode_switch(input: {
+  text: string
+  locale: chat_locale
+}): room_mode | null {
+  const text = normalize_trigger_text(input.text)
+  const words = line_mode_switch_words[input.locale] ?? line_mode_switch_words.ja
+
+  for (const mode of ['concierge', 'bot'] as const) {
+    if (
+      words[mode].some((word) =>
+        trigger_matches({
+          text,
+          word,
+          locale: input.locale,
+        }),
+      )
+    ) {
+      return mode
+    }
+  }
+
+  return null
 }

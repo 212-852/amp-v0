@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { send_action_trace } from '@/lib/debug/action'
 import type { notify_event } from './rules'
 
 const discord_api_base = 'https://discord.com/api/v10'
@@ -49,16 +48,10 @@ async function discord_action_bot_fetch(
 ) {
   const token = process.env.DISCORD_ACTION_BOT_TOKEN?.trim()
   const url = `${discord_api_base}${path}`
-  const method = init.method ?? 'GET'
 
   if (!token) {
     return null
   }
-
-  await send_action_trace('discord_fetch_started', {
-    url,
-    method,
-  })
 
   const response = await fetch(url, {
     ...init,
@@ -67,13 +60,6 @@ async function discord_action_bot_fetch(
       authorization: `Bot ${token}`,
       ...(init.headers ?? {}),
     },
-  })
-
-  await send_action_trace('discord_api_result', {
-    url,
-    method,
-    status: response.status,
-    ok: response.ok,
   })
 
   return response
@@ -263,11 +249,6 @@ async function close_discord_action_thread(input: {
       thread_id: input.thread_id,
       action_id: input.action_id,
     })
-    await send_action_trace('discord_thread_closed', {
-      thread_id: input.thread_id,
-      archived: true,
-      locked: true,
-    })
     return true
   }
 
@@ -301,11 +282,6 @@ async function reopen_discord_action_thread(input: {
     log_discord_action('discord_action_reopened', {
       thread_id: input.thread_id,
       action_id: input.action_id,
-    })
-    await send_action_trace('discord_thread_reopened', {
-      thread_id: input.thread_id,
-      archived: false,
-      locked: false,
     })
     return true
   }
@@ -484,14 +460,6 @@ function build_discord_content(event: notify_event) {
 export async function send_discord_notify(
   event: notify_event,
 ): Promise<discord_notify_result | null> {
-  await send_action_trace('discord_entered', {
-    category: 'category' in event ? event.category : event.event,
-    event: event.event,
-    has_bot_token: Boolean(process.env.DISCORD_ACTION_BOT_TOKEN),
-    has_channel_id: Boolean(process.env.DISCORD_ACTION_CHANNEL_ID),
-    has_webhook_url: Boolean(process.env.DISCORD_ACTION_WEBHOOK_URL),
-  })
-
   if (event.event === 'concierge_requested') {
     const result = await sync_discord_action_context({
       title: `Concierge - ${short_room_uuid(event.room_uuid)}`,

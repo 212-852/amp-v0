@@ -6,7 +6,6 @@ import {
   infer_source_channel_from_ua,
   type browser_session_source_channel,
 } from '@/lib/auth/session'
-import { send_action_trace } from '@/lib/debug/action'
 import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
@@ -21,7 +20,10 @@ import {
   web_chat_timeline_visibility,
   type web_timeline_filtered_row,
 } from './web_timeline'
-import { resolve_chat_context } from '@/lib/dispatch/context'
+import {
+  normalize_dispatch_text,
+  resolve_chat_context,
+} from '@/lib/dispatch/context'
 import {
   build_initial_chat_bundles,
   build_line_followup_ack_bundle,
@@ -42,6 +44,7 @@ import {
 } from './room'
 import {
   resolve_chat_message_action,
+  resolve_line_text_mode_switch,
   should_seed_initial_messages,
 } from './rules'
 import { output_chat_bundles } from '@/lib/output'
@@ -191,6 +194,7 @@ async function archive_input_line_text_for_room(input: {
   locale: chat_locale
   line_user_id?: string | null
   incoming_line_text?: resolve_initial_chat_input['incoming_line_text']
+  bundle?: ReturnType<typeof build_user_text_bundle>
 }) {
   if (!input.line_user_id || !input.incoming_line_text) {
     return null
@@ -209,11 +213,29 @@ async function archive_input_line_text_for_room(input: {
       input.incoming_line_text.webhook_event_id ?? null,
     delivery_context_redelivery:
       input.incoming_line_text.delivery_context_redelivery ?? null,
-    bundle: build_user_text_bundle({
-      text: input.incoming_line_text.text,
-      locale: input.locale,
-      content_key: 'line.incoming.text',
-    }),
+    bundle:
+      input.bundle ??
+      build_user_text_bundle({
+        text: input.incoming_line_text.text,
+        locale: input.locale,
+        content_key: 'line.incoming.text',
+      }),
+  })
+}
+
+function build_line_mode_switch_bundle(input: {
+  text: string
+  mode: room_mode
+  locale: chat_locale
+}) {
+  return build_user_text_bundle({
+    text: input.text,
+    locale: input.locale,
+    content_key: `room.mode.switch.${input.mode}`,
+    metadata: {
+      intent: 'switch_mode',
+      mode: input.mode,
+    },
   })
 }
 
@@ -267,6 +289,60 @@ export async function resolve_initial_chat(
   const should_seed =
     !room_has_initial_messages &&
     should_seed_initial_messages(archived_messages)
+  const incoming_line_text = input.incoming_line_text
+  const normalized_line_text = normalize_dispatch_text(
+    incoming_line_text?.text,
+  )
+  const line_switch_mode =
+    input.channel === 'line' && normalized_line_text
+      ? resolve_line_text_mode_switch({
+          text: normalized_line_text,
+          locale: input.locale,
+        })
+      : null
+
+  if (
+    input.channel === 'line' &&
+    input.line_reply_token &&
+    input.line_user_id &&
+    incoming_line_text &&
+    line_switch_mode
+  ) {
+    const incoming_bundle = build_line_mode_switch_bundle({
+      text: normalized_line_text,
+      mode: line_switch_mode,
+      locale: input.locale,
+    })
+
+    const result = await execute_room_mode_switch({
+      room: room_result.room,
+      locale: input.locale,
+      incoming_bundle,
+      archive_incoming: () =>
+        archive_input_line_text_for_room({
+          room: room_result.room,
+          locale: input.locale,
+          line_user_id: input.line_user_id,
+          incoming_line_text,
+          bundle: incoming_bundle,
+        }),
+      line_reply_token: input.line_reply_token,
+      line_user_id: input.line_user_id,
+    })
+
+    return {
+      room: {
+        ...room_result.room,
+        mode: result.ok ? result.mode : room_result.room.mode,
+      },
+      is_new_room: room_result.is_new_room,
+      is_seeded: false,
+      messages: result.ok
+        ? result.messages
+        : await load_archived_messages(room_result.room.room_uuid),
+      locale: input.locale,
+    }
+  }
 
   if (!should_seed) {
     if (
@@ -800,10 +876,6 @@ async function notify_room_mode_switch(input: {
       room_uuid: input.room_uuid,
       action_id: next_action_id,
     })
-    await send_action_trace('discord_action_id_saved', {
-      room_uuid: input.room_uuid,
-      action_id: next_action_id,
-    })
   } catch (error) {
     console.error('[chat] notify_action_failed', {
       room_uuid: input.room_uuid,
@@ -811,6 +883,116 @@ async function notify_room_mode_switch(input: {
       category: notify_category,
       error: serialize_error(error),
     })
+  }
+}
+
+async function execute_room_mode_switch(input: {
+  room: chat_room
+  locale: chat_locale
+  incoming_bundle: ReturnType<typeof build_user_text_bundle>
+  archive_incoming?: (() => Promise<{
+    archived_message: archived_message | null
+    is_duplicate: boolean
+  } | null>) | null
+  line_reply_token?: string | null
+  line_user_id?: string | null
+}): Promise<room_mode_switch_result> {
+  const switch_action = resolve_chat_message_action(input.incoming_bundle)
+
+  if (switch_action.action !== 'switch_room_mode') {
+    return { ok: false, error: 'invalid_transition' }
+  }
+
+  const archived_incoming = input.archive_incoming
+    ? await input.archive_incoming()
+    : null
+
+  if (archived_incoming?.is_duplicate) {
+    return {
+      ok: true,
+      mode: input.room.mode,
+      message_uuid: archived_incoming.archived_message?.archive_uuid ?? null,
+      messages: archived_incoming.archived_message
+        ? [archived_incoming.archived_message]
+        : [],
+    }
+  }
+
+  const room_update = await supabase
+    .from('rooms')
+    .update({
+      mode: switch_action.mode,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('room_uuid', input.room.room_uuid)
+    .select('mode, action_id')
+    .maybeSingle()
+
+  if (room_update.error) {
+    throw room_update.error
+  }
+
+  if (!room_update.data) {
+    return { ok: false, error: 'room_not_found' }
+  }
+
+  const chat_room_after_mode: chat_room = {
+    ...input.room,
+    mode: parse_room_mode(room_update.data.mode),
+  }
+  const confirmation_bundle = build_room_mode_notice_bundle({
+    notice:
+      switch_action.mode === 'concierge'
+        ? 'concierge_requested'
+        : 'resumed_bot',
+    locale: input.locale,
+  })
+
+  const outgoing_messages = await archive_message_bundles({
+    room_uuid: chat_room_after_mode.room_uuid,
+    participant_uuid: chat_room_after_mode.participant_uuid,
+    bot_participant_uuid: chat_room_after_mode.bot_participant_uuid,
+    channel: chat_room_after_mode.channel,
+    bundles: input.archive_incoming
+      ? [confirmation_bundle]
+      : [input.incoming_bundle, confirmation_bundle],
+  })
+  const archived_messages = [
+    ...(archived_incoming?.archived_message
+      ? [archived_incoming.archived_message]
+      : []),
+    ...outgoing_messages,
+  ]
+
+  await output_chat_bundles({
+    room: chat_room_after_mode,
+    channel: chat_room_after_mode.channel,
+    messages:
+      chat_room_after_mode.channel === 'line'
+        ? outgoing_messages
+        : archived_messages,
+    line_reply_token: input.line_reply_token ?? null,
+    line_user_id: input.line_user_id ?? null,
+  })
+
+  await notify_room_mode_switch({
+    room_uuid: chat_room_after_mode.room_uuid,
+    participant_uuid: chat_room_after_mode.participant_uuid,
+    visitor_uuid: chat_room_after_mode.visitor_uuid,
+    user_uuid: chat_room_after_mode.user_uuid,
+    channel: chat_room_after_mode.channel,
+    mode: chat_room_after_mode.mode,
+    action_id:
+      typeof room_update.data.action_id === 'string'
+        ? room_update.data.action_id
+        : null,
+  })
+
+  return {
+    ok: true,
+    mode: chat_room_after_mode.mode,
+    message_uuid: archived_messages[0]?.archive_uuid ?? null,
+    messages: archived_messages,
   }
 }
 
@@ -955,73 +1137,14 @@ export async function handle_chat_mode_request(
     mode: switch_action.mode,
   }
 
-  const room_update = await supabase
-    .from('rooms')
-    .update({
-      mode: switch_action.mode,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('room_uuid', body.room_uuid)
-    .select('mode, action_id')
-    .maybeSingle()
-
-  if (room_update.error) {
-    throw room_update.error
-  }
-
-  if (!room_update.data) {
-    return {
-      status: 404,
-      body: { ok: false, error: 'room_not_found' },
-    }
-  }
-
-  const chat_room_after_mode: chat_room = {
-    ...chat_room,
-    mode: parse_room_mode(room_update.data.mode),
-  }
-
-  const confirmation_bundle = build_room_mode_notice_bundle({
-    notice:
-      switch_action.mode === 'concierge'
-        ? 'concierge_requested'
-        : 'resumed_bot',
+  const result = await execute_room_mode_switch({
+    room: chat_room,
     locale,
-  })
-  const archived_messages = await archive_message_bundles({
-    room_uuid: chat_room_after_mode.room_uuid,
-    participant_uuid: chat_room_after_mode.participant_uuid,
-    bot_participant_uuid: chat_room_after_mode.bot_participant_uuid,
-    channel,
-    bundles: [incoming_bundle, confirmation_bundle],
-  })
-
-  await output_chat_bundles({
-    room: chat_room_after_mode,
-    channel,
-    messages: archived_messages,
-  })
-
-  await notify_room_mode_switch({
-    room_uuid: chat_room_after_mode.room_uuid,
-    participant_uuid: chat_room_after_mode.participant_uuid,
-    visitor_uuid: chat_room_after_mode.visitor_uuid,
-    user_uuid: chat_room_after_mode.user_uuid,
-    channel,
-    mode: chat_room_after_mode.mode,
-    action_id:
-      typeof room_update.data.action_id === 'string'
-        ? room_update.data.action_id
-        : null,
+    incoming_bundle,
   })
 
   return {
-    status: 200,
-    body: {
-      ok: true,
-      mode: chat_room_after_mode.mode,
-      message_uuid: archived_messages[0]?.archive_uuid ?? null,
-      messages: archived_messages,
-    },
+    status: result.ok ? 200 : 400,
+    body: result,
   }
 }

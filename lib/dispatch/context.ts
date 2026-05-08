@@ -19,6 +19,10 @@ type locale_source =
   | 'webhook_source'
   | 'fallback'
 
+export function normalize_dispatch_text(value: string | null | undefined) {
+  return value?.trim().replace(/\s+/g, ' ') ?? ''
+}
+
 function locale_source_for_debug(source: locale_source): string {
   if (source === 'browser_selected') {
     return 'browser'

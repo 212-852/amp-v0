@@ -8,7 +8,6 @@ import {
   type browser_session_source_channel,
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
-import { send_action_trace } from '@/lib/debug/action'
 import { sync_room_action_context } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
@@ -90,10 +89,6 @@ async function persist_action_id(input: {
 
   if (input.action_id?.startsWith('discord:')) {
     console.log('[chat] discord_action_id_saved', {
-      room_uuid: input.room_uuid,
-      action_id: input.action_id,
-    })
-    await send_action_trace('discord_action_id_saved', {
       room_uuid: input.room_uuid,
       action_id: input.action_id,
     })
