@@ -55,10 +55,6 @@ async function discord_action_bot_fetch(
     return null
   }
 
-  console.log('[ACTION_TRACE] discord_fetch_started', {
-    url,
-    method,
-  })
   await send_action_trace('discord_fetch_started', {
     url,
     method,
@@ -73,19 +69,11 @@ async function discord_action_bot_fetch(
     },
   })
 
-  const response_body = await response.clone().text()
-
-  console.log('[ACTION_TRACE] discord_fetch_completed', {
-    status: response.status,
-    ok: response.ok,
-    body: response_body,
-  })
   await send_action_trace('discord_api_result', {
     url,
     method,
     status: response.status,
     ok: response.ok,
-    body: response_body,
   })
 
   return response
@@ -496,12 +484,6 @@ function build_discord_content(event: notify_event) {
 export async function send_discord_notify(
   event: notify_event,
 ): Promise<discord_notify_result | null> {
-  console.log('[ACTION_TRACE] discord_entered', {
-    category: 'category' in event ? event.category : event.event,
-    has_bot_token: Boolean(process.env.DISCORD_ACTION_BOT_TOKEN),
-    has_channel_id: Boolean(process.env.DISCORD_ACTION_CHANNEL_ID),
-    has_webhook_url: Boolean(process.env.DISCORD_ACTION_WEBHOOK_URL),
-  })
   await send_action_trace('discord_entered', {
     category: 'category' in event ? event.category : event.event,
     event: event.event,
