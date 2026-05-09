@@ -440,12 +440,11 @@ const ROOM_SELECT =
 const PARTICIPANT_SELECT =
   'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, status'
 
-// Side-table selects use `*` because we cannot assume any non-key column
-// exists on the live DB (e.g. `visitors.display_name` and friends ship in
-// pending migrations). The display logic in rules.ts is field-tolerant.
+// Side-table selects avoid optional profile columns. The display logic in
+// rules.ts is field-tolerant and falls back to a short room label.
 const USER_SELECT = '*'
 
-const VISITOR_SELECT = '*'
+const VISITOR_SELECT = 'visitor_uuid, user_uuid'
 
 const IDENTITY_SELECT = '*'
 
@@ -846,10 +845,6 @@ function build_room_summary(
     room_uuid: row.room_uuid,
   })
 
-  // Avatar fallback is null per spec: no profile column may be assumed.
-  const avatar_url: string | null =
-    string_field(user_row, 'image_url') ?? null
-
   const latest = enrichment.latest_message_by_room.get(row.room_uuid) ?? null
   const latest_text = latest
     ? extract_text_from_message_row(latest.row)
@@ -867,7 +862,7 @@ function build_room_summary(
     user_uuid,
     visitor_uuid,
     display_name,
-    avatar_url,
+    avatar_url: null,
     latest_message_text: latest_text,
     latest_message_at: latest?.created_at ?? null,
     typing_participants: [],
@@ -1063,5 +1058,20 @@ export async function search_reception_rooms(
     status_mode: mode_filter,
   }
 
-  return apply_reception_search_filters(candidates, effective_filters)
+  const visible = apply_reception_search_filters(
+    candidates,
+    effective_filters,
+  )
+
+  await debug_admin_reception({
+    event: 'reception_list_query_completed',
+    payload: {
+      raw_count: candidates.length,
+      visible_count: visible.length,
+      mode_filter,
+      keyword: filters.keyword,
+    },
+  })
+
+  return visible
 }
