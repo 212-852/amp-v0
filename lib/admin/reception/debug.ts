@@ -3,6 +3,7 @@ import 'server-only'
 type admin_reception_debug_input = {
   event: string
   payload?: Record<string, unknown>
+  data?: Record<string, unknown>
 }
 
 function get_debug_user_ids() {
@@ -30,7 +31,7 @@ export async function debug_admin_reception(
     '**[DEBUG] ADMIN_RECEPTION**',
     `event: \`${input.event}\``,
     '```json',
-    JSON.stringify(input.payload ?? {}, null, 2).slice(0, 1500),
+    JSON.stringify(input.payload ?? input.data ?? {}, null, 2).slice(0, 1500),
     '```',
   ]
     .filter(Boolean)

@@ -1,6 +1,8 @@
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 
 import { search_reception_rooms } from '@/lib/admin/reception/action'
+import { debug_admin_reception } from '@/lib/admin/reception/debug'
 import {
   parse_reception_search_filters,
   type reception_search_filters,
@@ -8,29 +10,19 @@ import {
 
 import AdminReceptionPageClient from '@/components/admin/reception/page_client'
 
-const initial_filters: reception_search_filters = parse_reception_search_filters(
-  { status_mode: 'concierge' },
-)
-
 export const dynamic = 'force-dynamic'
 
-export default async function AdminReceptionPage() {
-  const initial_result = await search_reception_rooms(initial_filters)
-    .then((rooms) => ({
-      ok: true,
-      rooms: Array.isArray(rooms) ? rooms : [],
-    }))
-    .catch((error) => {
-      console.error('[admin_reception_page] initial_load_failed', {
-        error: error instanceof Error ? error.message : String(error),
-      })
+type admin_reception_page_data =
+  | {
+      ok: true
+      initial_filters: reception_search_filters
+      initial_rooms: Awaited<ReturnType<typeof search_reception_rooms>>
+    }
+  | {
+      ok: false
+    }
 
-      return {
-        ok: false,
-        rooms: [],
-      }
-    })
-
+function ReceptionPageShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col gap-4">
       <header>
@@ -45,16 +37,63 @@ export default async function AdminReceptionPage() {
           <span className="text-neutral-900">チャット一覧</span>
         </nav>
       </header>
-      {initial_result.ok ? (
-        <AdminReceptionPageClient
-          initial_filters={initial_filters}
-          initial_rooms={initial_result.rooms}
-        />
-      ) : (
-        <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
-          チャット一覧を読み込めませんでした
-        </div>
-      )}
+      {children}
     </div>
+  )
+}
+
+function ReceptionPageFallback() {
+  return (
+    <ReceptionPageShell>
+      <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
+        チャット一覧を読み込めませんでした
+      </div>
+    </ReceptionPageShell>
+  )
+}
+
+async function load_admin_reception_page_data(): Promise<admin_reception_page_data> {
+  try {
+    const initial_filters: reception_search_filters =
+      parse_reception_search_filters({ status_mode: 'concierge' })
+    const initial_rooms = await search_reception_rooms(initial_filters)
+
+    return {
+      ok: true,
+      initial_filters,
+      initial_rooms: Array.isArray(initial_rooms) ? initial_rooms : [],
+    }
+  } catch (error) {
+    await debug_admin_reception({
+      event: 'admin_reception_failed',
+      data: {
+        step: 'admin_reception_page_load',
+        error_message: error instanceof Error ? error.message : String(error),
+        error_stack: error instanceof Error ? error.stack : null,
+      },
+    })
+
+    console.error('[admin_reception_page] initial_load_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+
+    return { ok: false }
+  }
+}
+
+export default async function AdminReceptionPage() {
+  const data = await load_admin_reception_page_data()
+
+  if (!data.ok) {
+    return <ReceptionPageFallback />
+  }
+
+  return (
+    <ReceptionPageShell>
+      <AdminReceptionPageClient
+        initial_filters={data.initial_filters}
+        initial_rooms={data.initial_rooms}
+      />
+    </ReceptionPageShell>
   )
 }
