@@ -1,4 +1,5 @@
 import AdminReception from '@/components/admin/reception'
+import AdminAssistant from '@/components/layout/admin/assistant'
 import {
   list_reception_rooms,
   type reception_room,
@@ -43,8 +44,9 @@ export default async function AdminPage() {
   const rooms = await load_top_rooms(state)
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 pb-[calc(200px+env(safe-area-inset-bottom,0px))]">
       <AdminReception rooms={rooms} state={state} />
+      <AdminAssistant display_name={access.display_name} />
     </div>
   )
 }

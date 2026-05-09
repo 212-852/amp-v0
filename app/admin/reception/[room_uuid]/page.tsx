@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import AdminChatTimeline from '@/components/admin/c'
 import {
   list_reception_room_messages,
   read_reception_room,
@@ -58,37 +59,6 @@ async function load_messages(
   }
 }
 
-function is_outgoing_message(message: reception_room_message): boolean {
-  return (
-    message.direction === 'outgoing' ||
-    message.sender === 'admin' ||
-    message.sender === 'bot' ||
-    message.sender === 'system' ||
-    message.role === 'admin' ||
-    message.role === 'bot' ||
-    message.role === 'system'
-  )
-}
-
-function format_time(iso: string | null): string {
-  if (!iso) {
-    return ''
-  }
-
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-
-  return date.toLocaleString('ja-JP', {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
 export default async function AdminReceptionRoomPage({
   params,
 }: AdminReceptionRoomPageProps) {
@@ -98,8 +68,8 @@ export default async function AdminReceptionRoomPage({
   const room = result.room
 
   return (
-    <div className="flex flex-col gap-4">
-      <header>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="shrink-0 bg-neutral-100 pb-3">
         <nav
           aria-label="Breadcrumb"
           className="flex items-center gap-1.5 text-[12px] font-medium text-neutral-500"
@@ -119,79 +89,37 @@ export default async function AdminReceptionRoomPage({
         </nav>
       </header>
 
-      <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-          room_uuid
-        </div>
-        <div className="mt-1 break-all font-mono text-[13px] font-semibold text-black">
-          {room_uuid}
-        </div>
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+        <div className="shrink-0 border-b border-neutral-200 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+            room_uuid
+          </div>
+          <div className="mt-1 break-all font-mono text-[13px] font-semibold text-black">
+            {room_uuid}
+          </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 text-[12px]">
-          <div className="rounded-xl bg-neutral-100 px-3 py-2">
-            <div className="font-medium text-neutral-500">mode</div>
-            <div className="mt-1 font-semibold text-black">
-              {room?.mode ?? 'unknown'}
+          <div className="mt-4 grid grid-cols-2 gap-2 text-[12px]">
+            <div className="rounded-xl bg-neutral-100 px-3 py-2">
+              <div className="font-medium text-neutral-500">mode</div>
+              <div className="mt-1 font-semibold text-black">
+                {room?.mode ?? 'unknown'}
+              </div>
+            </div>
+            <div className="rounded-xl bg-neutral-100 px-3 py-2">
+              <div className="font-medium text-neutral-500">status</div>
+              <div className="mt-1 font-semibold text-black">
+                {result.ok ? (room ? 'found' : 'not found') : 'load failed'}
+              </div>
             </div>
           </div>
-          <div className="rounded-xl bg-neutral-100 px-3 py-2">
-            <div className="font-medium text-neutral-500">status</div>
-            <div className="mt-1 font-semibold text-black">
-              {result.ok ? (room ? 'found' : 'not found') : 'load failed'}
-            </div>
-          </div>
         </div>
 
-        <div className="mt-5 flex flex-col gap-2">
-          {!message_result.ok ? (
-            <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
-              メッセージを読み込めませんでした
-            </div>
-          ) : message_result.messages.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
-              メッセージはまだありません
-            </div>
-          ) : (
-            <ol className="flex flex-col gap-2">
-              {message_result.messages.map((message) => {
-                const is_outgoing = is_outgoing_message(message)
+        <AdminChatTimeline
+          messages={message_result.messages}
+          load_failed={!message_result.ok}
+        />
 
-                return (
-                  <li
-                    key={message.message_uuid}
-                    className={`flex ${
-                      is_outgoing ? 'justify-end' : 'justify-start'
-                    }`}
-                  >
-                    <div
-                      className={`max-w-[82%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed ${
-                        is_outgoing
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-neutral-100 text-black'
-                      }`}
-                    >
-                      <div className="whitespace-pre-wrap break-words">
-                        {message.text}
-                      </div>
-                      <div
-                        className={`mt-1 text-[10px] font-medium ${
-                          is_outgoing ? 'text-emerald-50' : 'text-neutral-400'
-                        }`}
-                      >
-                        {message.role ?? message.sender ?? 'message'}
-                        {format_time(message.created_at)
-                          ? ` - ${format_time(message.created_at)}`
-                          : ''}
-                      </div>
-                    </div>
-                  </li>
-                )
-              })}
-            </ol>
-          )}
-        </div>
-
-        <div className="mt-4 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3 text-center text-sm font-medium text-neutral-500">
+        <div className="shrink-0 border-t border-neutral-200 bg-neutral-50 px-4 py-3 text-center text-sm font-medium text-neutral-500">
           返信機能は次のステップで実装
         </div>
       </section>

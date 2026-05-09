@@ -146,7 +146,7 @@ export default async function AdminReceptionPage({
                 className="flex w-full items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-3 transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
               >
                 <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-700"
                   aria-hidden
                 >
                   <MessageCircle className="h-4 w-4" strokeWidth={2} />
@@ -168,7 +168,7 @@ export default async function AdminReceptionPage({
                       {room.room_uuid.slice(0, 8)}
                     </span>
                     {room.mode ? (
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700">
                         {room.mode}
                       </span>
                     ) : null}
