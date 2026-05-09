@@ -92,6 +92,107 @@ export function should_admin_receive_concierge_notify(
 }
 
 // ============================================================================
+// Reception room display name resolver
+// ----------------------------------------------------------------------------
+// Single source of truth for "what label do we put on a room?".
+// Field-tolerant: accepts opaque rows (Record<string, unknown>) so callers do
+// not have to assume any column exists. The reception list never crashes on
+// missing profile fields; instead the resolver falls through the priority
+// chain and lands on a stable default ("Guest").
+// ============================================================================
+
+export type room_profile_row = Record<string, unknown> | null | undefined
+
+export type resolve_room_display_name_input = {
+  visitor: room_profile_row
+  user: room_profile_row
+  identity: room_profile_row
+  room_uuid: string | null | undefined
+}
+
+function pick_string_field(
+  row: room_profile_row,
+  ...keys: string[]
+): string | null {
+  if (!row || typeof row !== 'object') {
+    return null
+  }
+
+  for (const key of keys) {
+    const value = (row as Record<string, unknown>)[key]
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+
+      if (trimmed.length > 0) {
+        return trimmed
+      }
+    }
+  }
+
+  return null
+}
+
+function short_room_label(room_uuid: string | null | undefined): string | null {
+  if (typeof room_uuid !== 'string') {
+    return null
+  }
+
+  const trimmed = room_uuid.trim()
+
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  return `Room ${trimmed.slice(0, 8)}`
+}
+
+/**
+ * Resolve a display label for a reception room from whatever profile data
+ * happens to be available.
+ *
+ * Priority (first non-empty wins):
+ *   1. visitors.nickname
+ *   2. users.name | users.display_name
+ *   3. identities.provider_user_name | identities.provider_id
+ *   4. Room <short room_uuid>
+ *   5. "Guest"
+ *
+ * Always returns a non-empty string. Each step accesses optional fields
+ * via bracket lookup, so callers may pass rows fetched with `select('*')`
+ * even when the underlying schema lacks the preferred columns.
+ */
+export function resolve_room_display_name(
+  input: resolve_room_display_name_input,
+): string {
+  const visitor_label = pick_string_field(input.visitor, 'nickname')
+  if (visitor_label) {
+    return visitor_label
+  }
+
+  const user_label = pick_string_field(input.user, 'name', 'display_name')
+  if (user_label) {
+    return user_label
+  }
+
+  const identity_label = pick_string_field(
+    input.identity,
+    'provider_user_name',
+    'provider_id',
+  )
+  if (identity_label) {
+    return identity_label
+  }
+
+  const short = short_room_label(input.room_uuid)
+  if (short) {
+    return short
+  }
+
+  return 'Guest'
+}
+
+// ============================================================================
 // Reception room search filters
 // ----------------------------------------------------------------------------
 // Pure rules used by the inbox (mini) and the full reception list page.

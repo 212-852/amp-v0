@@ -74,12 +74,10 @@ export default function AdminReceptionInboxItem({
 }: AdminReceptionInboxItemProps) {
   const trimmed_name = room.display_name?.trim() ?? ''
   const trimmed_preview = room.latest_message_text?.trim() ?? ''
-  const display_name =
-    trimmed_name.length > 0
-      ? trimmed_name
-      : variant === 'mini'
-        ? 'Concierge room'
-        : 'ゲスト'
+  // display_name is resolved upstream via resolve_room_display_name so it
+  // is always non-empty. The fallback here only protects against unknown
+  // legacy callers passing a literal empty string.
+  const display_name = trimmed_name.length > 0 ? trimmed_name : 'Guest'
   const channel = room.channel ? channel_label[room.channel] ?? room.channel : null
   const mode = room.mode ? mode_label[room.mode] ?? room.mode : null
   const preview =

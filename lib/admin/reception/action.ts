@@ -12,6 +12,7 @@ import {
   parse_reception_request,
   resolve_next_reception_state,
   resolve_reception_status_mode_query,
+  resolve_room_display_name,
   should_admin_receive_concierge_notify,
   type reception_record,
   type reception_request_input,
@@ -410,26 +411,18 @@ type participant_safe_row = {
   status: string | null
 }
 
-type user_safe_row = {
-  user_uuid: string
-  display_name: string | null
-  image_url: string | null
-}
-
-type visitor_safe_row = {
-  visitor_uuid: string
-  display_name: string | null
-}
+type opaque_row = Record<string, unknown>
 
 type latest_message_record = {
-  row: Record<string, unknown>
+  row: opaque_row
   created_at: string | null
 }
 
 type room_enrichment = {
   participants_by_room: Map<string, participant_safe_row[]>
-  users_by_uuid: Map<string, user_safe_row>
-  visitors_by_uuid: Map<string, visitor_safe_row>
+  users_by_uuid: Map<string, opaque_row>
+  visitors_by_uuid: Map<string, opaque_row>
+  identities_by_user_uuid: Map<string, opaque_row>
   latest_message_by_room: Map<string, latest_message_record>
 }
 
@@ -437,6 +430,7 @@ const EMPTY_ENRICHMENT: room_enrichment = {
   participants_by_room: new Map(),
   users_by_uuid: new Map(),
   visitors_by_uuid: new Map(),
+  identities_by_user_uuid: new Map(),
   latest_message_by_room: new Map(),
 }
 
@@ -446,9 +440,23 @@ const ROOM_SELECT =
 const PARTICIPANT_SELECT =
   'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, status'
 
-const USER_SELECT = 'user_uuid, display_name, image_url'
+// Side-table selects use `*` because we cannot assume any non-key column
+// exists on the live DB (e.g. `visitors.display_name` and friends ship in
+// pending migrations). The display logic in rules.ts is field-tolerant.
+const USER_SELECT = '*'
 
-const VISITOR_SELECT = 'visitor_uuid, display_name'
+const VISITOR_SELECT = '*'
+
+const IDENTITY_SELECT = '*'
+
+function string_field(row: opaque_row | null, key: string): string | null {
+  if (!row) {
+    return null
+  }
+
+  const value = row[key]
+  return typeof value === 'string' ? value : null
+}
 
 function normalize_room_mode(value: string | null): reception_room_mode | null {
   if (value === 'concierge') {
@@ -612,8 +620,9 @@ async function try_enrich_rooms(
 
   const room_uuids = rooms.map((row) => row.room_uuid)
   const participants_by_room = new Map<string, participant_safe_row[]>()
-  const users_by_uuid = new Map<string, user_safe_row>()
-  const visitors_by_uuid = new Map<string, visitor_safe_row>()
+  const users_by_uuid = new Map<string, opaque_row>()
+  const visitors_by_uuid = new Map<string, opaque_row>()
+  const identities_by_user_uuid = new Map<string, opaque_row>()
   const latest_message_by_room = new Map<string, latest_message_record>()
 
   let participants: participant_safe_row[] = []
@@ -679,9 +688,10 @@ async function try_enrich_rooms(
         throw users_result.error
       }
 
-      for (const row of (users_result.data ?? []) as user_safe_row[]) {
-        if (row.user_uuid) {
-          users_by_uuid.set(row.user_uuid, row)
+      for (const row of (users_result.data ?? []) as opaque_row[]) {
+        const user_uuid = string_field(row, 'user_uuid')
+        if (user_uuid) {
+          users_by_uuid.set(user_uuid, row)
         }
       }
     } catch (error) {
@@ -690,6 +700,36 @@ async function try_enrich_rooms(
         payload: {
           step: 'list_rooms',
           query: 'users',
+          ...pick_supabase_error(error),
+        },
+      })
+    }
+
+    try {
+      const identities_result = await supabase
+        .from('identities')
+        .select(IDENTITY_SELECT)
+        .in('user_uuid', user_uuids)
+
+      if (identities_result.error) {
+        throw identities_result.error
+      }
+
+      for (const row of (identities_result.data ?? []) as opaque_row[]) {
+        const user_uuid = string_field(row, 'user_uuid')
+
+        if (!user_uuid || identities_by_user_uuid.has(user_uuid)) {
+          continue
+        }
+
+        identities_by_user_uuid.set(user_uuid, row)
+      }
+    } catch (error) {
+      await debug_admin_reception({
+        event: 'admin_reception_failed',
+        payload: {
+          step: 'list_rooms',
+          query: 'identities',
           ...pick_supabase_error(error),
         },
       })
@@ -707,9 +747,10 @@ async function try_enrich_rooms(
         throw visitors_result.error
       }
 
-      for (const row of (visitors_result.data ?? []) as visitor_safe_row[]) {
-        if (row.visitor_uuid) {
-          visitors_by_uuid.set(row.visitor_uuid, row)
+      for (const row of (visitors_result.data ?? []) as opaque_row[]) {
+        const visitor_uuid = string_field(row, 'visitor_uuid')
+        if (visitor_uuid) {
+          visitors_by_uuid.set(visitor_uuid, row)
         }
       }
     } catch (error) {
@@ -767,6 +808,7 @@ async function try_enrich_rooms(
     participants_by_room,
     users_by_uuid,
     visitors_by_uuid,
+    identities_by_user_uuid,
     latest_message_by_room,
   }
 }
@@ -779,26 +821,34 @@ function build_room_summary(
     enrichment.participants_by_room.get(row.room_uuid) ?? []
   const user_participant =
     room_participants.find((p) => p.role === 'user') ?? null
-  const user_uuid = user_participant?.user_uuid ?? null
+  const direct_user_uuid = user_participant?.user_uuid ?? null
   const visitor_uuid = user_participant?.visitor_uuid ?? null
 
-  const display_name_from_user = user_uuid
-    ? (enrichment.users_by_uuid.get(user_uuid)?.display_name?.trim() ?? null)
+  // Visitor row may carry a `user_uuid` bridge for sessions that signed in
+  // after starting as a guest; honour it so we can still find a label even
+  // when the participant row was never updated.
+  const visitor_row = visitor_uuid
+    ? (enrichment.visitors_by_uuid.get(visitor_uuid) ?? null)
     : null
-  const display_name_from_visitor = visitor_uuid
-    ? (enrichment.visitors_by_uuid
-        .get(visitor_uuid)
-        ?.display_name?.trim() ?? null)
+  const bridged_user_uuid = string_field(visitor_row, 'user_uuid')
+  const user_uuid = direct_user_uuid ?? bridged_user_uuid
+  const user_row = user_uuid
+    ? (enrichment.users_by_uuid.get(user_uuid) ?? null)
     : null
-  const display_name =
-    display_name_from_user && display_name_from_user.length > 0
-      ? display_name_from_user
-      : display_name_from_visitor && display_name_from_visitor.length > 0
-        ? display_name_from_visitor
-        : null
-  const avatar_url = user_uuid
-    ? (enrichment.users_by_uuid.get(user_uuid)?.image_url ?? null)
+  const identity_row = user_uuid
+    ? (enrichment.identities_by_user_uuid.get(user_uuid) ?? null)
     : null
+
+  const display_name = resolve_room_display_name({
+    visitor: visitor_row,
+    user: user_row,
+    identity: identity_row,
+    room_uuid: row.room_uuid,
+  })
+
+  // Avatar fallback is null per spec: no profile column may be assumed.
+  const avatar_url: string | null =
+    string_field(user_row, 'image_url') ?? null
 
   const latest = enrichment.latest_message_by_room.get(row.room_uuid) ?? null
   const latest_text = latest
