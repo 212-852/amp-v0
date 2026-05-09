@@ -1,7 +1,7 @@
 import Image from 'next/image'
 import { ChevronDown, Settings, UserRound } from 'lucide-react'
 
-import { AdminReceptionButton } from '@/components/admin/reception'
+import { AdminReceptionButton } from '@/components/admin/reception_button'
 
 type AdminHeaderProps = {
   display_name: string | null
