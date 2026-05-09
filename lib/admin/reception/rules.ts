@@ -282,10 +282,7 @@ function match_role(
   summary: reception_room_summary,
   role: reception_room_role_filter,
 ): boolean {
-  return (
-    summary.participant_roles.includes(role) ||
-    summary.active_participants.some((participant) => participant.role === role)
-  )
+  return summary.participant_roles.includes(role)
 }
 
 /**

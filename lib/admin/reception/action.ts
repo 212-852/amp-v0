@@ -2,12 +2,6 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid_payload'
-import {
-  decide_active_participants,
-  decide_typing_participants,
-  is_participant_role,
-  type presence_participant,
-} from '@/lib/chat/presence/rules'
 
 import { debug_admin_reception } from './debug'
 import {
@@ -322,6 +316,13 @@ export async function summarize_reception(): Promise<reception_summary> {
 // ----------------------------------------------------------------------------
 // Single-core data fetch used by the mini inbox and the full reception list
 // page. Filtering decisions live in rules.ts; here we only execute queries.
+//
+// Column policy:
+//   Use ONLY columns proven to exist in the live DB. Presence-style columns
+//   (`is_active`, `is_typing`, `last_seen_at`, `typing_at`) ship in a
+//   migration that is not applied yet, so they MUST NOT appear in selects.
+//   typing/active participant arrays in the summary are intentionally empty
+//   until those columns are available.
 // ============================================================================
 
 const RECEPTION_ROOM_LOAD_HARD_LIMIT = 100
@@ -332,6 +333,42 @@ type room_load_query = {
   limit: number
 }
 
+/**
+ * Annotates a Supabase error with the source query label so the API layer
+ * can emit `admin_reception_failed` with `query`, `error_code`,
+ * `error_message`, `error_details`, `error_hint`.
+ */
+class ReceptionQueryError extends Error {
+  readonly query: string
+  readonly error_code: unknown
+  readonly error_message: unknown
+  readonly error_details: unknown
+  readonly error_hint: unknown
+
+  constructor(query: string, raw: unknown) {
+    const fields =
+      raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+    const message =
+      typeof fields.message === 'string'
+        ? fields.message
+        : raw instanceof Error
+          ? raw.message
+          : 'unknown_error'
+
+    super(`reception_query_failed:${query}: ${message}`)
+    this.name = 'ReceptionQueryError'
+    this.query = query
+    this.error_code = fields.code ?? null
+    this.error_message = fields.message ?? message
+    this.error_details = fields.details ?? null
+    this.error_hint = fields.hint ?? null
+  }
+}
+
+function fail(query: string, error: unknown): never {
+  throw new ReceptionQueryError(query, error)
+}
+
 type room_row_min = {
   room_uuid: string
   status: string | null
@@ -340,36 +377,15 @@ type room_row_min = {
   updated_at: string | null
 }
 
-type participant_row_min = {
-  participant_uuid: string
-  room_uuid: string | null
-  user_uuid: string | null
-  visitor_uuid: string | null
-  role: string | null
-  last_channel: string | null
-  status: string | null
-  is_active: boolean | null
-  is_typing: boolean | null
-  last_seen_at: string | null
-  typing_at: string | null
-}
+const ROOM_SELECT =
+  'room_uuid, room_type, status, mode, action_id, created_at, updated_at'
 
-type message_row_min = {
-  room_uuid: string
-  body: string | null
-  created_at: string
-}
+const PARTICIPANT_SELECT =
+  'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, status'
 
-type user_row_min = {
-  user_uuid: string
-  display_name: string | null
-  image_url: string | null
-}
+const USER_SELECT = 'user_uuid, display_name, image_url'
 
-type visitor_row_min = {
-  visitor_uuid: string
-  display_name: string | null
-}
+const VISITOR_SELECT = 'visitor_uuid, display_name'
 
 function normalize_room_mode(value: string | null): reception_room_mode | null {
   if (value === 'concierge') {
@@ -383,41 +399,88 @@ function normalize_room_mode(value: string | null): reception_room_mode | null {
   return null
 }
 
-function extract_text_from_message_body(body: string | null): string | null {
-  if (!body) {
-    return null
+/**
+ * Extract a short preview text from a row in `messages`.
+ *
+ * The body column may store JSON either as a stringified object (current
+ * archive writer) or as a Postgres `jsonb` value already parsed by the
+ * client. Either shape is accepted, and we look for text under the known
+ * locations:
+ *   - `bundle.payload.text`  (current archive shape)
+ *   - `payload.text`         (legacy / direct payload)
+ *   - `text`                 (legacy plain text)
+ *
+ * Anything else returns null without throwing so concierge rooms still
+ * appear when no recognizable preview is available.
+ */
+function extract_text_from_message_row(
+  row: Record<string, unknown>,
+): string | null {
+  let parsed: unknown = null
+  const body_value = row.body
+
+  if (typeof body_value === 'string') {
+    try {
+      parsed = JSON.parse(body_value)
+    } catch {
+      parsed = null
+    }
+  } else if (body_value && typeof body_value === 'object') {
+    parsed = body_value
   }
 
-  try {
-    const parsed = JSON.parse(body) as {
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as {
       bundle?: {
         bundle_type?: string
-        payload?: { text?: string }
+        payload?: { text?: unknown }
+      }
+      payload?: { text?: unknown }
+      text?: unknown
+    }
+
+    const bundle = obj.bundle
+    if (bundle && typeof bundle === 'object') {
+      const bundle_text = bundle.payload?.text
+      if (
+        bundle.bundle_type === 'text' &&
+        typeof bundle_text === 'string'
+      ) {
+        return bundle_text
+      }
+
+      if (typeof bundle.bundle_type === 'string') {
+        return `[${bundle.bundle_type}]`
       }
     }
 
-    const bundle = parsed?.bundle
-
-    if (!bundle) {
-      return null
+    const flat_payload_text = obj.payload?.text
+    if (typeof flat_payload_text === 'string') {
+      return flat_payload_text
     }
 
-    if (bundle.bundle_type === 'text' && typeof bundle.payload?.text === 'string') {
-      return bundle.payload.text
+    if (typeof obj.text === 'string') {
+      return obj.text
     }
-
-    if (bundle.bundle_type) {
-      return `[${bundle.bundle_type}]`
-    }
-
-    return null
-  } catch {
-    return null
   }
+
+  const payload_value = row.payload
+  if (payload_value && typeof payload_value === 'object') {
+    const flat = (payload_value as { text?: unknown }).text
+    if (typeof flat === 'string') {
+      return flat
+    }
+  }
+
+  if (typeof row.text === 'string') {
+    return row.text
+  }
+
+  return null
 }
 
 function unique_participant_roles(
-  rows: participant_row_min[],
+  rows: Array<{ role: string | null }>,
 ): reception_room_role_filter[] {
   const set = new Set<reception_room_role_filter>()
 
@@ -430,50 +493,6 @@ function unique_participant_roles(
   return Array.from(set)
 }
 
-function participant_display_name(input: {
-  participant: participant_row_min
-  users_by_uuid: Map<string, user_row_min>
-  visitors_by_uuid: Map<string, visitor_row_min>
-}) {
-  if (input.participant.user_uuid) {
-    return (
-      input.users_by_uuid.get(input.participant.user_uuid)?.display_name ?? null
-    )
-  }
-
-  if (input.participant.visitor_uuid) {
-    return (
-      input.visitors_by_uuid.get(input.participant.visitor_uuid)
-        ?.display_name ?? null
-    )
-  }
-
-  return null
-}
-
-function to_presence_participant(input: {
-  participant: participant_row_min
-  users_by_uuid: Map<string, user_row_min>
-  visitors_by_uuid: Map<string, visitor_row_min>
-}): presence_participant {
-  const role = is_participant_role(input.participant.role)
-    ? input.participant.role
-    : 'user'
-
-  return {
-    participant_uuid: input.participant.participant_uuid,
-    display_name: participant_display_name(input),
-    avatar_url: input.participant.user_uuid
-      ? input.users_by_uuid.get(input.participant.user_uuid)?.image_url ?? null
-      : null,
-    role,
-    is_active: input.participant.is_active === true,
-    is_typing: input.participant.is_typing === true,
-    last_seen_at: input.participant.last_seen_at,
-    typing_at: input.participant.typing_at,
-  }
-}
-
 async function load_reception_rooms(
   query: room_load_query,
 ): Promise<reception_room_summary[]> {
@@ -484,7 +503,7 @@ async function load_reception_rooms(
 
   let rooms_query = supabase
     .from('rooms')
-    .select('room_uuid, status, mode, action_id, updated_at')
+    .select(ROOM_SELECT)
     .eq('room_type', 'direct')
     .order('updated_at', { ascending: false })
     .limit(limit)
@@ -500,7 +519,7 @@ async function load_reception_rooms(
   const rooms_result = await rooms_query
 
   if (rooms_result.error) {
-    throw rooms_result.error
+    fail('rooms', rooms_result.error)
   }
 
   const rooms = (rooms_result.data ?? []) as room_row_min[]
@@ -513,25 +532,34 @@ async function load_reception_rooms(
 
   const participants_result = await supabase
     .from('participants')
-    .select(
-      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, last_channel, status, is_active, is_typing, last_seen_at, typing_at',
-    )
+    .select(PARTICIPANT_SELECT)
     .in('room_uuid', room_uuids)
 
   if (participants_result.error) {
-    throw participants_result.error
+    fail('participants', participants_result.error)
   }
 
-  const participants = (participants_result.data ?? []) as participant_row_min[]
+  type participant_safe_row = {
+    participant_uuid: string
+    room_uuid: string | null
+    user_uuid: string | null
+    visitor_uuid: string | null
+    role: string | null
+    status: string | null
+  }
+
+  const participants =
+    (participants_result.data ?? []) as participant_safe_row[]
 
   const user_uuids = Array.from(
     new Set(
       participants
-        .filter((row) => row.role === 'user' && typeof row.user_uuid === 'string')
+        .filter(
+          (row) => row.role === 'user' && typeof row.user_uuid === 'string',
+        )
         .map((row) => row.user_uuid as string),
     ),
   )
-  const users_by_uuid = new Map<string, user_row_min>()
   const visitor_uuids = Array.from(
     new Set(
       participants
@@ -539,19 +567,32 @@ async function load_reception_rooms(
         .map((row) => row.visitor_uuid as string),
     ),
   )
-  const visitors_by_uuid = new Map<string, visitor_row_min>()
+
+  type user_safe_row = {
+    user_uuid: string
+    display_name: string | null
+    image_url: string | null
+  }
+
+  type visitor_safe_row = {
+    visitor_uuid: string
+    display_name: string | null
+  }
+
+  const users_by_uuid = new Map<string, user_safe_row>()
+  const visitors_by_uuid = new Map<string, visitor_safe_row>()
 
   if (user_uuids.length > 0) {
     const users_result = await supabase
       .from('users')
-      .select('user_uuid, display_name, image_url')
+      .select(USER_SELECT)
       .in('user_uuid', user_uuids)
 
     if (users_result.error) {
-      throw users_result.error
+      fail('users', users_result.error)
     }
 
-    for (const row of (users_result.data ?? []) as user_row_min[]) {
+    for (const row of (users_result.data ?? []) as user_safe_row[]) {
       if (row.user_uuid) {
         users_by_uuid.set(row.user_uuid, row)
       }
@@ -561,14 +602,14 @@ async function load_reception_rooms(
   if (visitor_uuids.length > 0) {
     const visitors_result = await supabase
       .from('visitors')
-      .select('visitor_uuid, display_name')
+      .select(VISITOR_SELECT)
       .in('visitor_uuid', visitor_uuids)
 
     if (visitors_result.error) {
-      throw visitors_result.error
+      fail('visitors', visitors_result.error)
     }
 
-    for (const row of (visitors_result.data ?? []) as visitor_row_min[]) {
+    for (const row of (visitors_result.data ?? []) as visitor_safe_row[]) {
       if (row.visitor_uuid) {
         visitors_by_uuid.set(row.visitor_uuid, row)
       }
@@ -577,80 +618,90 @@ async function load_reception_rooms(
 
   const messages_result = await supabase
     .from('messages')
-    .select('room_uuid, body, created_at')
+    .select('*')
     .in('room_uuid', room_uuids)
     .order('created_at', { ascending: false })
     .limit(limit * 8)
 
   if (messages_result.error) {
-    throw messages_result.error
+    fail('messages', messages_result.error)
   }
 
-  const latest_message_by_room = new Map<string, message_row_min>()
+  const latest_message_by_room = new Map<
+    string,
+    { row: Record<string, unknown>; created_at: string | null }
+  >()
 
-  for (const row of (messages_result.data ?? []) as message_row_min[]) {
-    if (latest_message_by_room.has(row.room_uuid)) {
+  for (const raw of (messages_result.data ?? []) as Array<
+    Record<string, unknown>
+  >) {
+    const room_uuid =
+      typeof raw.room_uuid === 'string' ? raw.room_uuid : null
+
+    if (!room_uuid || latest_message_by_room.has(room_uuid)) {
       continue
     }
 
-    latest_message_by_room.set(row.room_uuid, row)
+    latest_message_by_room.set(room_uuid, {
+      row: raw,
+      created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
+    })
   }
 
-  const now = new Date()
-
-  return rooms.map((row) => {
+  const summaries: reception_room_summary[] = rooms.map((row) => {
     const room_participants = participants.filter(
       (p) => p.room_uuid === row.room_uuid,
     )
     const user_participant =
       room_participants.find((p) => p.role === 'user') ?? null
     const user_uuid = user_participant?.user_uuid ?? null
-    const display_name = user_participant
-      ? participant_display_name({
-          participant: user_participant,
-          users_by_uuid,
-          visitors_by_uuid,
-        })
+    const visitor_uuid = user_participant?.visitor_uuid ?? null
+
+    const display_name_from_user = user_uuid
+      ? (users_by_uuid.get(user_uuid)?.display_name?.trim() ?? null)
       : null
+    const display_name_from_visitor = visitor_uuid
+      ? (visitors_by_uuid.get(visitor_uuid)?.display_name?.trim() ?? null)
+      : null
+    const display_name =
+      display_name_from_user && display_name_from_user.length > 0
+        ? display_name_from_user
+        : display_name_from_visitor && display_name_from_visitor.length > 0
+          ? display_name_from_visitor
+          : null
     const avatar_url = user_uuid
-      ? users_by_uuid.get(user_uuid)?.image_url ?? null
+      ? (users_by_uuid.get(user_uuid)?.image_url ?? null)
       : null
+
     const latest = latest_message_by_room.get(row.room_uuid) ?? null
+    const latest_text = latest ? extract_text_from_message_row(latest.row) : null
+
     const mode = normalize_room_mode(row.mode)
     const status = row.status
     const is_pending = status === 'active' && mode === 'concierge'
-    const presence_participants = room_participants.map((participant) =>
-      to_presence_participant({
-        participant,
-        users_by_uuid,
-        visitors_by_uuid,
-      }),
-    )
-    const typing_participants = decide_typing_participants(
-      presence_participants,
-      now,
-    )
 
     return {
       room_uuid: row.room_uuid,
       status,
       mode,
-      channel: user_participant?.last_channel ?? null,
+      channel: null,
       user_uuid,
-      visitor_uuid: user_participant?.visitor_uuid ?? null,
+      visitor_uuid,
       display_name,
       avatar_url,
-      latest_message_text: extract_text_from_message_body(latest?.body ?? null),
+      latest_message_text: latest_text,
       latest_message_at: latest?.created_at ?? null,
-      typing_participants,
-      active_participants: decide_active_participants(presence_participants),
+      typing_participants: [],
+      active_participants: [],
       participant_roles: unique_participant_roles(room_participants),
-      has_typing: typing_participants.length > 0,
+      has_typing: false,
       is_pending,
       updated_at: row.updated_at,
       action_id: row.action_id,
     }
-  }).sort((a, b) => {
+  })
+
+  return summaries.sort((a, b) => {
     const a_time = new Date(
       a.latest_message_at ?? a.updated_at ?? 0,
     ).getTime()
@@ -658,14 +709,18 @@ async function load_reception_rooms(
       b.latest_message_at ?? b.updated_at ?? 0,
     ).getTime()
 
-    return (Number.isNaN(b_time) ? 0 : b_time) -
-      (Number.isNaN(a_time) ? 0 : a_time)
+    return (
+      (Number.isNaN(b_time) ? 0 : b_time) - (Number.isNaN(a_time) ? 0 : a_time)
+    )
   })
 }
 
 /**
- * Latest concierge rooms for compact inbox-style callers.
- * Ordered by latest message timestamp, falling back to `rooms.updated_at`.
+ * Latest concierge rooms for the admin mini inbox.
+ *
+ * Filter: `rooms.mode = 'concierge'` only (no status constraint, so rooms
+ * still surface even when temporarily marked inactive).
+ * Order: newest activity first.
  */
 export async function list_active_reception_rooms(input: {
   limit: number
@@ -684,8 +739,8 @@ export async function list_active_reception_rooms(input: {
 /**
  * Filtered reception room list for the full admin reception page.
  *
- * Defaults to concierge rooms. Remaining filters run in-memory via
- * `apply_reception_search_filters` from rules.ts.
+ * Default = `rooms.mode = 'concierge'`. Status filters and additional
+ * post-filters live in rules.ts.
  */
 export async function search_reception_rooms(
   filters: reception_search_filters,
@@ -703,20 +758,6 @@ export async function search_reception_rooms(
     ...filters,
     status_mode: mode_filter,
   }
-  const visible = apply_reception_search_filters(
-    candidates,
-    effective_filters,
-  )
 
-  await debug_admin_reception({
-    event: 'reception_list_query_completed',
-    payload: {
-      raw_count: candidates.length,
-      visible_count: visible.length,
-      mode_filter,
-      keyword: filters.keyword,
-    },
-  })
-
-  return visible
+  return apply_reception_search_filters(candidates, effective_filters)
 }
