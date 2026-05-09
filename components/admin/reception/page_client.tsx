@@ -6,6 +6,7 @@ import type {
   reception_room_summary,
   reception_search_filters,
 } from '@/lib/admin/reception/rules'
+import { create_browser_supabase } from '@/lib/db/browser'
 
 import AdminReceptionFilter from './filter'
 import AdminReceptionList from './list'
@@ -54,11 +55,14 @@ export default function AdminReceptionPageClient({
   initial_rooms,
 }: AdminReceptionPageClientProps) {
   const [rooms, set_rooms] = useState<reception_room_summary[]>(initial_rooms)
+  const [filters, set_filters] =
+    useState<reception_search_filters>(initial_filters)
   const [is_loading, set_is_loading] = useState(false)
   const fetch_token_ref = useRef(0)
 
   const handle_filters_change = useCallback(
     async (next_filters: reception_search_filters) => {
+      set_filters(next_filters)
       const token = fetch_token_ref.current + 1
       fetch_token_ref.current = token
       set_is_loading(true)
@@ -98,8 +102,41 @@ export default function AdminReceptionPageClient({
   )
 
   useEffect(() => {
-    set_rooms(initial_rooms)
-  }, [initial_rooms])
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      return
+    }
+
+    const refresh = () => {
+      void handle_filters_change(filters)
+    }
+    const channel = supabase
+      .channel('admin_reception_presence')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'participants',
+        },
+        refresh,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+        },
+        refresh,
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [filters, handle_filters_change])
 
   return (
     <div className="flex flex-col gap-3">

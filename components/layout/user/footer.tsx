@@ -6,7 +6,7 @@ import {
   Menu,
 } from 'lucide-react'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FaPaw } from 'react-icons/fa'
 
 import { useUserChat } from '@/components/chat/context'
@@ -114,6 +114,7 @@ const quick_menu_items: quick_menu_item[] = [
 ]
 
 type room_mode_segment = 'bot' | 'concierge'
+type presence_action = 'typing_start' | 'typing_stop'
 
 const switch_message_text: Record<
   room_mode_segment,
@@ -179,6 +180,8 @@ function create_optimistic_switch_message(input: {
 export default function UserFooter() {
   const chat = useUserChat()
   const input_ref = useRef<HTMLInputElement | null>(null)
+  const typing_timer_ref = useRef<number | null>(null)
+  const typing_active_ref = useRef(false)
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [pending_switch_mode, set_pending_switch_mode] =
@@ -197,6 +200,35 @@ export default function UserFooter() {
     ? flip_rotation + 180
     : flip_rotation
 
+  const post_typing_presence = useCallback(
+    (action: presence_action) => {
+      if (!chat.room_uuid || !chat.participant_uuid) {
+        return
+      }
+
+      if (action === 'typing_start' && typing_active_ref.current) {
+        return
+      }
+
+      typing_active_ref.current = action === 'typing_start'
+
+      void fetch('/api/chat/presence', {
+        method: 'POST',
+        credentials: 'include',
+        keepalive: action === 'typing_stop',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          action,
+        }),
+      }).catch(() => {})
+    },
+    [chat.participant_uuid, chat.room_uuid],
+  )
+
   useEffect(() => {
     const mounted_timer = window.setTimeout(() => {
       set_mounted(true)
@@ -211,7 +243,7 @@ export default function UserFooter() {
   }, [])
 
   useEffect(() => {
-    set_card_scale(0.98)
+    const scale_timer = window.setTimeout(() => set_card_scale(0.98), 0)
     const restore_timer = window.setTimeout(() => set_card_scale(1), 40)
 
     if (is_input_mode) {
@@ -220,12 +252,14 @@ export default function UserFooter() {
       }, 220)
 
       return () => {
+        window.clearTimeout(scale_timer)
         window.clearTimeout(restore_timer)
         window.clearTimeout(focus_timer)
       }
     }
 
     return () => {
+      window.clearTimeout(scale_timer)
       window.clearTimeout(restore_timer)
     }
   }, [is_input_mode])
@@ -239,8 +273,32 @@ export default function UserFooter() {
   }
 
   function close_input() {
+    post_typing_presence('typing_stop')
     chat.close_chat()
     set_flip_rotation((current_rotation) => current_rotation + 360)
+  }
+
+  function schedule_typing_stop() {
+    if (typing_timer_ref.current !== null) {
+      window.clearTimeout(typing_timer_ref.current)
+    }
+
+    typing_timer_ref.current = window.setTimeout(() => {
+      typing_timer_ref.current = null
+      post_typing_presence('typing_stop')
+    }, 5_000)
+  }
+
+  function handle_message_input_change() {
+    const has_text = Boolean(input_ref.current?.value.trim())
+
+    if (!has_text) {
+      post_typing_presence('typing_stop')
+      return
+    }
+
+    post_typing_presence('typing_start')
+    schedule_typing_stop()
   }
 
   function handle_paw_click() {
@@ -405,6 +463,7 @@ export default function UserFooter() {
     set_is_sending_text(true)
     chat.append_message(optimistic_message)
     reset_input_field()
+    post_typing_presence('typing_stop')
 
     try {
       const response = await fetch('/api/chat/message', {
@@ -488,6 +547,16 @@ export default function UserFooter() {
     event.preventDefault()
     void submit_chat_text(input_ref.current?.value ?? '')
   }
+
+  useEffect(() => {
+    return () => {
+      if (typing_timer_ref.current !== null) {
+        window.clearTimeout(typing_timer_ref.current)
+      }
+
+      post_typing_presence('typing_stop')
+    }
+  }, [post_typing_presence])
 
   function handle_send_click() {
     void submit_chat_text(input_ref.current?.value ?? '')
@@ -777,6 +846,7 @@ export default function UserFooter() {
                   autoComplete="off"
                   placeholder={content.message[render_locale]}
                   disabled={is_sending_text}
+                  onChange={handle_message_input_change}
                   className="
                     h-[48px] min-w-0 flex-1
                     rounded-full

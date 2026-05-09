@@ -113,6 +113,13 @@ export type reception_room_role_filter =
   | 'concierge'
   | 'bot'
 
+export type reception_room_participant_summary = {
+  participant_uuid: string
+  display_name: string
+  avatar_url: string | null
+  role: reception_room_role_filter
+}
+
 export type reception_search_filters = {
   keyword: string | null
   status_mode: reception_room_status_mode_filter | null
@@ -131,6 +138,9 @@ export type reception_room_summary = {
   display_name: string | null
   latest_message_text: string | null
   latest_message_at: string | null
+  avatar_url: string | null
+  typing_participants: reception_room_participant_summary[]
+  active_participants: reception_room_participant_summary[]
   participant_roles: reception_room_role_filter[]
   has_typing: boolean
   is_pending: boolean
@@ -273,7 +283,10 @@ function match_role(
   summary: reception_room_summary,
   role: reception_room_role_filter,
 ): boolean {
-  return summary.participant_roles.includes(role)
+  return (
+    summary.participant_roles.includes(role) ||
+    summary.active_participants.some((participant) => participant.role === role)
+  )
 }
 
 /**

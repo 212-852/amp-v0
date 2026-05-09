@@ -23,6 +23,22 @@ import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 import { create_browser_supabase } from '@/lib/db/browser'
 
+function post_presence(input: {
+  room_uuid: string
+  participant_uuid: string
+  action: 'enter' | 'leave'
+}) {
+  void fetch('/api/chat/presence', {
+    method: 'POST',
+    credentials: 'include',
+    keepalive: input.action === 'leave',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  }).catch(() => {})
+}
+
 function text_for(content: string | { ja?: string } | undefined) {
   if (typeof content === 'string') {
     return content
@@ -358,6 +374,22 @@ export function WebChat({
     messages,
     hydrate_chat,
   ])
+
+  useEffect(() => {
+    post_presence({
+      room_uuid,
+      participant_uuid,
+      action: 'enter',
+    })
+
+    return () => {
+      post_presence({
+        room_uuid,
+        participant_uuid,
+        action: 'leave',
+      })
+    }
+  }, [participant_uuid, room_uuid])
 
   useEffect(() => {
     if (!room_uuid) {

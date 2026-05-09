@@ -2,6 +2,12 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid_payload'
+import {
+  decide_active_participants,
+  decide_typing_participants,
+  is_participant_role,
+  type presence_participant,
+} from '@/lib/chat/presence/rules'
 
 import { debug_admin_reception } from './debug'
 import {
@@ -335,12 +341,17 @@ type room_row_min = {
 }
 
 type participant_row_min = {
+  participant_uuid: string
   room_uuid: string | null
   user_uuid: string | null
   visitor_uuid: string | null
   role: string | null
   last_channel: string | null
   status: string | null
+  is_active: boolean | null
+  is_typing: boolean | null
+  last_seen_at: string | null
+  typing_at: string | null
 }
 
 type message_row_min = {
@@ -351,6 +362,12 @@ type message_row_min = {
 
 type user_row_min = {
   user_uuid: string
+  display_name: string | null
+  image_url: string | null
+}
+
+type visitor_row_min = {
+  visitor_uuid: string
   display_name: string | null
 }
 
@@ -413,6 +430,50 @@ function unique_participant_roles(
   return Array.from(set)
 }
 
+function participant_display_name(input: {
+  participant: participant_row_min
+  users_by_uuid: Map<string, user_row_min>
+  visitors_by_uuid: Map<string, visitor_row_min>
+}) {
+  if (input.participant.user_uuid) {
+    return (
+      input.users_by_uuid.get(input.participant.user_uuid)?.display_name ?? null
+    )
+  }
+
+  if (input.participant.visitor_uuid) {
+    return (
+      input.visitors_by_uuid.get(input.participant.visitor_uuid)
+        ?.display_name ?? null
+    )
+  }
+
+  return null
+}
+
+function to_presence_participant(input: {
+  participant: participant_row_min
+  users_by_uuid: Map<string, user_row_min>
+  visitors_by_uuid: Map<string, visitor_row_min>
+}): presence_participant {
+  const role = is_participant_role(input.participant.role)
+    ? input.participant.role
+    : 'user'
+
+  return {
+    participant_uuid: input.participant.participant_uuid,
+    display_name: participant_display_name(input),
+    avatar_url: input.participant.user_uuid
+      ? input.users_by_uuid.get(input.participant.user_uuid)?.image_url ?? null
+      : null,
+    role,
+    is_active: input.participant.is_active === true,
+    is_typing: input.participant.is_typing === true,
+    last_seen_at: input.participant.last_seen_at,
+    typing_at: input.participant.typing_at,
+  }
+}
+
 async function load_reception_rooms(
   query: room_load_query,
 ): Promise<reception_room_summary[]> {
@@ -452,7 +513,9 @@ async function load_reception_rooms(
 
   const participants_result = await supabase
     .from('participants')
-    .select('room_uuid, user_uuid, visitor_uuid, role, last_channel, status')
+    .select(
+      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, last_channel, status, is_active, is_typing, last_seen_at, typing_at',
+    )
     .in('room_uuid', room_uuids)
 
   if (participants_result.error) {
@@ -469,11 +532,19 @@ async function load_reception_rooms(
     ),
   )
   const users_by_uuid = new Map<string, user_row_min>()
+  const visitor_uuids = Array.from(
+    new Set(
+      participants
+        .filter((row) => typeof row.visitor_uuid === 'string')
+        .map((row) => row.visitor_uuid as string),
+    ),
+  )
+  const visitors_by_uuid = new Map<string, visitor_row_min>()
 
   if (user_uuids.length > 0) {
     const users_result = await supabase
       .from('users')
-      .select('user_uuid, display_name')
+      .select('user_uuid, display_name, image_url')
       .in('user_uuid', user_uuids)
 
     if (users_result.error) {
@@ -483,6 +554,23 @@ async function load_reception_rooms(
     for (const row of (users_result.data ?? []) as user_row_min[]) {
       if (row.user_uuid) {
         users_by_uuid.set(row.user_uuid, row)
+      }
+    }
+  }
+
+  if (visitor_uuids.length > 0) {
+    const visitors_result = await supabase
+      .from('visitors')
+      .select('visitor_uuid, display_name')
+      .in('visitor_uuid', visitor_uuids)
+
+    if (visitors_result.error) {
+      throw visitors_result.error
+    }
+
+    for (const row of (visitors_result.data ?? []) as visitor_row_min[]) {
+      if (row.visitor_uuid) {
+        visitors_by_uuid.set(row.visitor_uuid, row)
       }
     }
   }
@@ -508,6 +596,8 @@ async function load_reception_rooms(
     latest_message_by_room.set(row.room_uuid, row)
   }
 
+  const now = new Date()
+
   return rooms.map((row) => {
     const room_participants = participants.filter(
       (p) => p.room_uuid === row.room_uuid,
@@ -515,13 +605,31 @@ async function load_reception_rooms(
     const user_participant =
       room_participants.find((p) => p.role === 'user') ?? null
     const user_uuid = user_participant?.user_uuid ?? null
-    const display_name = user_uuid
-      ? (users_by_uuid.get(user_uuid)?.display_name ?? null)
+    const display_name = user_participant
+      ? participant_display_name({
+          participant: user_participant,
+          users_by_uuid,
+          visitors_by_uuid,
+        })
+      : null
+    const avatar_url = user_uuid
+      ? users_by_uuid.get(user_uuid)?.image_url ?? null
       : null
     const latest = latest_message_by_room.get(row.room_uuid) ?? null
     const mode = normalize_room_mode(row.mode)
     const status = row.status
     const is_pending = status === 'active' && mode === 'concierge'
+    const presence_participants = room_participants.map((participant) =>
+      to_presence_participant({
+        participant,
+        users_by_uuid,
+        visitors_by_uuid,
+      }),
+    )
+    const typing_participants = decide_typing_participants(
+      presence_participants,
+      now,
+    )
 
     return {
       room_uuid: row.room_uuid,
@@ -531,10 +639,13 @@ async function load_reception_rooms(
       user_uuid,
       visitor_uuid: user_participant?.visitor_uuid ?? null,
       display_name,
+      avatar_url,
       latest_message_text: extract_text_from_message_body(latest?.body ?? null),
       latest_message_at: latest?.created_at ?? null,
+      typing_participants,
+      active_participants: decide_active_participants(presence_participants),
       participant_roles: unique_participant_roles(room_participants),
-      has_typing: false,
+      has_typing: typing_participants.length > 0,
       is_pending,
       updated_at: row.updated_at,
       action_id: row.action_id,
