@@ -144,6 +144,9 @@ export default function AdminReceptionPageClient({
         initial={initial_filters}
         onFiltersChange={handle_filters_change}
       />
+      <div className="px-1 text-[12px] font-medium text-neutral-500">
+        {rooms.length} 件
+      </div>
       <AdminReceptionList rooms={rooms} is_loading={is_loading} />
     </div>
   )

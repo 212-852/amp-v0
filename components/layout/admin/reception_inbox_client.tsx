@@ -26,7 +26,7 @@ export default function AdminReceptionInboxClient({
   const refresh = useCallback(async () => {
     try {
       const response = await fetch(
-        '/api/admin/reception/rooms?status_mode=concierge&pending_only=true',
+        '/api/admin/reception/rooms?status_mode=concierge',
         {
           method: 'GET',
           credentials: 'include',

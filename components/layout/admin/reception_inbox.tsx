@@ -12,7 +12,7 @@ const mini_filters: reception_search_filters = {
   status_mode: 'concierge',
   role: null,
   has_typing: false,
-  pending_only: true,
+  pending_only: false,
 }
 
 async function load_inbox_rooms(): Promise<reception_room_summary[]> {

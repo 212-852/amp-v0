@@ -251,8 +251,7 @@ function match_keyword(
 
   return (
     (summary.display_name?.toLowerCase().includes(needle) ?? false) ||
-    (summary.latest_message_text?.toLowerCase().includes(needle) ?? false) ||
-    summary.room_uuid.toLowerCase().includes(needle)
+    (summary.latest_message_text?.toLowerCase().includes(needle) ?? false)
   )
 }
 

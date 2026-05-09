@@ -9,7 +9,7 @@ import {
 import AdminReceptionPageClient from '@/components/admin/reception/page_client'
 
 const initial_filters: reception_search_filters = parse_reception_search_filters(
-  null,
+  { status_mode: 'concierge' },
 )
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +30,7 @@ export default async function AdminReceptionPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-2">
+      <header>
         <nav
           aria-label="Breadcrumb"
           className="flex items-center gap-1.5 text-[12px] font-medium text-neutral-500"
@@ -41,12 +41,6 @@ export default async function AdminReceptionPage() {
           <span aria-hidden>{'>'}</span>
           <span className="text-neutral-900">チャット一覧</span>
         </nav>
-        <div className="flex items-baseline justify-between">
-          <h1 className="text-lg font-semibold text-black">チャット一覧</h1>
-          <span className="text-[12px] text-neutral-500">
-            {initial_rooms.length} 件
-          </span>
-        </div>
       </header>
       <AdminReceptionPageClient
         initial_filters={initial_filters}

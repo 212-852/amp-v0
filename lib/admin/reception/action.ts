@@ -650,39 +650,48 @@ async function load_reception_rooms(
       updated_at: row.updated_at,
       action_id: row.action_id,
     }
+  }).sort((a, b) => {
+    const a_time = new Date(
+      a.latest_message_at ?? a.updated_at ?? 0,
+    ).getTime()
+    const b_time = new Date(
+      b.latest_message_at ?? b.updated_at ?? 0,
+    ).getTime()
+
+    return (Number.isNaN(b_time) ? 0 : b_time) -
+      (Number.isNaN(a_time) ? 0 : a_time)
   })
 }
 
 /**
- * Latest active concierge rooms for the admin mini inbox.
- *
- * "Active" = `rooms.status = 'active'` AND `rooms.mode = 'concierge'`.
- * Ordered by `rooms.updated_at` desc; capped by `limit`.
+ * Latest concierge rooms for compact inbox-style callers.
+ * Ordered by latest message timestamp, falling back to `rooms.updated_at`.
  */
 export async function list_active_reception_rooms(input: {
   limit: number
 }): Promise<reception_room_summary[]> {
   const safe_limit = Math.max(1, Math.min(input.limit, 20))
 
-  return load_reception_rooms({
-    statuses: ['active'],
+  const rooms = await load_reception_rooms({
+    statuses: null,
     modes: ['concierge'],
-    limit: safe_limit,
+    limit: RECEPTION_ROOM_LOAD_HARD_LIMIT,
   })
+
+  return rooms.slice(0, safe_limit)
 }
 
 /**
  * Filtered reception room list for the full admin reception page.
  *
- * SQL pre-filter: `status_mode` is translated by rules into a single
- * `rooms.status` / `rooms.mode` predicate so we don't fetch the entire
- * table. Remaining filters (keyword, role, pending_only, has_typing) run
- * in-memory via `apply_reception_search_filters` from rules.ts.
+ * Defaults to concierge rooms. Remaining filters run in-memory via
+ * `apply_reception_search_filters` from rules.ts.
  */
 export async function search_reception_rooms(
   filters: reception_search_filters,
 ): Promise<reception_room_summary[]> {
-  const sql_hint = resolve_reception_status_mode_query(filters.status_mode)
+  const mode_filter = filters.status_mode ?? 'concierge'
+  const sql_hint = resolve_reception_status_mode_query(mode_filter)
 
   const candidates = await load_reception_rooms({
     statuses: sql_hint.statuses,
@@ -690,5 +699,24 @@ export async function search_reception_rooms(
     limit: RECEPTION_ROOM_LOAD_HARD_LIMIT,
   })
 
-  return apply_reception_search_filters(candidates, filters)
+  const effective_filters: reception_search_filters = {
+    ...filters,
+    status_mode: mode_filter,
+  }
+  const visible = apply_reception_search_filters(
+    candidates,
+    effective_filters,
+  )
+
+  await debug_admin_reception({
+    event: 'reception_list_query_completed',
+    payload: {
+      raw_count: candidates.length,
+      visible_count: visible.length,
+      mode_filter,
+      keyword: filters.keyword,
+    },
+  })
+
+  return visible
 }
