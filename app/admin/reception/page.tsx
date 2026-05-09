@@ -1,28 +1,57 @@
 import Link from 'next/link'
+import { ArrowRight, MessageCircle, Search } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { search_reception_rooms } from '@/lib/admin/reception/action'
-import { debug_admin_reception } from '@/lib/admin/reception/debug'
 import {
-  parse_reception_search_filters,
-  type reception_search_filters,
-} from '@/lib/admin/reception/rules'
-
-import AdminReceptionPageClient from '@/components/admin/reception/page_client'
+  list_concierge_rooms,
+  type concierge_room,
+} from '@/lib/admin/reception/rooms'
 
 export const dynamic = 'force-dynamic'
 
-type admin_reception_page_data =
-  | {
-      ok: true
-      initial_filters: reception_search_filters
-      initial_rooms: Awaited<ReturnType<typeof search_reception_rooms>>
-    }
-  | {
-      ok: false
-    }
+const PAGE_LIMIT = 50
 
-function ReceptionPageShell({ children }: { children: ReactNode }) {
+function format_relative_time(iso: string | null): string {
+  if (!iso) {
+    return ''
+  }
+
+  const date = new Date(iso)
+  const diff_ms = Date.now() - date.getTime()
+
+  if (Number.isNaN(diff_ms)) {
+    return ''
+  }
+
+  const diff_min = Math.floor(diff_ms / 60_000)
+
+  if (diff_min < 1) {
+    return 'たった今'
+  }
+
+  if (diff_min < 60) {
+    return `${diff_min}分前`
+  }
+
+  const diff_hour = Math.floor(diff_min / 60)
+
+  if (diff_hour < 24) {
+    return `${diff_hour}時間前`
+  }
+
+  const diff_day = Math.floor(diff_hour / 24)
+
+  if (diff_day < 7) {
+    return `${diff_day}日前`
+  }
+
+  return date.toLocaleDateString('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+  })
+}
+
+function ReceptionShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col gap-4">
       <header>
@@ -33,67 +62,120 @@ function ReceptionPageShell({ children }: { children: ReactNode }) {
           <Link href="/admin" className="transition-colors hover:text-black">
             Home
           </Link>
-          <span aria-hidden>{'>'}</span>
+          <ArrowRight
+            className="h-3 w-3 text-neutral-400"
+            strokeWidth={2}
+            aria-hidden
+          />
           <span className="text-neutral-900">チャット一覧</span>
         </nav>
       </header>
+      <section
+        aria-label="Reception search"
+        className="rounded-2xl border border-neutral-200 bg-white p-3 shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
+      >
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-300"
+            strokeWidth={2}
+            aria-hidden
+          />
+          <input
+            type="search"
+            inputMode="search"
+            placeholder="検索 (準備中)"
+            disabled
+            aria-disabled
+            className="block w-full cursor-not-allowed rounded-full border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-[13px] text-neutral-400 placeholder:text-neutral-300"
+          />
+        </div>
+      </section>
       {children}
     </div>
   )
 }
 
-function ReceptionPageFallback() {
+function RoomCard({ room }: { room: concierge_room }) {
+  const short_id = room.room_uuid.slice(0, 8)
+  const relative_time = format_relative_time(room.updated_at)
+
   return (
-    <ReceptionPageShell>
-      <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
-        チャット一覧を読み込めませんでした
+    <Link
+      href={`/admin/reception/${room.room_uuid}`}
+      className="flex w-full items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-3 transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+    >
+      <div
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+        aria-hidden
+      >
+        <MessageCircle className="h-4 w-4" strokeWidth={2} />
       </div>
-    </ReceptionPageShell>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="truncate text-[13px] font-semibold leading-tight text-black">
+            Concierge room
+          </span>
+          {relative_time ? (
+            <span className="shrink-0 text-[11px] font-medium leading-none text-neutral-400">
+              {relative_time}
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-500">
+          対応が必要です
+        </p>
+        <p className="mt-1 truncate text-[10px] font-mono leading-none text-neutral-400">
+          {short_id}
+        </p>
+      </div>
+    </Link>
   )
 }
 
-async function load_admin_reception_page_data(): Promise<admin_reception_page_data> {
-  try {
-    const initial_filters: reception_search_filters =
-      parse_reception_search_filters({ status_mode: 'concierge' })
-    const initial_rooms = await search_reception_rooms(initial_filters)
+function EmptyState() {
+  return (
+    <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
+      コンシェルジュ案件はまだありません
+    </div>
+  )
+}
 
-    return {
-      ok: true,
-      initial_filters,
-      initial_rooms: Array.isArray(initial_rooms) ? initial_rooms : [],
-    }
-  } catch (error) {
-    await debug_admin_reception({
-      event: 'admin_reception_failed',
-      data: {
-        step: 'admin_reception_page_load',
-        error_message: error instanceof Error ? error.message : String(error),
-        error_stack: error instanceof Error ? error.stack : null,
-      },
-    })
-
-    console.error('[admin_reception_page] initial_load_failed', {
-      error: error instanceof Error ? error.message : String(error),
-    })
-
-    return { ok: false }
-  }
+function ErrorState() {
+  return (
+    <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
+      チャット一覧を読み込めませんでした
+    </div>
+  )
 }
 
 export default async function AdminReceptionPage() {
-  const data = await load_admin_reception_page_data()
+  const result = await list_concierge_rooms({ limit: PAGE_LIMIT })
 
-  if (!data.ok) {
-    return <ReceptionPageFallback />
+  if (!result.ok) {
+    return (
+      <ReceptionShell>
+        <ErrorState />
+      </ReceptionShell>
+    )
+  }
+
+  if (result.rooms.length === 0) {
+    return (
+      <ReceptionShell>
+        <EmptyState />
+      </ReceptionShell>
+    )
   }
 
   return (
-    <ReceptionPageShell>
-      <AdminReceptionPageClient
-        initial_filters={data.initial_filters}
-        initial_rooms={data.initial_rooms}
-      />
-    </ReceptionPageShell>
+    <ReceptionShell>
+      <ul className="flex flex-col gap-2">
+        {result.rooms.map((room) => (
+          <li key={room.room_uuid}>
+            <RoomCard room={room} />
+          </li>
+        ))}
+      </ul>
+    </ReceptionShell>
   )
 }
