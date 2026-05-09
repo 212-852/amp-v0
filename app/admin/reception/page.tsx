@@ -154,7 +154,7 @@ export default async function AdminReceptionPage({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-[13px] font-semibold leading-tight text-black">
-                      {room.title}
+                      {room.display_name}
                     </span>
                     <span className="shrink-0 text-[11px] font-medium leading-none text-neutral-400">
                       {format_time(room.updated_at)}

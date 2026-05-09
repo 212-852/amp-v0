@@ -1,6 +1,7 @@
 import Image from 'next/image'
-import { ChevronDown, Settings, UserRound } from 'lucide-react'
+import { UserRound } from 'lucide-react'
 
+import AdminHeaderMenu from '@/components/admin/menu'
 import { AdminReceptionButton } from '@/components/admin/reception_button'
 
 type AdminHeaderProps = {
@@ -9,9 +10,6 @@ type AdminHeaderProps = {
   role?: string | null
   tier?: string | null
 }
-
-const icon_button_class =
-  'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-black shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-colors hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 active:scale-[0.98] sm:h-11 sm:w-11'
 
 /**
  * Admin header is a presentational shell. It composes the reception
@@ -30,6 +28,8 @@ export default function AdminHeader({
       .map((value) => value?.trim())
       .filter(Boolean)
       .join(' ') || 'admin'
+  const can_access_management =
+    role === 'admin' && (tier === 'owner' || tier === 'core')
 
   return (
     <header className="border-b border-black/[0.06] bg-white px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] shadow-[0_1px_0_rgba(0,0,0,0.03)]">
@@ -63,20 +63,7 @@ export default function AdminHeader({
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
           <AdminReceptionButton />
-          <button
-            type="button"
-            className={icon_button_class}
-            aria-label="Settings"
-          >
-            <Settings className="h-5 w-5" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            className={icon_button_class}
-            aria-label="Menu"
-          >
-            <ChevronDown className="h-5 w-5" strokeWidth={2} />
-          </button>
+          <AdminHeaderMenu can_access_management={can_access_management} />
         </div>
       </div>
     </header>

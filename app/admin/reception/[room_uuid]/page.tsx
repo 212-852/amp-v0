@@ -68,8 +68,8 @@ export default async function AdminReceptionRoomPage({
   const room = result.room
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="shrink-0 bg-neutral-100 pb-3">
+    <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+      <header className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
         <nav
           aria-label="Breadcrumb"
           className="flex items-center gap-1.5 text-[12px] font-medium text-neutral-500"
@@ -89,28 +89,17 @@ export default async function AdminReceptionRoomPage({
         </nav>
       </header>
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
-        <div className="shrink-0 border-b border-neutral-200 p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-            room_uuid
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+        <div className="shrink-0 border-b border-neutral-200 px-6 py-4">
+          <div className="truncate text-[16px] font-semibold leading-tight text-black">
+            {room?.display_name ?? 'Guest'}
           </div>
-          <div className="mt-1 break-all font-mono text-[13px] font-semibold text-black">
-            {room_uuid}
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-2 text-[12px]">
-            <div className="rounded-xl bg-neutral-100 px-3 py-2">
-              <div className="font-medium text-neutral-500">mode</div>
-              <div className="mt-1 font-semibold text-black">
-                {room?.mode ?? 'unknown'}
-              </div>
-            </div>
-            <div className="rounded-xl bg-neutral-100 px-3 py-2">
-              <div className="font-medium text-neutral-500">status</div>
-              <div className="mt-1 font-semibold text-black">
-                {result.ok ? (room ? 'found' : 'not found') : 'load failed'}
-              </div>
-            </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-neutral-500">
+            <span>{room?.mode ?? 'unknown'}</span>
+            <span aria-hidden>{'/'}</span>
+            <span>{result.ok ? (room ? 'found' : 'not found') : 'load failed'}</span>
+            <span aria-hidden>{'/'}</span>
+            <span className="font-mono">{room_uuid.slice(0, 8)}</span>
           </div>
         </div>
 
@@ -119,7 +108,7 @@ export default async function AdminReceptionRoomPage({
           load_failed={!message_result.ok}
         />
 
-        <div className="shrink-0 border-t border-neutral-200 bg-neutral-50 px-4 py-3 text-center text-sm font-medium text-neutral-500">
+        <div className="shrink-0 border-t border-neutral-200 bg-neutral-50 px-6 py-3 text-center text-sm font-medium text-neutral-500">
           返信機能は次のステップで実装
         </div>
       </section>

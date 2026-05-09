@@ -63,7 +63,7 @@ export default function AdminChatTimeline({
   return (
     <div
       ref={container_ref}
-      className="min-h-0 flex-1 overflow-y-auto px-1 py-3"
+      className="min-h-0 w-full flex-1 overflow-y-auto px-6 py-3"
     >
       {load_failed ? (
         <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
