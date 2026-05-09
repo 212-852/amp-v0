@@ -314,8 +314,8 @@ export async function summarize_reception(): Promise<reception_summary> {
 // ============================================================================
 // Reception room inbox / search loader
 // ----------------------------------------------------------------------------
-// Single-core data fetch used by the mini inbox and the full reception list
-// page. Filtering decisions live in rules.ts; here we only execute queries.
+// Source of truth: `rooms` only. Filtering decisions live in rules.ts; here we
+// only execute queries.
 //
 // Column policy:
 //   Use ONLY columns proven to exist in the live DB. Presence-style columns
@@ -323,6 +323,13 @@ export async function summarize_reception(): Promise<reception_summary> {
 //   migration that is not applied yet, so they MUST NOT appear in selects.
 //   typing/active participant arrays in the summary are intentionally empty
 //   until those columns are available.
+//
+// Failure policy:
+//   - `rooms` query failure -> throws ReceptionQueryError (nothing to render).
+//   - Any enrichment query failure (participants/users/visitors/messages) is
+//     logged via `admin_reception_failed` but never drops the room.
+//     Missing fields fall back to null/empty so concierge rooms always
+//     surface.
 // ============================================================================
 
 const RECEPTION_ROOM_LOAD_HARD_LIMIT = 100
@@ -369,12 +376,68 @@ function fail(query: string, error: unknown): never {
   throw new ReceptionQueryError(query, error)
 }
 
+function pick_supabase_error(error: unknown) {
+  const fields =
+    error && typeof error === 'object'
+      ? (error as Record<string, unknown>)
+      : {}
+
+  return {
+    error_code: fields.code ?? null,
+    error_message:
+      fields.message ?? (error instanceof Error ? error.message : null),
+    error_details: fields.details ?? null,
+    error_hint: fields.hint ?? null,
+  }
+}
+
 type room_row_min = {
   room_uuid: string
+  room_type: string | null
   status: string | null
   mode: string | null
   action_id: string | null
+  created_at: string | null
   updated_at: string | null
+}
+
+type participant_safe_row = {
+  participant_uuid: string
+  room_uuid: string | null
+  user_uuid: string | null
+  visitor_uuid: string | null
+  role: string | null
+  status: string | null
+}
+
+type user_safe_row = {
+  user_uuid: string
+  display_name: string | null
+  image_url: string | null
+}
+
+type visitor_safe_row = {
+  visitor_uuid: string
+  display_name: string | null
+}
+
+type latest_message_record = {
+  row: Record<string, unknown>
+  created_at: string | null
+}
+
+type room_enrichment = {
+  participants_by_room: Map<string, participant_safe_row[]>
+  users_by_uuid: Map<string, user_safe_row>
+  visitors_by_uuid: Map<string, visitor_safe_row>
+  latest_message_by_room: Map<string, latest_message_record>
+}
+
+const EMPTY_ENRICHMENT: room_enrichment = {
+  participants_by_room: new Map(),
+  users_by_uuid: new Map(),
+  visitors_by_uuid: new Map(),
+  latest_message_by_room: new Map(),
 }
 
 const ROOM_SELECT =
@@ -493,9 +556,18 @@ function unique_participant_roles(
   return Array.from(set)
 }
 
-async function load_reception_rooms(
+/**
+ * Source-of-truth rooms query. Throws when `rooms` itself fails so the
+ * caller can decide between propagating (full search) and recovering
+ * (top mini inbox).
+ *
+ * Only constraints applied here: optional `status` IN, optional `mode` IN,
+ * `order by updated_at desc`, hard `limit`. No `room_type` constraint - a
+ * room being concierge mode is enough to surface it.
+ */
+async function fetch_rooms_only(
   query: room_load_query,
-): Promise<reception_room_summary[]> {
+): Promise<room_row_min[]> {
   const limit = Math.max(
     1,
     Math.min(query.limit, RECEPTION_ROOM_LOAD_HARD_LIMIT),
@@ -504,7 +576,6 @@ async function load_reception_rooms(
   let rooms_query = supabase
     .from('rooms')
     .select(ROOM_SELECT)
-    .eq('room_type', 'direct')
     .order('updated_at', { ascending: false })
     .limit(limit)
 
@@ -516,40 +587,69 @@ async function load_reception_rooms(
     rooms_query = rooms_query.in('mode', query.modes)
   }
 
-  const rooms_result = await rooms_query
+  const result = await rooms_query
 
-  if (rooms_result.error) {
-    fail('rooms', rooms_result.error)
+  if (result.error) {
+    fail('rooms', result.error)
   }
 
-  const rooms = (rooms_result.data ?? []) as room_row_min[]
+  return (result.data ?? []) as room_row_min[]
+}
 
+/**
+ * Best-effort enrichment for an already-loaded set of rooms. Each side
+ * query that fails is logged via `admin_reception_failed` (with the query
+ * label and full Postgres error fields) but does NOT abort enrichment for
+ * the remaining tables, and never drops rooms. Callers always receive a
+ * complete (possibly empty-mapped) `room_enrichment`.
+ */
+async function try_enrich_rooms(
+  rooms: room_row_min[],
+): Promise<room_enrichment> {
   if (rooms.length === 0) {
-    return []
+    return EMPTY_ENRICHMENT
   }
 
   const room_uuids = rooms.map((row) => row.room_uuid)
+  const participants_by_room = new Map<string, participant_safe_row[]>()
+  const users_by_uuid = new Map<string, user_safe_row>()
+  const visitors_by_uuid = new Map<string, visitor_safe_row>()
+  const latest_message_by_room = new Map<string, latest_message_record>()
 
-  const participants_result = await supabase
-    .from('participants')
-    .select(PARTICIPANT_SELECT)
-    .in('room_uuid', room_uuids)
+  let participants: participant_safe_row[] = []
 
-  if (participants_result.error) {
-    fail('participants', participants_result.error)
+  try {
+    const participants_result = await supabase
+      .from('participants')
+      .select(PARTICIPANT_SELECT)
+      .in('room_uuid', room_uuids)
+
+    if (participants_result.error) {
+      throw participants_result.error
+    }
+
+    participants =
+      (participants_result.data ?? []) as participant_safe_row[]
+
+    for (const row of participants) {
+      if (typeof row.room_uuid !== 'string') {
+        continue
+      }
+
+      const list = participants_by_room.get(row.room_uuid) ?? []
+      list.push(row)
+      participants_by_room.set(row.room_uuid, list)
+    }
+  } catch (error) {
+    await debug_admin_reception({
+      event: 'admin_reception_failed',
+      payload: {
+        step: 'list_rooms',
+        query: 'participants',
+        ...pick_supabase_error(error),
+      },
+    })
   }
-
-  type participant_safe_row = {
-    participant_uuid: string
-    room_uuid: string | null
-    user_uuid: string | null
-    visitor_uuid: string | null
-    role: string | null
-    status: string | null
-  }
-
-  const participants =
-    (participants_result.data ?? []) as participant_safe_row[]
 
   const user_uuids = Array.from(
     new Set(
@@ -568,138 +668,184 @@ async function load_reception_rooms(
     ),
   )
 
-  type user_safe_row = {
-    user_uuid: string
-    display_name: string | null
-    image_url: string | null
-  }
-
-  type visitor_safe_row = {
-    visitor_uuid: string
-    display_name: string | null
-  }
-
-  const users_by_uuid = new Map<string, user_safe_row>()
-  const visitors_by_uuid = new Map<string, visitor_safe_row>()
-
   if (user_uuids.length > 0) {
-    const users_result = await supabase
-      .from('users')
-      .select(USER_SELECT)
-      .in('user_uuid', user_uuids)
+    try {
+      const users_result = await supabase
+        .from('users')
+        .select(USER_SELECT)
+        .in('user_uuid', user_uuids)
 
-    if (users_result.error) {
-      fail('users', users_result.error)
-    }
-
-    for (const row of (users_result.data ?? []) as user_safe_row[]) {
-      if (row.user_uuid) {
-        users_by_uuid.set(row.user_uuid, row)
+      if (users_result.error) {
+        throw users_result.error
       }
+
+      for (const row of (users_result.data ?? []) as user_safe_row[]) {
+        if (row.user_uuid) {
+          users_by_uuid.set(row.user_uuid, row)
+        }
+      }
+    } catch (error) {
+      await debug_admin_reception({
+        event: 'admin_reception_failed',
+        payload: {
+          step: 'list_rooms',
+          query: 'users',
+          ...pick_supabase_error(error),
+        },
+      })
     }
   }
 
   if (visitor_uuids.length > 0) {
-    const visitors_result = await supabase
-      .from('visitors')
-      .select(VISITOR_SELECT)
-      .in('visitor_uuid', visitor_uuids)
+    try {
+      const visitors_result = await supabase
+        .from('visitors')
+        .select(VISITOR_SELECT)
+        .in('visitor_uuid', visitor_uuids)
 
-    if (visitors_result.error) {
-      fail('visitors', visitors_result.error)
-    }
-
-    for (const row of (visitors_result.data ?? []) as visitor_safe_row[]) {
-      if (row.visitor_uuid) {
-        visitors_by_uuid.set(row.visitor_uuid, row)
+      if (visitors_result.error) {
+        throw visitors_result.error
       }
+
+      for (const row of (visitors_result.data ?? []) as visitor_safe_row[]) {
+        if (row.visitor_uuid) {
+          visitors_by_uuid.set(row.visitor_uuid, row)
+        }
+      }
+    } catch (error) {
+      await debug_admin_reception({
+        event: 'admin_reception_failed',
+        payload: {
+          step: 'list_rooms',
+          query: 'visitors',
+          ...pick_supabase_error(error),
+        },
+      })
     }
   }
 
-  const messages_result = await supabase
-    .from('messages')
-    .select('*')
-    .in('room_uuid', room_uuids)
-    .order('created_at', { ascending: false })
-    .limit(limit * 8)
+  try {
+    const messages_result = await supabase
+      .from('messages')
+      .select('*')
+      .in('room_uuid', room_uuids)
+      .order('created_at', { ascending: false })
+      .limit(rooms.length * 8)
 
-  if (messages_result.error) {
-    fail('messages', messages_result.error)
-  }
-
-  const latest_message_by_room = new Map<
-    string,
-    { row: Record<string, unknown>; created_at: string | null }
-  >()
-
-  for (const raw of (messages_result.data ?? []) as Array<
-    Record<string, unknown>
-  >) {
-    const room_uuid =
-      typeof raw.room_uuid === 'string' ? raw.room_uuid : null
-
-    if (!room_uuid || latest_message_by_room.has(room_uuid)) {
-      continue
+    if (messages_result.error) {
+      throw messages_result.error
     }
 
-    latest_message_by_room.set(room_uuid, {
-      row: raw,
-      created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
+    for (const raw of (messages_result.data ?? []) as Array<
+      Record<string, unknown>
+    >) {
+      const room_uuid =
+        typeof raw.room_uuid === 'string' ? raw.room_uuid : null
+
+      if (!room_uuid || latest_message_by_room.has(room_uuid)) {
+        continue
+      }
+
+      latest_message_by_room.set(room_uuid, {
+        row: raw,
+        created_at:
+          typeof raw.created_at === 'string' ? raw.created_at : null,
+      })
+    }
+  } catch (error) {
+    await debug_admin_reception({
+      event: 'admin_reception_failed',
+      payload: {
+        step: 'list_rooms',
+        query: 'messages',
+        ...pick_supabase_error(error),
+      },
     })
   }
 
-  const summaries: reception_room_summary[] = rooms.map((row) => {
-    const room_participants = participants.filter(
-      (p) => p.room_uuid === row.room_uuid,
-    )
-    const user_participant =
-      room_participants.find((p) => p.role === 'user') ?? null
-    const user_uuid = user_participant?.user_uuid ?? null
-    const visitor_uuid = user_participant?.visitor_uuid ?? null
+  return {
+    participants_by_room,
+    users_by_uuid,
+    visitors_by_uuid,
+    latest_message_by_room,
+  }
+}
 
-    const display_name_from_user = user_uuid
-      ? (users_by_uuid.get(user_uuid)?.display_name?.trim() ?? null)
-      : null
-    const display_name_from_visitor = visitor_uuid
-      ? (visitors_by_uuid.get(visitor_uuid)?.display_name?.trim() ?? null)
-      : null
-    const display_name =
-      display_name_from_user && display_name_from_user.length > 0
-        ? display_name_from_user
-        : display_name_from_visitor && display_name_from_visitor.length > 0
-          ? display_name_from_visitor
-          : null
-    const avatar_url = user_uuid
-      ? (users_by_uuid.get(user_uuid)?.image_url ?? null)
-      : null
+function build_room_summary(
+  row: room_row_min,
+  enrichment: room_enrichment,
+): reception_room_summary {
+  const room_participants =
+    enrichment.participants_by_room.get(row.room_uuid) ?? []
+  const user_participant =
+    room_participants.find((p) => p.role === 'user') ?? null
+  const user_uuid = user_participant?.user_uuid ?? null
+  const visitor_uuid = user_participant?.visitor_uuid ?? null
 
-    const latest = latest_message_by_room.get(row.room_uuid) ?? null
-    const latest_text = latest ? extract_text_from_message_row(latest.row) : null
+  const display_name_from_user = user_uuid
+    ? (enrichment.users_by_uuid.get(user_uuid)?.display_name?.trim() ?? null)
+    : null
+  const display_name_from_visitor = visitor_uuid
+    ? (enrichment.visitors_by_uuid
+        .get(visitor_uuid)
+        ?.display_name?.trim() ?? null)
+    : null
+  const display_name =
+    display_name_from_user && display_name_from_user.length > 0
+      ? display_name_from_user
+      : display_name_from_visitor && display_name_from_visitor.length > 0
+        ? display_name_from_visitor
+        : null
+  const avatar_url = user_uuid
+    ? (enrichment.users_by_uuid.get(user_uuid)?.image_url ?? null)
+    : null
 
-    const mode = normalize_room_mode(row.mode)
-    const status = row.status
-    const is_pending = status === 'active' && mode === 'concierge'
+  const latest = enrichment.latest_message_by_room.get(row.room_uuid) ?? null
+  const latest_text = latest
+    ? extract_text_from_message_row(latest.row)
+    : null
 
-    return {
-      room_uuid: row.room_uuid,
-      status,
-      mode,
-      channel: null,
-      user_uuid,
-      visitor_uuid,
-      display_name,
-      avatar_url,
-      latest_message_text: latest_text,
-      latest_message_at: latest?.created_at ?? null,
-      typing_participants: [],
-      active_participants: [],
-      participant_roles: unique_participant_roles(room_participants),
-      has_typing: false,
-      is_pending,
-      updated_at: row.updated_at,
-      action_id: row.action_id,
-    }
-  })
+  const mode = normalize_room_mode(row.mode)
+  const status = row.status
+  const is_pending = status === 'active' && mode === 'concierge'
+
+  return {
+    room_uuid: row.room_uuid,
+    status,
+    mode,
+    channel: null,
+    user_uuid,
+    visitor_uuid,
+    display_name,
+    avatar_url,
+    latest_message_text: latest_text,
+    latest_message_at: latest?.created_at ?? null,
+    typing_participants: [],
+    active_participants: [],
+    participant_roles: unique_participant_roles(room_participants),
+    has_typing: false,
+    is_pending,
+    updated_at: row.updated_at,
+    action_id: row.action_id,
+  }
+}
+
+/**
+ * Convenience composition for the full reception list flow. Throws on
+ * `rooms` failure (so the search API can return a hard error), otherwise
+ * always builds summaries with whatever enrichment succeeded.
+ */
+async function load_reception_rooms(
+  query: room_load_query,
+): Promise<reception_room_summary[]> {
+  const rooms = await fetch_rooms_only(query)
+
+  if (rooms.length === 0) {
+    return []
+  }
+
+  const enrichment = await try_enrich_rooms(rooms)
+  const summaries = rooms.map((row) => build_room_summary(row, enrichment))
 
   return summaries.sort((a, b) => {
     const a_time = new Date(
@@ -716,25 +862,133 @@ async function load_reception_rooms(
 }
 
 /**
- * Latest concierge rooms for the admin mini inbox.
- *
- * Filter: `rooms.mode = 'concierge'` only (no status constraint, so rooms
- * still surface even when temporarily marked inactive).
- * Order: newest activity first.
+ * Diagnostic query used when the top inbox finds zero concierge rooms.
+ * Looks at the most recent rooms regardless of mode so we can tell whether
+ * the table is empty, the column is wrong, or simply there are no
+ * concierge rooms yet. Errors are captured in the returned payload.
  */
-export async function list_active_reception_rooms(input: {
+async function diagnose_empty_concierge_rooms(): Promise<{
+  diag_total: number
+  diag_modes: string[]
+  diag_error: ReturnType<typeof pick_supabase_error> | null
+}> {
+  const result = await supabase
+    .from('rooms')
+    .select('mode')
+    .order('updated_at', { ascending: false })
+    .limit(50)
+
+  if (result.error) {
+    return {
+      diag_total: 0,
+      diag_modes: [],
+      diag_error: pick_supabase_error(result.error),
+    }
+  }
+
+  const rows = (result.data ?? []) as Array<{ mode: string | null }>
+  const modes = Array.from(
+    new Set(
+      rows
+        .map((row) => row.mode)
+        .filter((value): value is string => typeof value === 'string'),
+    ),
+  )
+
+  return {
+    diag_total: rows.length,
+    diag_modes: modes,
+    diag_error: null,
+  }
+}
+
+/**
+ * Top mini-inbox loader used under the admin header.
+ *
+ * Behavior contract:
+ *   - Source of truth = `rooms` only (`mode = 'concierge'`, ordered by
+ *     `updated_at desc`, hard limit).
+ *   - Rooms render even when message / participant / user data is missing
+ *     (see `inbox_item.tsx` mini fallbacks: "Concierge room",
+ *     "対応が必要です", `updated_at`).
+ *   - Always emits `reception_top_rooms_loaded` with raw_count,
+ *     visible_count, room_uuids, modes.
+ *   - When `raw_count === 0`, attaches diagnostic info from the rooms
+ *     table so we can distinguish "no concierge rooms yet" from "rooms
+ *     query is broken".
+ */
+export async function list_top_reception_rooms(input: {
   limit: number
 }): Promise<reception_room_summary[]> {
   const safe_limit = Math.max(1, Math.min(input.limit, 20))
 
-  const rooms = await load_reception_rooms({
-    statuses: null,
-    modes: ['concierge'],
-    limit: RECEPTION_ROOM_LOAD_HARD_LIMIT,
+  let rooms: room_row_min[] = []
+
+  try {
+    rooms = await fetch_rooms_only({
+      statuses: null,
+      modes: ['concierge'],
+      limit: safe_limit,
+    })
+  } catch (error) {
+    await debug_admin_reception({
+      event: 'admin_reception_failed',
+      payload: {
+        step: 'list_rooms',
+        query: 'rooms',
+        ...pick_supabase_error(error),
+      },
+    })
+    return []
+  }
+
+  const raw_count = rooms.length
+  const room_uuids = rooms.map((row) => row.room_uuid)
+  const modes = Array.from(
+    new Set(
+      rooms
+        .map((row) => row.mode)
+        .filter((value): value is string => typeof value === 'string'),
+    ),
+  )
+
+  if (raw_count === 0) {
+    const diag = await diagnose_empty_concierge_rooms()
+
+    await debug_admin_reception({
+      event: 'reception_top_rooms_loaded',
+      payload: {
+        raw_count: 0,
+        visible_count: 0,
+        room_uuids: [],
+        modes: [],
+        ...diag,
+      },
+    })
+
+    return []
+  }
+
+  const enrichment = await try_enrich_rooms(rooms)
+  const summaries = rooms.map((row) => build_room_summary(row, enrichment))
+
+  await debug_admin_reception({
+    event: 'reception_top_rooms_loaded',
+    payload: {
+      raw_count,
+      visible_count: summaries.length,
+      room_uuids,
+      modes,
+    },
   })
 
-  return rooms.slice(0, safe_limit)
+  return summaries
 }
+
+/**
+ * Backwards-compatible alias for the mini inbox loader.
+ */
+export const list_active_reception_rooms = list_top_reception_rooms
 
 /**
  * Filtered reception room list for the full admin reception page.

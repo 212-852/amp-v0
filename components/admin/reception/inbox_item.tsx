@@ -72,10 +72,22 @@ export default function AdminReceptionInboxItem({
   room,
   variant = 'mini',
 }: AdminReceptionInboxItemProps) {
-  const display_name = room.display_name?.trim() || 'ゲスト'
+  const trimmed_name = room.display_name?.trim() ?? ''
+  const trimmed_preview = room.latest_message_text?.trim() ?? ''
+  const display_name =
+    trimmed_name.length > 0
+      ? trimmed_name
+      : variant === 'mini'
+        ? 'Concierge room'
+        : 'ゲスト'
   const channel = room.channel ? channel_label[room.channel] ?? room.channel : null
   const mode = room.mode ? mode_label[room.mode] ?? room.mode : null
-  const preview = room.latest_message_text?.trim() || ''
+  const preview =
+    trimmed_preview.length > 0
+      ? trimmed_preview
+      : variant === 'mini'
+        ? '対応が必要です'
+        : ''
   const typing_text =
     room.typing_participants.length === 0
       ? null
@@ -136,7 +148,7 @@ export default function AdminReceptionInboxItem({
                 typing_text ? 'text-amber-700' : 'text-neutral-500'
               }`}
             >
-              {typing_text ?? (preview || '(まだメッセージがありません)')}
+              {typing_text ?? preview}
             </div>
             {room.active_participants.length > 0 ? (
               <div className="mt-1 flex flex-wrap items-center gap-1">
