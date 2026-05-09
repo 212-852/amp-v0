@@ -1,5 +1,4 @@
-import Link from 'next/link'
-import { ArrowRight, MessageCircle } from 'lucide-react'
+import { MessageCircle } from 'lucide-react'
 
 import type { reception_room } from '@/lib/admin/reception/room'
 
@@ -45,44 +44,32 @@ export default function AdminReception({ rooms }: AdminReceptionProps) {
     >
       <ul className="flex flex-col gap-2">
         {rooms.map((room) => (
-          <li key={room.room_uuid}>
-            <Link
-              href={`/admin/reception/${room.room_uuid}`}
-              className="flex w-full items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-3 transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+          <li
+            key={room.room_uuid}
+            className="flex w-full items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-3"
+          >
+            <div
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+              aria-hidden
             >
-              <div
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
-                aria-hidden
-              >
-                <MessageCircle className="h-4 w-4" strokeWidth={2} />
+              <MessageCircle className="h-4 w-4" strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="truncate text-[13px] font-semibold leading-tight text-black">
+                  {room.title}
+                </span>
+                <span className="shrink-0 text-[11px] font-medium leading-none text-neutral-400">
+                  {format_time(room.updated_at)}
+                </span>
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[13px] font-semibold leading-tight text-black">
-                    {room.title}
-                  </span>
-                  <span className="shrink-0 text-[11px] font-medium leading-none text-neutral-400">
-                    {format_time(room.updated_at)}
-                  </span>
-                </div>
-                <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-600">
-                  {room.preview}
-                </p>
-              </div>
-            </Link>
+              <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-600">
+                {room.preview}
+              </p>
+            </div>
           </li>
         ))}
       </ul>
-
-      <div className="flex justify-end">
-        <Link
-          href="/admin/reception"
-          className="inline-flex items-center gap-1 text-[12px] font-semibold text-neutral-600 transition-colors hover:text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
-        >
-          一覧へ
-          <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
-        </Link>
-      </div>
     </section>
   )
 }
