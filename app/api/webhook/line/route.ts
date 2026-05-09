@@ -3,13 +3,13 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
-import { clean_uuid } from '@/lib/db/uuid_payload'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 import {
   resolve_dispatch_locale,
   resolve_line_dispatch_identity,
 } from '@/lib/dispatch/context'
-import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
-import { notify_new_user_created } from '@/lib/notify/new_user_created'
+import { fetch_line_messaging_profile } from '@/lib/line/messaging/profile'
+import { notify_new_user_created } from '@/lib/notify/user/created'
 import { deliver_line_text_reply } from '@/lib/output/line'
 
 type line_webhook_event = {

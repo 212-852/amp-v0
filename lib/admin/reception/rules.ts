@@ -7,10 +7,8 @@
 //   - `lib/notify/recipients.ts`     (concierge target filtering)
 //   - `app/api/admin/reception/route.ts` (request body parsing)
 //
-// Room-list / inbox filtering used to live here too. After the reception
-// page was rebuilt as a minimal `rooms`-only view those helpers are no
-// longer needed; if filters come back, add them next to the new
-// `lib/admin/reception/rooms.ts` module instead of here.
+// Room-list helpers (card type, list-input parser, keyword matcher) live
+// further down in this same file so all reception rules ship from one place.
 // ============================================================================
 
 export type reception_state = 'open' | 'offline'
@@ -104,4 +102,101 @@ export function should_admin_receive_concierge_notify(
   }
 
   return state === 'open'
+}
+
+// ============================================================================
+// Reception room cards
+// ----------------------------------------------------------------------------
+// Single transport shape used by:
+//   - core (lib/admin/reception/action.ts) when building cards from DB rows
+//   - API (app/api/admin/reception/rooms/route.ts) when serializing
+//   - UI  (components/admin/reception.tsx) when rendering
+//
+// UI never reaches into DB-shaped values. It only consumes this normalized
+// card. Add fields here when enrichment is reintroduced.
+// ============================================================================
+
+export const RECEPTION_LIST_DEFAULT_LIMIT = 50
+export const RECEPTION_LIST_HARD_LIMIT = 100
+export const RECEPTION_INBOX_LIMIT = 3
+
+export type reception_card = {
+  room_uuid: string
+  title: string
+  preview: string
+  updated_at: string | null
+  mode: string | null
+  typing_label: string | null
+  active_label: string | null
+}
+
+export type list_reception_rooms_input = {
+  limit: number
+  keyword: string | null
+}
+
+/**
+ * Pure parser for `/api/admin/reception/rooms` query parameters. Always
+ * returns a clamped, defaulted shape so callers can pass it straight to
+ * the core without re-validating.
+ */
+export function normalize_list_reception_rooms_input(
+  raw: Record<string, unknown> | URLSearchParams | null | undefined,
+): list_reception_rooms_input {
+  const get = (key: string): unknown => {
+    if (!raw) return null
+    if (raw instanceof URLSearchParams) return raw.get(key)
+    return (raw as Record<string, unknown>)[key]
+  }
+
+  let limit = RECEPTION_LIST_DEFAULT_LIMIT
+  const limit_raw = get('limit')
+
+  if (typeof limit_raw === 'number' && Number.isFinite(limit_raw)) {
+    limit = limit_raw
+  } else if (typeof limit_raw === 'string') {
+    const parsed = Number(limit_raw)
+    if (Number.isFinite(parsed)) {
+      limit = parsed
+    }
+  }
+
+  limit = Math.max(1, Math.min(Math.floor(limit), RECEPTION_LIST_HARD_LIMIT))
+
+  let keyword: string | null = null
+  const keyword_raw = get('keyword') ?? get('q')
+
+  if (typeof keyword_raw === 'string') {
+    const trimmed = keyword_raw.trim()
+    if (trimmed.length > 0) {
+      keyword = trimmed
+    }
+  }
+
+  return { limit, keyword }
+}
+
+/**
+ * Pure card-side keyword filter. Matches against title / preview /
+ * room_uuid (case-insensitive). Empty/whitespace keyword always matches.
+ */
+export function match_card_keyword(
+  card: reception_card,
+  keyword: string | null,
+): boolean {
+  if (!keyword) {
+    return true
+  }
+
+  const needle = keyword.trim().toLowerCase()
+
+  if (needle.length === 0) {
+    return true
+  }
+
+  return (
+    card.title.toLowerCase().includes(needle) ||
+    card.preview.toLowerCase().includes(needle) ||
+    card.room_uuid.toLowerCase().includes(needle)
+  )
 }

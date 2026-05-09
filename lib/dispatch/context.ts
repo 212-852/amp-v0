@@ -4,8 +4,8 @@ import { control } from '@/lib/config/control'
 import { resolve_chat_room } from '@/lib/chat/room'
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
-import { clean_uuid } from '@/lib/db/uuid_payload'
-import { fetch_line_messaging_profile } from '@/lib/line/messaging_profile'
+import { clean_uuid } from '@/lib/db/uuid/payload'
+import { fetch_line_messaging_profile } from '@/lib/line/messaging/profile'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
 export {

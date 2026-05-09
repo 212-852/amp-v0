@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { clean_uuid } from '@/lib/db/uuid_payload'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 
 export type presence_mutation_context =
   | {

@@ -3,7 +3,7 @@ import 'server-only'
 import {
   line_login_channel_id,
   line_login_channel_secret,
-} from '@/lib/config/line_env'
+} from '@/lib/config/line/env'
 
 /**
  * Normal LINE Login (OAuth) only. Used by `/api/auth/line` and `/api/auth/line/callback`.

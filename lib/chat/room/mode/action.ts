@@ -11,25 +11,25 @@ import { supabase } from '@/lib/db/supabase'
 import { sync_room_action_context } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
-import { archive_message_bundles } from './archive'
+import { archive_message_bundles } from '../../archive'
 import {
   build_room_mode_admin_accepted_bundle,
   build_room_mode_notice_bundle,
-} from './message'
-import type { chat_locale } from './message'
+} from '../../message'
+import type { chat_locale } from '../../message'
 import {
   load_room_row,
   parse_room_mode,
   type chat_channel,
   type chat_room,
   type room_mode,
-} from './room'
+} from '../../room'
 import {
   room_mode_can_accept_concierge,
   room_mode_can_request_concierge,
   room_mode_can_resume_bot,
   type room_mode_gate_row,
-} from './room_mode_rules'
+} from './rules'
 
 type stored_room_row = NonNullable<Awaited<ReturnType<typeof load_room_row>>>
 
@@ -632,7 +632,7 @@ export async function handle_room_mode_switch_request(request: Request) {
   ) as chat_locale
   const visitor_uuid = session.visitor_uuid
   const user_uuid = await resolve_visitor_user_uuid(visitor_uuid)
-  const room_result = await import('./room').then(({ resolve_chat_room }) =>
+  const room_result = await import('../../room').then(({ resolve_chat_room }) =>
     resolve_chat_room({
       visitor_uuid,
       user_uuid,

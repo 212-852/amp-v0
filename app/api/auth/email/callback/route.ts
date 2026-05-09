@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
-import { notify_new_user_created } from '@/lib/notify/new_user_created'
+import { notify_new_user_created } from '@/lib/notify/user/created'
 import { debug } from '@/lib/debug'
 
 type email_otp_type = 'email' | 'magiclink'

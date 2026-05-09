@@ -3,8 +3,8 @@ import { randomUUID } from 'crypto'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-import { build_line_auth_url } from '@/lib/auth/line_oauth'
-import { line_login_channel_id } from '@/lib/config/line_env'
+import { build_line_auth_url } from '@/lib/auth/line/oauth'
+import { line_login_channel_id } from '@/lib/config/line/env'
 
 export const line_login_state_cookie_name = 'line_login_state'
 

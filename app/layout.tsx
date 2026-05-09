@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { M_PLUS_Rounded_1c } from 'next/font/google'
 import './globals.css'
-import LiffBootstrapLoader from '@/components/session/liffbootstrap_loader'
+import LiffBootstrapLoader from '@/components/session/liff/loader'
 
 const rounded = M_PLUS_Rounded_1c({
   subsets: ['latin'],

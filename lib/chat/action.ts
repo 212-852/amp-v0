@@ -7,9 +7,9 @@ import {
   infer_source_channel_from_ua,
   type browser_session_source_channel,
 } from '@/lib/auth/session'
-import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
+import { get_request_visitor_uuid } from '@/lib/visitor/request'
 import { supabase } from '@/lib/db/supabase'
-import { clean_uuid } from '@/lib/db/uuid_payload'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import {
   archive_incoming_line_text,
@@ -21,7 +21,7 @@ import {
 import {
   web_chat_timeline_visibility,
   type web_timeline_filtered_row,
-} from './web_timeline'
+} from './web/timeline'
 import {
   normalize_dispatch_text,
   resolve_chat_context,

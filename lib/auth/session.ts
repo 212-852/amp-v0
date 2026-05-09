@@ -2,7 +2,7 @@ import { cache } from 'react'
 
 import { control } from '@/lib/config/control'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
-import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
+import { get_request_visitor_uuid } from '@/lib/visitor/request'
 
 export { visitor_cookie_name }
 

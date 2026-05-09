@@ -9,7 +9,7 @@ import {
   visitor_cookie_name,
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
-import { notify_new_user_created } from '@/lib/notify/new_user_created'
+import { notify_new_user_created } from '@/lib/notify/user/created'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
 type liff_auth_body = {

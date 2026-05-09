@@ -5,14 +5,14 @@ import { resolve_auth_access } from '@/lib/auth/access'
 import {
   exchange_line_code_for_token,
   fetch_line_oauth_profile,
-} from '@/lib/auth/line_oauth'
+} from '@/lib/auth/line/oauth'
 import {
   get_browser_session_cookie_options,
   visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
 import { debug } from '@/lib/debug'
-import { notify_new_user_created } from '@/lib/notify/new_user_created'
+import { notify_new_user_created } from '@/lib/notify/user/created'
 import { line_login_state_cookie_name } from '../route'
 
 function get_app_origin_from_callback_env() {

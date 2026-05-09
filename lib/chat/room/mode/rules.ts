@@ -1,6 +1,6 @@
 import 'server-only'
 
-import type { room_mode } from './room'
+import type { room_mode } from '../../room'
 
 export type room_mode_gate_row = {
   mode: room_mode

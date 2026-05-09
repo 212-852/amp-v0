@@ -14,7 +14,7 @@ import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
 import OverlayRoot from '@/components/overlay/root'
 import Breadcrumb from '@/components/shared/breadcrumb'
-import { use_session_profile } from '@/components/session/use_session_profile'
+import { use_session_profile } from '@/components/session/profile'
 import { build_breadcrumb } from '@/lib/breadcrumb'
 import {
   type locale_key,

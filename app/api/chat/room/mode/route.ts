@@ -11,7 +11,7 @@ import {
   room_mode_request_concierge,
   room_mode_resume_bot,
   room_mode_resume_bot_for_room,
-} from '@/lib/chat/room_mode_action'
+} from '@/lib/chat/room/mode/action'
 import type { chat_locale } from '@/lib/chat/message'
 import { resolve_chat_room } from '@/lib/chat/room'
 import type { chat_channel } from '@/lib/chat/room'

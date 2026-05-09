@@ -1,5 +1,5 @@
 -- Local/dev: clear chat tables only. Do not run against production without care.
--- Run in Supabase SQL editor or: psql < scripts/reset_chat_tables.sql
+-- Run in Supabase SQL editor or: psql < scripts/chat/reset.sql
 -- Preserves: users, visitors, identities
 
 truncate table public.messages restart identity cascade;

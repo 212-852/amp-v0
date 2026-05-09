@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { line_liff_verify_channel_id } from '@/lib/config/line_env'
+import { line_liff_verify_channel_id } from '@/lib/config/line/env'
 
 const LINE_VERIFY_ID_TOKEN_URL = 'https://api.line.me/oauth2/v2.1/verify'
 

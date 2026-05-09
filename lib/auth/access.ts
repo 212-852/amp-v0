@@ -3,7 +3,7 @@ import 'server-only'
 import { control } from '@/lib/config/control'
 import { resolve_user_visitor } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
-import { clean_uuid } from '@/lib/db/uuid_payload'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 import { normalize_locale } from '@/lib/locale/action'
 import { debug_event } from '@/lib/debug'
 

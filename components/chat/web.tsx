@@ -8,8 +8,8 @@ import {
 
 import { useUserChat } from '@/components/chat/context'
 import type { archived_message } from '@/lib/chat/archive'
-import { archived_message_from_message_row } from '@/lib/chat/realtime_row'
-import type { message_insert_row } from '@/lib/chat/realtime_row'
+import { archived_message_from_message_row } from '@/lib/chat/realtime/row'
+import type { message_insert_row } from '@/lib/chat/realtime/row'
 import type {
   faq_bundle,
   how_to_use_bundle,

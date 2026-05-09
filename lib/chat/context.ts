@@ -6,7 +6,7 @@ import { headers } from 'next/headers'
 import { supabase } from '@/lib/db/supabase'
 import { normalize_locale } from '@/lib/locale/action'
 import { locale_cookie_name } from '@/lib/locale/cookie'
-import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
+import { get_request_visitor_uuid } from '@/lib/visitor/request'
 import {
   resolve_visitor_context,
   type session_source_channel,

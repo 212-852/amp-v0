@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { debug } from '@/lib/debug'
-import { notify_new_user_created } from '@/lib/notify/new_user_created'
+import { notify_new_user_created } from '@/lib/notify/user/created'
 import { google_login_state_cookie_name } from '../route'
 
 type google_token_response = {

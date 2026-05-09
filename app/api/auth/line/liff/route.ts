@@ -1,8 +1,8 @@
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-import { verify_line_liff_id_token } from '@/lib/auth/line_liff_id_token'
-import { resolve_liff_login } from '@/lib/auth/liff_login'
+import { verify_line_liff_id_token } from '@/lib/auth/liff/token'
+import { resolve_liff_login } from '@/lib/auth/liff/login'
 import {
   get_browser_session_cookie_options,
   visitor_cookie_max_age,
@@ -10,7 +10,7 @@ import {
 } from '@/lib/auth/session'
 import { control } from '@/lib/config/control'
 import { debug_event } from '@/lib/debug'
-import { notify_new_user_created } from '@/lib/notify/new_user_created'
+import { notify_new_user_created } from '@/lib/notify/user/created'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
 type liff_auth_body = {

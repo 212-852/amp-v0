@@ -1,4 +1,4 @@
-import UserHomeChat from '@/components/user/home_chat'
+import UserHomeChat from '@/components/user/home/chat'
 
 export const dynamic = 'force-dynamic'
 

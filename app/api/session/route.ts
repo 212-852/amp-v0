@@ -12,7 +12,7 @@ import {
   type browser_session_source_channel,
 } from '@/lib/auth/session'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
-import { get_request_visitor_uuid } from '@/lib/visitor/request_uuid'
+import { get_request_visitor_uuid } from '@/lib/visitor/request'
 import { control } from '@/lib/config/control'
 import { resolve_initial_chat } from '@/lib/chat/action'
 import { ensure_direct_room_for_visitor } from '@/lib/chat/room'

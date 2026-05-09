@@ -1,11 +1,7 @@
 import Image from 'next/image'
-import {
-  ChevronDown,
-  Settings,
-  UserRound,
-} from 'lucide-react'
+import { ChevronDown, Settings, UserRound } from 'lucide-react'
 
-import AdminReceptionButton from './reception_button'
+import { AdminReceptionButton } from '@/components/admin/reception'
 
 type AdminHeaderProps = {
   display_name: string | null
@@ -17,6 +13,11 @@ type AdminHeaderProps = {
 const icon_button_class =
   'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-black shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-colors hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 active:scale-[0.98] sm:h-11 sm:w-11'
 
+/**
+ * Admin header is a presentational shell. It composes the reception
+ * ON/OFF pill via `<AdminReceptionButton />` but never owns reception
+ * state, never knows the API shape, never imports server-only modules.
+ */
 export default function AdminHeader({
   display_name,
   image_url,
@@ -24,10 +25,11 @@ export default function AdminHeader({
   tier,
 }: AdminHeaderProps) {
   const profile_name = display_name?.trim() || 'Admin'
-  const subtitle = [role, tier]
-    .map((value) => value?.trim())
-    .filter(Boolean)
-    .join(' ') || 'admin'
+  const subtitle =
+    [role, tier]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(' ') || 'admin'
 
   return (
     <header className="border-b border-black/[0.06] bg-white px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] shadow-[0_1px_0_rgba(0,0,0,0.03)]">

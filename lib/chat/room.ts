@@ -2,7 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
-import { clean_uuid } from '@/lib/db/uuid_payload'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 
 import { room_select_fields } from '@/lib/chat/room/schema'
