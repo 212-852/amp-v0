@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 import { search_reception_rooms } from '@/lib/admin/reception/action'
 import {
   parse_reception_search_filters,
@@ -27,12 +29,24 @@ export default async function AdminReceptionPage() {
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <header className="flex items-baseline justify-between">
-        <h1 className="text-base font-semibold text-black">受付一覧</h1>
-        <span className="text-[12px] text-neutral-500">
-          {initial_rooms.length} 件
-        </span>
+    <div className="flex flex-col gap-4">
+      <header className="flex flex-col gap-2">
+        <nav
+          aria-label="Breadcrumb"
+          className="flex items-center gap-1.5 text-[12px] font-medium text-neutral-500"
+        >
+          <Link href="/admin" className="transition-colors hover:text-black">
+            Home
+          </Link>
+          <span aria-hidden>{'>'}</span>
+          <span className="text-neutral-900">チャット一覧</span>
+        </nav>
+        <div className="flex items-baseline justify-between">
+          <h1 className="text-lg font-semibold text-black">チャット一覧</h1>
+          <span className="text-[12px] text-neutral-500">
+            {initial_rooms.length} 件
+          </span>
+        </div>
       </header>
       <AdminReceptionPageClient
         initial_filters={initial_filters}
