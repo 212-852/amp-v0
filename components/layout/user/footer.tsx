@@ -23,10 +23,12 @@ import { get_copyright_text } from '@/lib/config/site'
 import type { locale_key } from '@/lib/locale/action'
 import type { archived_message } from '@/lib/chat/archive'
 import type { room_mode } from '@/lib/chat/room'
+import { can_switch_to_concierge } from '@/lib/chat/rules'
 import {
   get_locale,
   subscribe_locale,
 } from '@/lib/locale/state'
+import { use_session_profile } from '@/components/session/profile'
 
 const content = {
   mypage: {
@@ -53,6 +55,26 @@ const content = {
     ja: 'メッセージを入力',
     en: 'Type a message',
     es: 'Escribe un mensaje',
+  },
+  link_required_title: {
+    ja: '連携が必要です',
+    en: 'Account linking required',
+    es: 'Se requiere conexion',
+  },
+  link_required_body: {
+    ja: 'コンシェルジュに相談するには連携が必要です',
+    en: 'Account linking is required to contact the concierge.',
+    es: 'Necesitas vincular tu cuenta para consultar al concierge.',
+  },
+  link_required_action: {
+    ja: '連携する',
+    en: 'Link account',
+    es: 'Vincular cuenta',
+  },
+  close: {
+    ja: '閉じる',
+    en: 'Close',
+    es: 'Cerrar',
   },
 }
 
@@ -179,6 +201,7 @@ function create_optimistic_switch_message(input: {
 
 export default function UserFooter() {
   const chat = useUserChat()
+  const { session } = use_session_profile()
   const input_ref = useRef<HTMLInputElement | null>(null)
   const typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
@@ -192,6 +215,7 @@ export default function UserFooter() {
   const [is_mypage_open, set_is_mypage_open] = useState(false)
   const [is_menu_open, set_is_menu_open] = useState(false)
   const [is_quick_menu_open, set_is_quick_menu_open] = useState(false)
+  const [is_link_required_open, set_is_link_required_open] = useState(false)
   const [is_paw_pressed, set_is_paw_pressed] = useState(false)
   const is_input_mode = chat.is_chat_open
   const render_locale = mounted ? locale : 'ja'
@@ -351,6 +375,16 @@ export default function UserFooter() {
       })
 
       if (!response.ok) {
+        if (response.status === 403) {
+          const payload = (await response.json().catch(() => null)) as {
+            error?: string
+          } | null
+
+          if (payload?.error === 'link_required') {
+            set_is_link_required_open(true)
+          }
+        }
+
         chat.set_mode(previous_mode)
         chat.remove_message(optimistic_message.archive_uuid)
         return
@@ -358,6 +392,7 @@ export default function UserFooter() {
 
       const payload = (await response.json()) as {
         ok?: boolean
+        error?: string
         mode?: room_mode_segment
         messages?: archived_message[]
       }
@@ -384,6 +419,10 @@ export default function UserFooter() {
 
         chat.append_messages(outgoing_messages)
       } else {
+        if (payload.error === 'link_required') {
+          set_is_link_required_open(true)
+        }
+
         chat.set_mode(previous_mode)
         chat.remove_message(optimistic_message.archive_uuid)
       }
@@ -405,8 +444,23 @@ export default function UserFooter() {
 
   function handle_select_concierge() {
     if (room_mode_segment === 'bot') {
+      if (
+        !can_switch_to_concierge({
+          role: session?.role ?? null,
+          tier: session?.tier ?? null,
+        })
+      ) {
+        set_is_link_required_open(true)
+        return
+      }
+
       void post_room_mode_action('concierge')
     }
+  }
+
+  function open_connect_modal() {
+    set_is_link_required_open(false)
+    window.dispatchEvent(new Event('amp_open_connect_modal'))
   }
 
   function reset_input_field() {
@@ -481,6 +535,16 @@ export default function UserFooter() {
       })
 
       if (!response.ok) {
+        if (response.status === 403) {
+          const payload = (await response.json().catch(() => null)) as {
+            error?: string
+          } | null
+
+          if (payload?.error === 'link_required') {
+            set_is_link_required_open(true)
+          }
+        }
+
         chat.remove_message(optimistic_message.archive_uuid)
         return
       }
@@ -497,9 +561,13 @@ export default function UserFooter() {
             kind: 'plain_text'
             messages: archived_message[]
           }
-        | { ok: false; error: string }
+        | { ok: false; error: string; reason?: string }
 
       if (!payload.ok) {
+        if (payload.error === 'link_required') {
+          set_is_link_required_open(true)
+        }
+
         chat.remove_message(optimistic_message.archive_uuid)
         return
       }
@@ -601,6 +669,35 @@ export default function UserFooter() {
           on_close={() => set_is_quick_menu_open(false)}
           on_select={handle_quick_menu_item_click}
         />
+      </OverlayRoot>
+
+      <OverlayRoot
+        open={is_link_required_open}
+        on_close={() => set_is_link_required_open(false)}
+        variant="center"
+      >
+        <div className="w-[92%] max-w-[360px] rounded-[26px] bg-white px-6 py-6 text-center shadow-[0_12px_40px_rgba(42,29,24,0.14)]">
+          <h2 className="text-[18px] font-semibold text-[#2a1d18]">
+            {content.link_required_title[render_locale]}
+          </h2>
+          <p className="mt-3 text-[14px] leading-[1.7] text-[#6d5c52]">
+            {content.link_required_body[render_locale]}
+          </p>
+          <button
+            type="button"
+            className="mt-5 w-full rounded-full bg-[#2a1d18] px-5 py-3 text-[14px] font-semibold text-white"
+            onClick={open_connect_modal}
+          >
+            {content.link_required_action[render_locale]}
+          </button>
+          <button
+            type="button"
+            className="mt-3 text-[12px] font-medium text-[#8a7568]"
+            onClick={() => set_is_link_required_open(false)}
+          >
+            {content.close[render_locale]}
+          </button>
+        </div>
       </OverlayRoot>
 
       <footer className="fixed bottom-0 left-0 right-0 z-50 w-screen bg-transparent pb-[env(safe-area-inset-bottom,0px)]">

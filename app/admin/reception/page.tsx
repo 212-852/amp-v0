@@ -146,10 +146,23 @@ export default async function AdminReceptionPage({
                 className="flex w-full items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-3 transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
               >
                 <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-700"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-100 text-neutral-700"
                   aria-hidden
                 >
-                  <MessageCircle className="h-4 w-4" strokeWidth={2} />
+                  {room.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={room.avatar_url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : room.display_name ? (
+                    <span className="text-[12px] font-semibold">
+                      {room.display_name.slice(0, 1)}
+                    </span>
+                  ) : (
+                    <MessageCircle className="h-4 w-4" strokeWidth={2} />
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">

@@ -37,7 +37,9 @@ export async function GET(_request: Request, context: route_context) {
 
     return NextResponse.json({
       ok: true,
-      memo,
+      memo: memo.handoff_memo,
+      updated_at: memo.handoff_memo_updated_at,
+      updated_by: memo.handoff_memo_updated_by,
     })
   } catch (error) {
     return NextResponse.json(
@@ -74,7 +76,9 @@ export async function POST(request: Request, context: route_context) {
 
     return NextResponse.json({
       ok: true,
-      memo,
+      memo: memo.handoff_memo,
+      updated_at: memo.handoff_memo_updated_at,
+      updated_by: memo.handoff_memo_updated_by,
     })
   } catch (error) {
     return NextResponse.json(

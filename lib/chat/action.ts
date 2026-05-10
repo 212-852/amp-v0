@@ -47,12 +47,14 @@ import {
   type room_mode,
 } from './room'
 import {
+  can_switch_to_concierge,
   resolve_chat_message_action,
   should_seed_initial_messages,
 } from './rules'
 import { decide_bot_action } from './bot/rules'
 import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
+import { get_session_user } from '@/lib/auth/route'
 
 type resolve_initial_chat_input = {
   visitor_uuid: string | null
@@ -69,6 +71,12 @@ type resolve_initial_chat_input = {
     webhook_event_id?: string | null
     delivery_context_redelivery?: boolean | null
   } | null
+}
+
+type concierge_eligibility = {
+  allowed: boolean
+  role: string | null
+  tier: string | null
 }
 
 export type initial_chat_result = {
@@ -111,6 +119,72 @@ async function chat_action_log(
   ) {
     console.error('[chat_action_failed]', event, payload)
   }
+}
+
+async function resolve_user_concierge_eligibility(
+  user_uuid: string | null | undefined,
+): Promise<concierge_eligibility> {
+  const sanitized_user_uuid = clean_uuid(user_uuid)
+
+  if (!sanitized_user_uuid) {
+    return {
+      allowed: false,
+      role: null,
+      tier: null,
+    }
+  }
+
+  const result = await supabase
+    .from('users')
+    .select('role, tier')
+    .eq('user_uuid', sanitized_user_uuid)
+    .maybeSingle()
+
+  if (result.error) {
+    throw result.error
+  }
+
+  const row = result.data as { role: string | null; tier: string | null } | null
+  const role = row?.role ?? null
+  const tier = row?.tier ?? null
+
+  return {
+    allowed: can_switch_to_concierge({ role, tier }),
+    role,
+    tier,
+  }
+}
+
+async function current_session_concierge_eligibility(): Promise<concierge_eligibility> {
+  const session = await get_session_user()
+  const role = session.role
+  const tier = session.tier
+
+  return {
+    allowed: can_switch_to_concierge({ role, tier }),
+    role,
+    tier,
+  }
+}
+
+function concierge_link_required_result(): room_mode_switch_result {
+  return {
+    ok: false,
+    error: 'link_required',
+    reason: 'concierge_requires_member',
+  }
+}
+
+function link_required_line_text(locale: chat_locale) {
+  if (locale === 'en') {
+    return 'Account linking is required to contact the concierge. Please link your account first.'
+  }
+
+  if (locale === 'es') {
+    return 'Necesitas vincular tu cuenta para consultar al concierge. Vincula tu cuenta primero.'
+  }
+
+  return 'コンシェルジュに相談するには連携が必要です。先にアカウント連携をお願いします。'
 }
 
 async function emit_chat_action_completed(input: {
@@ -408,6 +482,67 @@ export async function resolve_initial_chat(
       incoming_line_text &&
       line_switch_mode
     ) {
+      if (line_switch_mode === 'concierge') {
+        const eligibility = await resolve_user_concierge_eligibility(
+          room_result.room.user_uuid,
+        )
+
+        if (!eligibility.allowed) {
+          let reply_status: number | null = null
+
+          try {
+            reply_status = await deliver_line_text_reply({
+              reply_token: input.line_reply_token,
+              text: link_required_line_text(input.locale),
+            })
+          } catch (error) {
+            console.error('[line_reply_failed]', {
+              room_uuid: room_result.room.room_uuid,
+              line_user_id: input.line_user_id,
+              switch_mode: line_switch_mode,
+              error: serialize_error(error),
+            })
+          }
+
+          await archive_input_line_text_for_room({
+            room: room_result.room,
+            locale: input.locale,
+            line_user_id: input.line_user_id,
+            incoming_line_text,
+            bundle: build_user_text_bundle({
+              text: normalized_line_text,
+              locale: input.locale,
+              content_key: 'room.mode.link_required',
+              metadata: {
+                intent: 'link_required',
+                requested_mode: 'concierge',
+              },
+            }),
+          })
+
+          await emit_chat_action_completed({
+            reason: 'mode_switch_link_required',
+            room: room_result.room,
+            channel: input.channel,
+            is_seeded: false,
+            message_count: 0,
+            extra: {
+              switch_mode: line_switch_mode,
+              reply_status,
+              deferred: false,
+            },
+          })
+
+          return make_initial_chat_result({
+            room: room_result.room,
+            is_new_room: room_result.is_new_room,
+            is_seeded: false,
+            messages: [],
+            locale: input.locale,
+          })
+        }
+      }
+
       const incoming_bundle = build_line_mode_switch_bundle({
         text: normalized_line_text,
         mode: line_switch_mode,
@@ -979,6 +1114,8 @@ type room_mode_switch_result =
         | 'room_not_found'
         | 'room_mismatch'
         | 'invalid_transition'
+        | 'link_required'
+      reason?: 'concierge_requires_member'
     }
 
 async function notify_room_mode_switch(input: {
@@ -1167,6 +1304,16 @@ async function execute_room_mode_switch(input: {
 
   if (switch_action.action !== 'switch_room_mode') {
     return { ok: false, error: 'invalid_transition' }
+  }
+
+  if (switch_action.mode === 'concierge') {
+    const eligibility = await resolve_user_concierge_eligibility(
+      input.room.user_uuid,
+    )
+
+    if (!eligibility.allowed) {
+      return concierge_link_required_result()
+    }
   }
 
   const archived_incoming = input.archive_incoming
@@ -1422,6 +1569,18 @@ export async function handle_chat_mode_request(
   }
 
   const locale = normalize_locale(body.locale) as chat_locale
+
+  if (body.mode === 'concierge') {
+    const eligibility = await current_session_concierge_eligibility()
+
+    if (!eligibility.allowed) {
+      return {
+        status: 403,
+        body: concierge_link_required_result(),
+      }
+    }
+  }
+
   const incoming_bundle = build_room_mode_switch_bundle({
     mode: body.mode,
     locale,
@@ -1473,6 +1632,7 @@ export type chat_message_request_result =
   | {
       ok: false
       error: string
+      reason?: string
     }
 
 export async function handle_chat_message_request(
@@ -1515,6 +1675,21 @@ export async function handle_chat_message_request(
       ? web_bot_decision.mode ?? null
       : null
 
+  if (detected_switch_mode === 'concierge') {
+    const eligibility = await current_session_concierge_eligibility()
+
+    if (!eligibility.allowed) {
+      return {
+        status: 403,
+        body: {
+          ok: false,
+          error: 'link_required',
+          reason: 'concierge_requires_member',
+        },
+      }
+    }
+  }
+
   const initial_mode: room_mode = detected_switch_mode ?? 'bot'
 
   const room_resolved = await resolve_web_chat_room_for_request({
@@ -1545,8 +1720,12 @@ export async function handle_chat_message_request(
 
     if (!switch_result.ok) {
       return {
-        status: 400,
-        body: { ok: false, error: switch_result.error },
+        status: switch_result.error === 'link_required' ? 403 : 400,
+        body: {
+          ok: false,
+          error: switch_result.error,
+          reason: switch_result.reason,
+        },
       }
     }
 

@@ -101,6 +101,18 @@ export default function UserHeader() {
     }
   }, [])
 
+  useEffect(() => {
+    function handle_open_connect() {
+      set_connect_open(true)
+    }
+
+    window.addEventListener('amp_open_connect_modal', handle_open_connect)
+
+    return () => {
+      window.removeEventListener('amp_open_connect_modal', handle_open_connect)
+    }
+  }, [])
+
   const profile_image_url = session?.image_url ?? null
   const profile_display_name = session?.display_name ?? null
 

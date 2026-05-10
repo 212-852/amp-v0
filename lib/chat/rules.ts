@@ -1,9 +1,17 @@
-import 'server-only'
-
 import type { archived_message } from './archive'
 import type { message_bundle } from './message'
 import type { room_mode } from './room'
 import type { chat_locale } from './message'
+
+export function can_switch_to_concierge(input: {
+  role: string | null | undefined
+  tier: string | null | undefined
+}): boolean {
+  return (
+    input.role === 'user' &&
+    (input.tier === 'member' || input.tier === 'vip')
+  )
+}
 
 function room_has_line_initial_or_ack(archived_messages: archived_message[]) {
   return archived_messages.some((row) => {

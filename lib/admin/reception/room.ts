@@ -15,6 +15,9 @@ type room_row = {
 export type reception_room = {
   room_uuid: string
   display_name: string
+  role: string | null
+  tier: string | null
+  avatar_url: string | null
   title: string
   preview: string
   updated_at: string | null
@@ -60,6 +63,7 @@ type user_profile_row = {
   display_name?: string | null
   role?: string | null
   tier?: string | null
+  image_url?: string | null
 }
 
 type identity_row = {
@@ -67,6 +71,14 @@ type identity_row = {
   provider_id: string | null
   display_name?: string | null
   provider_user_name?: string | null
+}
+
+type room_card_enrichment = {
+  display_name: string | null
+  role: string | null
+  tier: string | null
+  avatar_url: string | null
+  preview: string | null
 }
 
 export type reception_room_subject = {
@@ -103,15 +115,20 @@ const guest_subject: reception_room_subject = {
 
 function normalize_room(
   row: room_row,
-  display_name = short_room_label(row.room_uuid),
+  enrichment: room_card_enrichment | null = null,
 ): reception_room {
   const mode = row.mode === 'bot' ? 'bot' : 'concierge'
 
   return {
     room_uuid: row.room_uuid,
-    display_name,
+    display_name:
+      enrichment?.display_name ??
+      (mode === 'concierge' ? short_room_label(row.room_uuid) : 'Bot room'),
+    role: enrichment?.role ?? null,
+    tier: enrichment?.tier ?? null,
+    avatar_url: enrichment?.avatar_url ?? null,
     title: mode === 'concierge' ? 'Concierge room' : 'Bot room',
-    preview: mode === 'concierge' ? '対応が必要です' : 'ボット対応中',
+    preview: enrichment?.preview ?? '対応が必要です',
     updated_at: row.updated_at,
     mode,
   }
@@ -149,13 +166,49 @@ function resolve_display_name(input: {
   )
 }
 
-async function enrich_room_display_names(
+function message_text(body: Record<string, unknown> | null): string {
+  const payload = pick_object(body?.payload)
+  const payload_text = pick_string(payload?.text)
+
+  if (payload_text) {
+    return payload_text
+  }
+
+  const bundle = pick_object(body?.bundle)
+  const bundle_payload = pick_object(bundle?.payload)
+  const bundle_payload_text = pick_string(bundle_payload?.text)
+
+  if (bundle_payload_text) {
+    return bundle_payload_text
+  }
+
+  const metadata = pick_object(body?.metadata)
+  const metadata_text = pick_string(metadata?.text)
+
+  if (metadata_text) {
+    return metadata_text
+  }
+
+  const content_key =
+    pick_string(body?.content_key) ?? pick_string(bundle?.content_key)
+
+  return content_key ?? '(message)'
+}
+
+function message_sequence_from_body(
+  body: Record<string, unknown> | null,
+): number | null {
+  const bundle = pick_object(body?.bundle)
+  return pick_number(body?.sequence) ?? pick_number(bundle?.sequence)
+}
+
+async function enrich_room_cards(
   rows: room_row[],
-): Promise<Map<string, string>> {
-  const display_names = new Map<string, string>()
+): Promise<Map<string, room_card_enrichment>> {
+  const enrichments = new Map<string, room_card_enrichment>()
 
   if (rows.length === 0) {
-    return display_names
+    return enrichments
   }
 
   const room_uuids = rows.map((row) => row.room_uuid)
@@ -175,8 +228,16 @@ async function enrich_room_display_names(
   }
 
   const user_uuid_by_room = new Map<string, string>()
+  const participant_by_room = new Map<string, participant_row>()
 
   for (const participant of participants) {
+    if (
+      participant.room_uuid &&
+      !participant_by_room.has(participant.room_uuid)
+    ) {
+      participant_by_room.set(participant.room_uuid, participant)
+    }
+
     if (
       participant.room_uuid &&
       participant.user_uuid &&
@@ -188,62 +249,68 @@ async function enrich_room_display_names(
 
   const user_uuids = Array.from(new Set(user_uuid_by_room.values()))
 
-  if (user_uuids.length === 0) {
-    return display_names
-  }
-
   const users_by_uuid = new Map<string, user_profile_row>()
   const identities_by_user_uuid = new Map<string, identity_row>()
 
-  try {
-    const user_result = await supabase
-      .from('users')
-      .select('user_uuid, display_name, role, tier')
-      .in('user_uuid', user_uuids)
+  if (user_uuids.length > 0) {
+    try {
+      const user_result = await supabase
+        .from('users')
+        .select('user_uuid, display_name, role, tier, image_url')
+        .in('user_uuid', user_uuids)
 
-    if (!user_result.error) {
-      for (const user of (user_result.data ?? []) as user_profile_row[]) {
-        users_by_uuid.set(user.user_uuid, user)
-      }
-    }
-  } catch {
-    // Optional user profile enrichment must not block room rendering.
-  }
-
-  try {
-    const identity_result = await supabase
-      .from('identities')
-      .select('user_uuid, provider_id')
-      .in('user_uuid', user_uuids)
-
-    if (!identity_result.error) {
-      for (const identity of (identity_result.data ?? []) as identity_row[]) {
-        if (
-          identity.user_uuid &&
-          !identities_by_user_uuid.has(identity.user_uuid)
-        ) {
-          identities_by_user_uuid.set(identity.user_uuid, identity)
+      if (!user_result.error) {
+        for (const user of (user_result.data ?? []) as user_profile_row[]) {
+          users_by_uuid.set(user.user_uuid, user)
         }
       }
+    } catch {
+      // Optional user profile enrichment must not block room rendering.
     }
-  } catch {
-    // Optional identity enrichment must not block room rendering.
+
+    try {
+      const identity_result = await supabase
+        .from('identities')
+        .select('user_uuid, provider_id')
+        .in('user_uuid', user_uuids)
+
+      if (!identity_result.error) {
+        for (const identity of (identity_result.data ?? []) as identity_row[]) {
+          if (
+            identity.user_uuid &&
+            !identities_by_user_uuid.has(identity.user_uuid)
+          ) {
+            identities_by_user_uuid.set(identity.user_uuid, identity)
+          }
+        }
+      }
+    } catch {
+      // Optional identity enrichment must not block room rendering.
+    }
   }
+
+  const preview_by_room = await read_latest_message_previews(room_uuids)
 
   for (const row of rows) {
     const user_uuid = user_uuid_by_room.get(row.room_uuid) ?? null
-    display_names.set(
-      row.room_uuid,
-      resolve_display_name({
+    const participant = participant_by_room.get(row.room_uuid) ?? null
+    const user = user_uuid ? users_by_uuid.get(user_uuid) : null
+
+    enrichments.set(row.room_uuid, {
+      display_name: resolve_display_name({
         room_uuid: row.room_uuid,
         user_uuid,
         users_by_uuid,
         identities_by_user_uuid,
       }),
-    )
+      role: string_value(user?.role) ?? string_value(participant?.role),
+      tier: string_value(user?.tier),
+      avatar_url: string_value(user?.image_url),
+      preview: preview_by_room.get(row.room_uuid) ?? null,
+    })
   }
 
-  return display_names
+  return enrichments
 }
 
 function choose_subject_participant(
@@ -371,12 +438,12 @@ export async function list_reception_rooms({
   }
 
   const rows = (result.data ?? []) as room_row[]
-  const display_names = await enrich_room_display_names(rows)
+  const enrichments = await enrich_room_cards(rows)
 
   return rows.map((row) =>
     normalize_room(
       row,
-      display_names.get(row.room_uuid) ?? short_room_label(row.room_uuid),
+      enrichments.get(row.room_uuid) ?? null,
     ),
   )
 }
@@ -399,11 +466,11 @@ export async function get_reception_room(
   }
 
   const row = result.data as room_row
-  const display_names = await enrich_room_display_names([row])
+  const enrichments = await enrich_room_cards([row])
 
   return normalize_room(
     row,
-    display_names.get(row.room_uuid) ?? short_room_label(row.room_uuid),
+    enrichments.get(row.room_uuid) ?? null,
   )
 }
 
@@ -452,28 +519,6 @@ function pick_string(value: unknown): string | null {
 
 function pick_number(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function message_text(body: Record<string, unknown> | null): string {
-  const payload = pick_object(body?.payload)
-  const payload_text = pick_string(payload?.text)
-
-  if (payload_text) {
-    return payload_text
-  }
-
-  const bundle = pick_object(body?.bundle)
-  const bundle_payload = pick_object(bundle?.payload)
-  const bundle_payload_text = pick_string(bundle_payload?.text)
-
-  if (bundle_payload_text) {
-    return bundle_payload_text
-  }
-
-  const content_key =
-    pick_string(body?.content_key) ?? pick_string(bundle?.content_key)
-
-  return content_key ?? '(message)'
 }
 
 function normalize_message(row: message_row): reception_room_message {
@@ -529,6 +574,76 @@ function compare_messages(
     new Date(a.created_at ?? 0).getTime() -
     new Date(b.created_at ?? 0).getTime()
   )
+}
+
+function compare_latest_message_rows(a: message_row, b: message_row) {
+  const a_body = parse_body(a.body)
+  const b_body = parse_body(b.body)
+  const a_sequence = message_sequence_from_body(a_body)
+  const b_sequence = message_sequence_from_body(b_body)
+
+  if (a_sequence !== null && b_sequence !== null) {
+    return b_sequence - a_sequence
+  }
+
+  if (a_sequence !== null) {
+    return -1
+  }
+
+  if (b_sequence !== null) {
+    return 1
+  }
+
+  return (
+    new Date(b.created_at ?? 0).getTime() -
+    new Date(a.created_at ?? 0).getTime()
+  )
+}
+
+async function read_latest_message_previews(
+  room_uuids: string[],
+): Promise<Map<string, string>> {
+  const previews = new Map<string, string>()
+
+  if (room_uuids.length === 0) {
+    return previews
+  }
+
+  try {
+    const result = await supabase
+      .from('messages')
+      .select('message_uuid, room_uuid, body, created_at')
+      .in('room_uuid', room_uuids)
+      .order('created_at', { ascending: false })
+      .limit(Math.max(50, room_uuids.length * 10))
+
+    if (result.error) {
+      return previews
+    }
+
+    const rows_by_room = new Map<string, message_row[]>()
+
+    for (const row of (result.data ?? []) as message_row[]) {
+      const list = rows_by_room.get(row.room_uuid) ?? []
+      list.push(row)
+      rows_by_room.set(row.room_uuid, list)
+    }
+
+    for (const [room_uuid, rows] of rows_by_room.entries()) {
+      const latest = rows.sort(compare_latest_message_rows)[0] ?? null
+      const text = latest ? message_text(parse_body(latest.body)) : null
+
+      if (text && text !== '(message)') {
+        previews.set(room_uuid, text)
+      } else if (text) {
+        previews.set(room_uuid, '対応が必要です')
+      }
+    }
+  } catch {
+    return previews
+  }
+
+  return previews
 }
 
 export async function list_reception_room_messages({

@@ -107,11 +107,11 @@ export default async function AdminReceptionRoomPage({
   params,
 }: AdminReceptionRoomPageProps) {
   const { room_uuid } = await params
-  const result = await load_room(room_uuid)
+  const room_result = await load_room(room_uuid)
   const subject = await load_subject(room_uuid)
   const memo = await load_memo(room_uuid)
   const message_result = await load_messages(room_uuid)
-  const room = result.room
+  const room = room_result.room
 
   return (
     <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
@@ -146,10 +146,12 @@ export default async function AdminReceptionRoomPage({
             <span>
               {subject.role ?? 'user'} / {subject.tier ?? 'guest'}
             </span>
-            <span aria-hidden>{'/'}</span>
-            <span>{room?.mode ?? 'unknown'}</span>
-            <span aria-hidden>{'/'}</span>
-            <span>{result.ok ? (room ? 'found' : 'not found') : 'load failed'}</span>
+            {room?.mode ? (
+              <>
+                <span aria-hidden>{'/'}</span>
+                <span>{room.mode}</span>
+              </>
+            ) : null}
             <span aria-hidden>{'/'}</span>
             <span className="font-mono">{room_uuid.slice(0, 8)}</span>
           </div>

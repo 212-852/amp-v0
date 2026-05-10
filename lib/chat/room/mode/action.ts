@@ -24,6 +24,7 @@ import {
   type chat_room,
   type room_mode,
 } from '../../room'
+import { can_switch_to_concierge } from '../../rules'
 import {
   room_mode_can_accept_concierge,
   room_mode_can_request_concierge,
@@ -253,14 +254,52 @@ export type room_mode_action_result =
   | { ok: true; mode: room_mode }
   | {
       ok: false
-      error: 'forbidden' | 'room_not_found' | 'invalid_transition'
+      error:
+        | 'forbidden'
+        | 'room_not_found'
+        | 'invalid_transition'
+        | 'link_required'
+      reason?: 'concierge_requires_member'
     }
+
+async function can_user_request_concierge(
+  user_uuid: string | null | undefined,
+) {
+  if (!user_uuid) {
+    return false
+  }
+
+  const result = await supabase
+    .from('users')
+    .select('role, tier')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  if (result.error) {
+    throw result.error
+  }
+
+  return can_switch_to_concierge({
+    role: result.data?.role ?? null,
+    tier: result.data?.tier ?? null,
+  })
+}
 
 export async function room_mode_request_concierge(input: {
   chat_room: chat_room
   channel: chat_channel
   locale: chat_locale
 }): Promise<room_mode_action_result> {
+  const is_allowed = await can_user_request_concierge(input.chat_room.user_uuid)
+
+  if (!is_allowed) {
+    return {
+      ok: false,
+      error: 'link_required',
+      reason: 'concierge_requires_member',
+    }
+  }
+
   const row = await load_room_row(input.chat_room.room_uuid)
 
   if (!row) {
