@@ -8,6 +8,7 @@ import {
   type browser_session_source_channel,
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
+import { read_admin_display_name } from '@/lib/admin/management/action'
 import { sync_room_action_context } from '@/lib/notify'
 import { normalize_locale } from '@/lib/locale/action'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
@@ -426,8 +427,13 @@ export async function room_mode_accept_concierge(input: {
     admin_user_uuid: input.admin_user_uuid,
   })
 
+  const admin_display_name =
+    (await read_admin_display_name(input.admin_user_uuid)) ??
+    input.admin_display_name ??
+    'Admin'
+
   const bundle = build_room_mode_admin_accepted_bundle({
-    admin_display_name: input.admin_display_name ?? 'Admin',
+    admin_display_name,
     locale: input.locale,
   })
 
@@ -439,7 +445,7 @@ export async function room_mode_accept_concierge(input: {
     bundles: [bundle],
   })
 
-  const log_label = `${input.admin_display_name?.trim() || 'Admin'} accepted`
+  const log_label = `${admin_display_name.trim() || 'Admin'} accepted`
 
   const display_name = await load_display_name(handles.user_uuid)
   const action_context = await sync_room_action_context({

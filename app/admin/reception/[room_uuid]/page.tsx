@@ -139,29 +139,34 @@ export default async function AdminReceptionRoomPage({
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
         <div className="shrink-0 border-b border-neutral-200 px-6 py-4">
-          <div className="truncate text-[16px] font-semibold leading-tight text-black">
-            {subject.display_name}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-neutral-500">
-            <span>
-              {subject.role ?? 'user'} / {subject.tier ?? 'guest'}
-            </span>
-            {room?.mode ? (
-              <>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[16px] font-semibold leading-tight text-black">
+                {subject.display_name}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-neutral-500">
+                <span>
+                  {subject.role ?? 'user'} / {subject.tier ?? 'guest'}
+                </span>
+                {room?.mode ? (
+                  <>
+                    <span aria-hidden>{'/'}</span>
+                    <span>{room.mode}</span>
+                  </>
+                ) : null}
                 <span aria-hidden>{'/'}</span>
-                <span>{room.mode}</span>
-              </>
-            ) : null}
-            <span aria-hidden>{'/'}</span>
-            <span className="font-mono">{room_uuid.slice(0, 8)}</span>
+                <span className="font-mono">{room_uuid.slice(0, 8)}</span>
+              </div>
+            </div>
+            <div className="shrink-0">
+              <AdminHandoffMemo
+                room_uuid={room_uuid}
+                initial_memo={memo.handoff_memo}
+                initial_updated_at={memo.handoff_memo_updated_at}
+              />
+            </div>
           </div>
         </div>
-
-        <AdminHandoffMemo
-          room_uuid={room_uuid}
-          initial_memo={memo.handoff_memo}
-          initial_updated_at={memo.handoff_memo_updated_at}
-        />
 
         <AdminChatTimeline
           messages={message_result.messages}

@@ -1,8 +1,11 @@
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { UserRound } from 'lucide-react'
 
 import {
   read_admin_user,
+  update_admin_profile,
   type admin_user_detail,
 } from '@/lib/admin/management/action'
 import { require_admin_management_access } from '@/lib/admin/management/context'
@@ -11,6 +14,7 @@ export const dynamic = 'force-dynamic'
 
 type AdminManagementDetailPageProps = {
   params: Promise<{ user_uuid: string }>
+  searchParams?: Promise<{ saved?: string; error?: string }>
 }
 
 function format_time(iso: string | null): string {
@@ -74,11 +78,36 @@ async function load_admin(user_uuid: string): Promise<{
 
 export default async function AdminManagementDetailPage({
   params,
+  searchParams,
 }: AdminManagementDetailPageProps) {
   await require_admin_management_access()
   const { user_uuid } = await params
+  const query = searchParams ? await searchParams : {}
   const result = await load_admin(user_uuid)
   const admin = result.admin
+  const is_saved = query.saved === '1'
+  const has_error = Boolean(query.error)
+
+  async function save_admin_profile(form_data: FormData) {
+    'use server'
+
+    await require_admin_management_access()
+
+    const result = await update_admin_profile({
+      user_uuid,
+      real_name: String(form_data.get('real_name') ?? ''),
+      birth_date: String(form_data.get('birth_date') ?? ''),
+      work_name: String(form_data.get('work_name') ?? ''),
+    })
+
+    if (!result.ok) {
+      redirect(`/admin/management/${user_uuid}?error=${result.error}`)
+    }
+
+    revalidatePath('/admin/management')
+    revalidatePath(`/admin/management/${user_uuid}`)
+    redirect(`/admin/management/${user_uuid}?saved=1`)
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -95,7 +124,7 @@ export default async function AdminManagementDetailPage({
             href="/admin/management"
             className="transition-colors hover:text-black"
           >
-            運営者管理
+            運営者一覧
           </Link>
           <span aria-hidden>{'>'}</span>
           <span className="truncate text-neutral-900">
@@ -138,11 +167,81 @@ export default async function AdminManagementDetailPage({
               <div className="truncate text-[16px] font-semibold leading-tight text-black">
                 {admin.display_name ?? '名称未設定'}
               </div>
+              <div className="mt-1 text-[12px] font-medium text-neutral-500">
+                {admin.role ?? 'admin'} / {admin.tier ?? '未設定'}
+              </div>
               <div className="mt-1 truncate font-mono text-[11px] text-neutral-400">
                 {admin.user_uuid}
               </div>
             </div>
           </section>
+
+          <form
+            action={save_admin_profile}
+            className="rounded-2xl border border-neutral-200 bg-white px-4 py-4"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h1 className="text-[15px] font-semibold text-black">
+                運営者プロフィール
+              </h1>
+              {is_saved ? (
+                <span className="text-[12px] font-semibold text-neutral-500">
+                  保存しました
+                </span>
+              ) : null}
+              {has_error ? (
+                <span className="text-[12px] font-semibold text-neutral-500">
+                  入力内容を確認してください
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-semibold text-neutral-500">
+                  本名
+                </span>
+                <input
+                  name="real_name"
+                  defaultValue={admin.profile.real_name ?? ''}
+                  maxLength={80}
+                  className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-[14px] text-black outline-none transition-colors focus:border-black"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-semibold text-neutral-500">
+                  生年月日
+                </span>
+                <input
+                  name="birth_date"
+                  type="date"
+                  defaultValue={admin.profile.birth_date ?? ''}
+                  className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-[14px] text-black outline-none transition-colors focus:border-black"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-semibold text-neutral-500">
+                  社内表示名
+                </span>
+                <input
+                  name="work_name"
+                  defaultValue={admin.profile.work_name ?? ''}
+                  maxLength={40}
+                  placeholder="M.OKINO"
+                  className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-[14px] text-black outline-none transition-colors focus:border-black"
+                />
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              className="mt-4 h-11 w-full rounded-xl bg-black px-4 text-[14px] font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              保存
+            </button>
+          </form>
 
           <section
             aria-label="運営者プロファイル"

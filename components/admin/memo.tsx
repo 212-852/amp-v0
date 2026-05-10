@@ -113,16 +113,16 @@ export default function AdminHandoffMemo({
 
   return (
     <>
-      <div className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
+      <div className="inline-flex items-center gap-2">
         <button
           type="button"
-          className="rounded-full border border-neutral-300 bg-white px-4 py-2 text-[12px] font-semibold text-black transition-colors hover:bg-neutral-100"
+          className="rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-black transition-colors hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
           onClick={open_modal}
         >
           引き継ぎメモ
         </button>
         {memo ? (
-          <span className="ml-2 align-middle text-[11px] font-medium text-neutral-400">
+          <span className="text-[11px] font-medium text-neutral-400">
             保存済み
           </span>
         ) : null}

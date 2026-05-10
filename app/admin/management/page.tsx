@@ -83,10 +83,10 @@ export default async function AdminManagementPage() {
             Home
           </Link>
           <span aria-hidden>{'>'}</span>
-          <span className="text-neutral-900">運営者管理</span>
+          <span className="text-neutral-900">運営者一覧</span>
         </nav>
         <h1 className="mt-2 text-[18px] font-semibold leading-tight text-black">
-          運営者管理
+          運営者一覧
         </h1>
       </header>
 
