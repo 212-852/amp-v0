@@ -1,11 +1,16 @@
 import Link from 'next/link'
 
 import AdminChatTimeline from '@/components/admin/c'
+import AdminHandoffMemo from '@/components/admin/memo'
 import {
   list_reception_room_messages,
+  read_reception_room_memo,
   read_reception_room,
+  resolve_room_subject,
   type reception_room,
+  type reception_room_memo,
   type reception_room_message,
+  type reception_room_subject,
 } from '@/lib/admin/reception/room'
 
 export const dynamic = 'force-dynamic'
@@ -59,11 +64,52 @@ async function load_messages(
   }
 }
 
+async function load_subject(
+  room_uuid: string,
+): Promise<reception_room_subject> {
+  try {
+    return await resolve_room_subject(room_uuid)
+  } catch (error) {
+    console.error('[admin_reception_room_page] resolve_subject_failed', {
+      room_uuid,
+      error: error instanceof Error ? error.message : String(error),
+    })
+
+    return {
+      display_name: 'ゲスト',
+      role: 'user',
+      tier: 'guest',
+      user_uuid: null,
+      visitor_uuid: null,
+    }
+  }
+}
+
+async function load_memo(room_uuid: string): Promise<reception_room_memo> {
+  try {
+    return await read_reception_room_memo({ room_uuid })
+  } catch (error) {
+    console.error('[admin_reception_room_page] read_memo_failed', {
+      room_uuid,
+      error: error instanceof Error ? error.message : String(error),
+    })
+
+    return {
+      room_uuid,
+      handoff_memo: '',
+      handoff_memo_updated_at: null,
+      handoff_memo_updated_by: null,
+    }
+  }
+}
+
 export default async function AdminReceptionRoomPage({
   params,
 }: AdminReceptionRoomPageProps) {
   const { room_uuid } = await params
   const result = await load_room(room_uuid)
+  const subject = await load_subject(room_uuid)
+  const memo = await load_memo(room_uuid)
   const message_result = await load_messages(room_uuid)
   const room = result.room
 
@@ -85,16 +131,22 @@ export default async function AdminReceptionRoomPage({
             チャット一覧
           </Link>
           <span aria-hidden>{'>'}</span>
-          <span className="text-neutral-900">Room</span>
+          <span className="truncate text-neutral-900">
+            {subject.display_name}
+          </span>
         </nav>
       </header>
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
         <div className="shrink-0 border-b border-neutral-200 px-6 py-4">
           <div className="truncate text-[16px] font-semibold leading-tight text-black">
-            {room?.display_name ?? 'Guest'}
+            {subject.display_name}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-neutral-500">
+            <span>
+              {subject.role ?? 'user'} / {subject.tier ?? 'guest'}
+            </span>
+            <span aria-hidden>{'/'}</span>
             <span>{room?.mode ?? 'unknown'}</span>
             <span aria-hidden>{'/'}</span>
             <span>{result.ok ? (room ? 'found' : 'not found') : 'load failed'}</span>
@@ -102,6 +154,12 @@ export default async function AdminReceptionRoomPage({
             <span className="font-mono">{room_uuid.slice(0, 8)}</span>
           </div>
         </div>
+
+        <AdminHandoffMemo
+          room_uuid={room_uuid}
+          initial_memo={memo.handoff_memo}
+          initial_updated_at={memo.handoff_memo_updated_at}
+        />
 
         <AdminChatTimeline
           messages={message_result.messages}

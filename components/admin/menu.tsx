@@ -59,7 +59,7 @@ export default function AdminHeaderMenu({
               className="block rounded-xl px-3 py-2 text-[13px] font-semibold text-black transition-colors hover:bg-neutral-100"
               onClick={() => set_is_open(false)}
             >
-              管理メニュー
+              運営者管理
             </Link>
           ) : (
             <div className="px-3 py-2 text-[12px] font-medium text-neutral-400">

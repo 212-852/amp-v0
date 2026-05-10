@@ -41,17 +41,25 @@ type message_row = {
   created_at: string | null
 }
 
+type memo_row = {
+  room_uuid: string
+  handoff_memo: string | null
+  handoff_memo_updated_at: string | null
+  handoff_memo_updated_by: string | null
+}
+
 type participant_row = {
   room_uuid: string | null
   user_uuid: string | null
+  visitor_uuid: string | null
   role: string | null
 }
 
 type user_profile_row = {
   user_uuid: string
   display_name?: string | null
-  email?: string | null
-  name?: string | null
+  role?: string | null
+  tier?: string | null
 }
 
 type identity_row = {
@@ -61,6 +69,21 @@ type identity_row = {
   provider_user_name?: string | null
 }
 
+export type reception_room_subject = {
+  display_name: string
+  role: string | null
+  tier: string | null
+  user_uuid: string | null
+  visitor_uuid: string | null
+}
+
+export type reception_room_memo = {
+  room_uuid: string
+  handoff_memo: string
+  handoff_memo_updated_at: string | null
+  handoff_memo_updated_by: string | null
+}
+
 const room_select =
   'room_uuid, room_type, status, mode, action_id, created_at, updated_at'
 
@@ -68,6 +91,14 @@ function short_room_label(room_uuid: string): string {
   return room_uuid.trim().length > 0
     ? `Room ${room_uuid.slice(0, 8)}`
     : 'Guest'
+}
+
+const guest_subject: reception_room_subject = {
+  display_name: 'ゲスト',
+  role: 'user',
+  tier: 'guest',
+  user_uuid: null,
+  visitor_uuid: null,
 }
 
 function normalize_room(
@@ -110,8 +141,6 @@ function resolve_display_name(input: {
 
   return (
     string_value(user?.display_name) ??
-    string_value(user?.name) ??
-    string_value(user?.email) ??
     string_value(identity?.display_name) ??
     string_value(identity?.provider_user_name) ??
     string_value(identity?.provider_id) ??
@@ -135,7 +164,7 @@ async function enrich_room_display_names(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select('room_uuid, user_uuid, role')
+      .select('room_uuid, user_uuid, visitor_uuid, role')
       .in('room_uuid', room_uuids)
 
     if (!participant_result.error) {
@@ -169,7 +198,7 @@ async function enrich_room_display_names(
   try {
     const user_result = await supabase
       .from('users')
-      .select('user_uuid, display_name, email')
+      .select('user_uuid, display_name, role, tier')
       .in('user_uuid', user_uuids)
 
     if (!user_result.error) {
@@ -215,6 +244,107 @@ async function enrich_room_display_names(
   }
 
   return display_names
+}
+
+function choose_subject_participant(
+  participants: participant_row[],
+): participant_row | null {
+  const non_bot = participants.filter((participant) => {
+    const role = participant.role?.trim().toLowerCase() ?? ''
+    return role !== 'bot'
+  })
+
+  return (
+    non_bot.find((participant) => participant.role === 'user') ??
+    non_bot.find((participant) => participant.user_uuid) ??
+    non_bot[0] ??
+    null
+  )
+}
+
+export async function resolve_room_subject(
+  room_uuid: string,
+): Promise<reception_room_subject> {
+  let participants: participant_row[] = []
+
+  try {
+    const participant_result = await supabase
+      .from('participants')
+      .select('room_uuid, user_uuid, visitor_uuid, role')
+      .eq('room_uuid', room_uuid)
+
+    if (participant_result.error) {
+      return guest_subject
+    }
+
+    participants = (participant_result.data ?? []) as participant_row[]
+  } catch {
+    return guest_subject
+  }
+
+  const subject_participant = choose_subject_participant(participants)
+
+  if (!subject_participant) {
+    return guest_subject
+  }
+
+  const user_uuid = subject_participant.user_uuid ?? null
+  const visitor_uuid = subject_participant.visitor_uuid ?? null
+
+  if (!user_uuid) {
+    return {
+      display_name: 'ゲスト',
+      role: string_value(subject_participant.role) ?? 'user',
+      tier: 'guest',
+      user_uuid: null,
+      visitor_uuid,
+    }
+  }
+
+  let user: user_profile_row | null = null
+  let identity: identity_row | null = null
+
+  try {
+    const user_result = await supabase
+      .from('users')
+      .select('user_uuid, display_name, role, tier')
+      .eq('user_uuid', user_uuid)
+      .maybeSingle()
+
+    if (!user_result.error) {
+      user = user_result.data as user_profile_row | null
+    }
+  } catch {
+    user = null
+  }
+
+  try {
+    const identity_result = await supabase
+      .from('identities')
+      .select('user_uuid, provider_id')
+      .eq('user_uuid', user_uuid)
+      .limit(1)
+
+    if (!identity_result.error) {
+      identity = ((identity_result.data ?? []) as identity_row[])[0] ?? null
+    }
+  } catch {
+    identity = null
+  }
+
+  return {
+    display_name:
+      string_value(user?.display_name) ??
+      string_value(identity?.provider_id) ??
+      'ゲスト',
+    role:
+      string_value(user?.role) ??
+      string_value(subject_participant.role) ??
+      'user',
+    tier: string_value(user?.tier) ?? 'guest',
+    user_uuid,
+    visitor_uuid,
+  }
 }
 
 export async function list_reception_rooms({
@@ -419,4 +549,82 @@ export async function list_reception_room_messages({
   return ((result.data ?? []) as message_row[])
     .map(normalize_message)
     .sort(compare_messages)
+}
+
+function normalize_memo(row: memo_row): reception_room_memo {
+  return {
+    room_uuid: row.room_uuid,
+    handoff_memo: row.handoff_memo ?? '',
+    handoff_memo_updated_at: row.handoff_memo_updated_at,
+    handoff_memo_updated_by: row.handoff_memo_updated_by,
+  }
+}
+
+export function normalize_handoff_memo(value: unknown): string {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  return value.trim().slice(0, 2000)
+}
+
+export async function read_reception_room_memo({
+  room_uuid,
+}: {
+  room_uuid: string
+}): Promise<reception_room_memo> {
+  const result = await supabase
+    .from('rooms')
+    .select(
+      'room_uuid, handoff_memo, handoff_memo_updated_at, handoff_memo_updated_by',
+    )
+    .eq('room_uuid', room_uuid)
+    .maybeSingle()
+
+  if (result.error) {
+    throw result.error
+  }
+
+  if (!result.data) {
+    return {
+      room_uuid,
+      handoff_memo: '',
+      handoff_memo_updated_at: null,
+      handoff_memo_updated_by: null,
+    }
+  }
+
+  return normalize_memo(result.data as memo_row)
+}
+
+export async function update_reception_room_memo({
+  room_uuid,
+  memo,
+  updated_by,
+}: {
+  room_uuid: string
+  memo: string
+  updated_by: string
+}): Promise<reception_room_memo> {
+  const normalized_memo = normalize_handoff_memo(memo)
+  const updated_at = new Date().toISOString()
+
+  const result = await supabase
+    .from('rooms')
+    .update({
+      handoff_memo: normalized_memo,
+      handoff_memo_updated_at: updated_at,
+      handoff_memo_updated_by: updated_by,
+    })
+    .eq('room_uuid', room_uuid)
+    .select(
+      'room_uuid, handoff_memo, handoff_memo_updated_at, handoff_memo_updated_by',
+    )
+    .single()
+
+  if (result.error) {
+    throw result.error
+  }
+
+  return normalize_memo(result.data as memo_row)
 }
