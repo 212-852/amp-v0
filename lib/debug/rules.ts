@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { debug_control } from './control'
+
 export type debug_level = 'info' | 'warn' | 'error'
 export type debug_channel = 'discord'
 
@@ -29,7 +31,9 @@ export function resolve_debug_rule(input: {
     return {
       category: 'handoff_memo',
       level: 'info',
-      channels: ['discord'],
+      channels: debug_control.handoff_memo_debug_enabled
+        ? ['discord']
+        : [],
     }
   }
 
@@ -37,7 +41,9 @@ export function resolve_debug_rule(input: {
     return {
       category: 'handoff_memo',
       level: 'info',
-      channels: ['discord'],
+      channels: debug_control.handoff_memo_debug_enabled
+        ? ['discord']
+        : [],
     }
   }
 

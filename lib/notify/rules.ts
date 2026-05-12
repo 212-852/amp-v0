@@ -42,6 +42,15 @@ export type notify_event =
       message: string
     }
   | {
+      event: 'admin_internal_name_updated'
+      admin_user_uuid: string
+      old_internal_name: string | null
+      new_internal_name: string
+      updated_by_user_uuid: string
+      updated_at: string
+      source_channel: string
+    }
+  | {
       event: 'debug_trace'
       category: string
       debug_event: string
@@ -53,7 +62,10 @@ export type notify_channel = 'discord' | 'line' | 'push'
 export type notify_target = 'admin' | 'concierge' | 'owner' | 'core'
 
 export type notify_rule = {
-  category?: 'concierge_requested' | 'concierge_closed'
+  category?:
+    | 'concierge_requested'
+    | 'concierge_closed'
+    | 'admin_internal_name_updated'
   priority?: 'high' | 'normal'
   targets?: notify_target[]
   channels: notify_channel[]
@@ -97,6 +109,10 @@ export function should_send_notify(event: notify_event) {
   }
 
   if (event.event === 'line_push') {
+    return true
+  }
+
+  if (event.event === 'admin_internal_name_updated') {
     return true
   }
 
@@ -146,6 +162,15 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
   if (event.event === 'line_push') {
     return {
       channels: ['line'],
+    }
+  }
+
+  if (event.event === 'admin_internal_name_updated') {
+    return {
+      category: 'admin_internal_name_updated',
+      priority: 'normal',
+      targets: ['owner', 'core'],
+      channels: ['discord'],
     }
   }
 

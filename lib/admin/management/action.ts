@@ -2,7 +2,9 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
+import { notify } from '@/lib/notify'
 import {
+  can_update_admin_profile,
   validate_admin_profile_input,
   type admin_profile_input,
 } from './rules'
@@ -300,6 +302,7 @@ export type update_admin_profile_result =
       error:
         | 'invalid_user'
         | 'admin_not_found'
+        | 'not_allowed'
         | 'real_name_too_long'
         | 'work_name_too_long'
         | 'invalid_birth_date'
@@ -307,11 +310,26 @@ export type update_admin_profile_result =
 
 export async function update_admin_profile(input: {
   user_uuid: string
+  updated_by_user_uuid: string
+  updated_by_role: string | null
+  updated_by_tier: string | null
+  source_channel?: string | null
 } & admin_profile_input): Promise<update_admin_profile_result> {
   const user_uuid = clean_uuid(input.user_uuid)
+  const updated_by_user_uuid = clean_uuid(input.updated_by_user_uuid)
 
   if (!user_uuid) {
     return { ok: false, error: 'invalid_user' }
+  }
+
+  if (
+    !updated_by_user_uuid ||
+    !can_update_admin_profile({
+      role: input.updated_by_role,
+      tier: input.updated_by_tier,
+    })
+  ) {
+    return { ok: false, error: 'not_allowed' }
   }
 
   const validation = validate_admin_profile_input(input)
@@ -335,6 +353,20 @@ export async function update_admin_profile(input: {
     return { ok: false, error: 'admin_not_found' }
   }
 
+  const current_profile_result = await supabase
+    .from('admin_profiles')
+    .select('work_name')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  if (current_profile_result.error) {
+    throw current_profile_result.error
+  }
+
+  const old_work_name = string_value(
+    (current_profile_result.data as admin_profiles_row | null)?.['work_name'],
+  )
+
   const updated_at = new Date().toISOString()
   const result = await supabase
     .from('admin_profiles')
@@ -353,6 +385,19 @@ export async function update_admin_profile(input: {
   }
 
   const row = (result.data ?? {}) as admin_profiles_row
+  const next_work_name = string_value(row['work_name'])
+
+  if (next_work_name && next_work_name !== old_work_name) {
+    await notify({
+      event: 'admin_internal_name_updated',
+      admin_user_uuid: user_uuid,
+      old_internal_name: old_work_name,
+      new_internal_name: next_work_name,
+      updated_by_user_uuid,
+      updated_at,
+      source_channel: input.source_channel ?? 'web',
+    })
+  }
 
   return {
     ok: true,

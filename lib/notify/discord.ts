@@ -440,6 +440,18 @@ function build_discord_content(event: notify_event) {
     return lines.join('\n')
   }
 
+  if (event.event === 'admin_internal_name_updated') {
+    return [
+      '[ADMIN INTERNAL NAME UPDATED]',
+      `admin_user_uuid: ${event.admin_user_uuid}`,
+      `old_internal_name: ${event.old_internal_name ?? 'none'}`,
+      `new_internal_name: ${event.new_internal_name}`,
+      `updated_by_user_uuid: ${event.updated_by_user_uuid}`,
+      `updated_at: ${event.updated_at}`,
+      `source_channel: ${event.source_channel}`,
+    ].join('\n')
+  }
+
   return null
 }
 

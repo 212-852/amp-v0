@@ -4,6 +4,13 @@ export type admin_profile_input = {
   work_name?: string | null
 }
 
+export function can_update_admin_profile(input: {
+  role: string | null | undefined
+  tier: string | null | undefined
+}): boolean {
+  return input.role === 'admin' && (input.tier === 'owner' || input.tier === 'core')
+}
+
 export type admin_profile_validated = {
   ok: true
   value: {

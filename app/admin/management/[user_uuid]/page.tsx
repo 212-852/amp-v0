@@ -91,10 +91,14 @@ export default async function AdminManagementDetailPage({
   async function save_admin_profile(form_data: FormData) {
     'use server'
 
-    await require_admin_management_access()
+    const access = await require_admin_management_access()
 
     const result = await update_admin_profile({
       user_uuid,
+      updated_by_user_uuid: access.admin_user_uuid,
+      updated_by_role: 'admin',
+      updated_by_tier: access.tier,
+      source_channel: 'web',
       real_name: String(form_data.get('real_name') ?? ''),
       birth_date: String(form_data.get('birth_date') ?? ''),
       work_name: String(form_data.get('work_name') ?? ''),
@@ -205,6 +209,7 @@ export default async function AdminManagementDetailPage({
                   name="real_name"
                   defaultValue={admin.profile.real_name ?? ''}
                   maxLength={80}
+                  placeholder="本名"
                   className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-[14px] text-black outline-none transition-colors focus:border-black"
                 />
               </label>
@@ -217,6 +222,7 @@ export default async function AdminManagementDetailPage({
                   name="birth_date"
                   type="date"
                   defaultValue={admin.profile.birth_date ?? ''}
+                  placeholder="生年月日"
                   className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-[14px] text-black outline-none transition-colors focus:border-black"
                 />
               </label>
@@ -229,7 +235,7 @@ export default async function AdminManagementDetailPage({
                   name="work_name"
                   defaultValue={admin.profile.work_name ?? ''}
                   maxLength={40}
-                  placeholder="M.OKINO"
+                  placeholder="社内表示名"
                   className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-[14px] text-black outline-none transition-colors focus:border-black"
                 />
               </label>
