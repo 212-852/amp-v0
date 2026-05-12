@@ -66,7 +66,10 @@ export function resolve_debug_rule(input: {
     return {
       category: 'admin_management',
       level: is_failed ? 'error' : 'info',
-      channels: ['discord'],
+      channels:
+        is_failed || debug_control.admin_management_debug_enabled
+          ? ['discord']
+          : [],
     }
   }
 
