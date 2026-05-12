@@ -16,7 +16,6 @@ export type admin_operator_display_policy =
 type users_embed_row = {
   user_uuid: string
   display_name: string | null
-  name: string | null
   email: string | null
 }
 
@@ -70,7 +69,6 @@ function compose_handoff_saved_by_label(input: {
 function compose_admin_display_label(input: {
   internal_name: string | null
   display_name: string | null
-  name: string | null
   email: string | null
 }): string | null {
   if (input.internal_name) {
@@ -79,10 +77,6 @@ function compose_admin_display_label(input: {
 
   if (input.display_name) {
     return input.display_name
-  }
-
-  if (input.name) {
-    return input.name
   }
 
   const local = email_local_part(input.email)
@@ -186,7 +180,7 @@ export async function batch_resolve_admin_operator_display(
 
   const users_result = await supabase
     .from('users')
-    .select('user_uuid, display_name, name, email')
+    .select('user_uuid, display_name, email')
     .in('user_uuid', cleaned)
 
   if (users_result.error) {
@@ -209,7 +203,6 @@ export async function batch_resolve_admin_operator_display(
         compose_admin_display_label({
           internal_name: internal,
           display_name: string_value(raw.display_name),
-          name: string_value(raw.name),
           email: string_value(raw.email),
         }) ?? null
     } else {

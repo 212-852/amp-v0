@@ -9,6 +9,10 @@ import {
   compare_chat_room_timeline_messages,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
+import {
+  build_identity_display_bundles,
+  type identity_display_bundle,
+} from '@/lib/auth/customer_display'
 import { supabase } from '@/lib/db/supabase'
 
 type room_row = {
@@ -63,27 +67,15 @@ type participant_row = {
 type user_profile_row = {
   user_uuid: string
   display_name?: string | null
-  name?: string | null
   role?: string | null
   tier?: string | null
   image_url?: string | null
   email?: string | null
 }
 
-type identity_row = {
-  user_uuid: string | null
-  provider?: string | null
-  provider_id: string | null
-  display_name?: string | null
-  provider_user_name?: string | null
-}
-
 type resolved_display_name_source =
   | 'users.display_name'
-  | 'users.name'
-  | 'identities.display_name'
-  | 'identities.provider_user_name'
-  | 'identities.provider_id'
+  | 'identities.line_profile'
   | 'participants.display_name'
   | 'email_local_part'
   | 'unset'
@@ -255,82 +247,9 @@ function string_value(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function merge_identity_rows_for_display(rows: identity_row[]): identity_row | null {
-  if (rows.length === 0) {
-    return null
-  }
-
-  const user_uuid =
-    string_value(rows[0]?.user_uuid) ??
-    string_value(
-      rows.map((r) => string_value(r.user_uuid)).find((u) => u !== null) ?? null,
-    )
-
-  if (!user_uuid) {
-    return null
-  }
-
-  const sorted = [...rows].sort((a, b) => {
-    const a_line = string_value(a.provider)?.toLowerCase() === 'line' ? 0 : 1
-    const b_line = string_value(b.provider)?.toLowerCase() === 'line' ? 0 : 1
-
-    return a_line - b_line
-  })
-
-  let display_name: string | null = null
-  let provider_user_name: string | null = null
-  let provider_id: string | null = null
-
-  for (const row of sorted) {
-    display_name = display_name ?? string_value(row.display_name)
-    provider_user_name =
-      provider_user_name ?? string_value(row.provider_user_name)
-    provider_id = provider_id ?? string_value(row.provider_id)
-  }
-
-  const first_provider =
-    string_value(sorted.find((r) => string_value(r.provider))?.provider ?? null)
-
-  return {
-    user_uuid,
-    provider: first_provider,
-    display_name,
-    provider_user_name,
-    provider_id,
-  }
-}
-
-function build_merged_identities_map(rows: identity_row[]): Map<string, identity_row> {
-  const grouped = new Map<string, identity_row[]>()
-
-  for (const row of rows) {
-    const u = string_value(row.user_uuid)
-
-    if (!u) {
-      continue
-    }
-
-    const list = grouped.get(u) ?? []
-    list.push(row)
-    grouped.set(u, list)
-  }
-
-  const out = new Map<string, identity_row>()
-
-  for (const [u, list] of grouped) {
-    const merged = merge_identity_rows_for_display(list)
-
-    if (merged) {
-      out.set(u, merged)
-    }
-  }
-
-  return out
-}
-
 function resolve_customer_list_card_title(input: {
   user: user_profile_row | null | undefined
-  identity: identity_row | null | undefined
+  identity: identity_display_bundle | null | undefined
   customer: participant_row | null
 }): { title: string; source: resolved_display_name_source } {
   const from_user_display = string_value(input.user?.display_name)
@@ -339,43 +258,24 @@ function resolve_customer_list_card_title(input: {
     return { title: from_user_display, source: 'users.display_name' }
   }
 
-  const from_user_name = string_value(input.user?.name)
+  const from_line_profile = string_value(
+    input.identity?.line_profile_display_name,
+  )
 
-  if (from_user_name) {
-    return { title: from_user_name, source: 'users.name' }
-  }
-
-  const from_identity_display = string_value(input.identity?.display_name)
-
-  if (from_identity_display) {
-    return { title: from_identity_display, source: 'identities.display_name' }
-  }
-
-  const from_identity_puname = string_value(input.identity?.provider_user_name)
-
-  if (from_identity_puname) {
-    return {
-      title: from_identity_puname,
-      source: 'identities.provider_user_name',
-    }
-  }
-
-  const from_identity_pid = string_value(input.identity?.provider_id)
-
-  if (from_identity_pid) {
-    return { title: from_identity_pid, source: 'identities.provider_id' }
-  }
-
-  const from_participant = string_value(input.customer?.display_name)
-
-  if (from_participant) {
-    return { title: from_participant, source: 'participants.display_name' }
+  if (from_line_profile) {
+    return { title: from_line_profile, source: 'identities.line_profile' }
   }
 
   const from_email = email_local_part(input.user?.email)
 
   if (from_email) {
     return { title: from_email, source: 'email_local_part' }
+  }
+
+  const from_participant = string_value(input.customer?.display_name)
+
+  if (from_participant) {
+    return { title: from_participant, source: 'participants.display_name' }
   }
 
   return { title: unset_customer_label, source: 'unset' }
@@ -416,7 +316,7 @@ async function fetch_user_profile_row_by_uuid(
   try {
     const result = await supabase
       .from('users')
-      .select('user_uuid, display_name, name, role, tier, image_url, email')
+      .select('user_uuid, display_name, role, tier, image_url, email')
       .eq('user_uuid', user_uuid)
       .maybeSingle()
 
@@ -592,13 +492,13 @@ async function enrich_room_cards(
   const user_uuids = Array.from(new Set(user_uuid_by_room.values()))
 
   const users_by_uuid = new Map<string, user_profile_row>()
-  const identities_by_user_uuid = new Map<string, identity_row>()
+  const identities_by_user_uuid = new Map<string, identity_display_bundle>()
 
   if (user_uuids.length > 0) {
     try {
       const user_result = await supabase
         .from('users')
-        .select('user_uuid, display_name, name, role, tier, image_url, email')
+        .select('user_uuid, display_name, role, tier, image_url, email')
         .in('user_uuid', user_uuids)
 
       if (user_result.error) {
@@ -627,7 +527,7 @@ async function enrich_room_cards(
     try {
       const identity_result = await supabase
         .from('identities')
-        .select('user_uuid, provider, provider_id, display_name, provider_user_name')
+        .select('*')
         .in('user_uuid', user_uuids)
 
       if (identity_result.error) {
@@ -639,8 +539,8 @@ async function enrich_room_cards(
           phase: 'identities_query',
         })
       } else {
-        const merged = build_merged_identities_map(
-          (identity_result.data ?? []) as identity_row[],
+        const merged = build_identity_display_bundles(
+          (identity_result.data ?? []) as Record<string, unknown>[],
         )
 
         for (const [user_uuid, row] of merged) {
@@ -699,9 +599,9 @@ async function enrich_room_cards(
     const has_display_name = Boolean(string_value(customer_user?.display_name))
     const has_identity = Boolean(
       identity &&
-        (string_value(identity.display_name) ||
-          string_value(identity.provider_user_name) ||
-          string_value(identity.provider_id)),
+        (string_value(identity.line_profile_display_name) ||
+          string_value(identity.provider_id) ||
+          string_value(identity.provider)),
     )
 
     if (has_user_uuid) {
@@ -848,12 +748,12 @@ export async function resolve_room_subject(
   }
 
   let user: user_profile_row | null = null
-  let identity: identity_row | null = null
+  let identity: identity_display_bundle | null = null
 
   try {
     const user_result = await supabase
       .from('users')
-      .select('user_uuid, display_name, name, role, tier, email')
+      .select('user_uuid, display_name, role, tier, email')
       .eq('user_uuid', user_uuid)
       .maybeSingle()
 
@@ -868,24 +768,23 @@ export async function resolve_room_subject(
     user = await fetch_user_profile_row_by_uuid(user_uuid)
   }
 
-  let identity_rows: identity_row[] = []
+  let identity_rows: Record<string, unknown>[] = []
 
   try {
     const identity_result = await supabase
       .from('identities')
-      .select(
-        'user_uuid, provider, provider_id, display_name, provider_user_name',
-      )
+      .select('*')
       .eq('user_uuid', user_uuid)
 
     if (!identity_result.error) {
-      identity_rows = (identity_result.data ?? []) as identity_row[]
+      identity_rows = (identity_result.data ?? []) as Record<string, unknown>[]
     }
   } catch {
     identity_rows = []
   }
 
-  identity = merge_identity_rows_for_display(identity_rows)
+  const bundles = build_identity_display_bundles(identity_rows)
+  identity = bundles.get(user_uuid) ?? null
 
   const resolved = resolve_customer_list_card_title({
     user,
