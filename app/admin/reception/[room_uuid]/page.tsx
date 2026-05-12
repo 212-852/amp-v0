@@ -139,7 +139,7 @@ export default async function AdminReceptionRoomPage({
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
         <div className="shrink-0 border-b border-neutral-200 px-6 py-4">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-3">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[16px] font-semibold leading-tight text-black">
                 {subject.display_name}
@@ -158,13 +158,11 @@ export default async function AdminReceptionRoomPage({
                 <span className="font-mono">{room_uuid.slice(0, 8)}</span>
               </div>
             </div>
-            <div className="shrink-0">
-              <AdminHandoffMemo
-                room_uuid={room_uuid}
-                initial_memo={memo.handoff_memo}
-                initial_updated_at={memo.handoff_memo_updated_at}
-              />
-            </div>
+            <AdminHandoffMemo
+              room_uuid={room_uuid}
+              initial_memo={memo.handoff_memo}
+              initial_updated_at={memo.handoff_memo_updated_at}
+            />
           </div>
         </div>
 

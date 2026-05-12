@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
 
 import { resolve_admin_reception_context } from '@/lib/admin/reception/context'
+import { apply_reception_room_memo_request } from '@/lib/admin/reception/memo/action'
 import {
-  normalize_handoff_memo,
   read_reception_room_memo,
-  update_reception_room_memo,
 } from '@/lib/admin/reception/room'
 
 type route_context = {
@@ -68,9 +67,9 @@ export async function POST(request: Request, context: route_context) {
     const body = (await request.json().catch(() => ({}))) as {
       memo?: unknown
     }
-    const memo = await update_reception_room_memo({
+    const memo = await apply_reception_room_memo_request({
       room_uuid,
-      memo: normalize_handoff_memo(body.memo),
+      body,
       updated_by: admin_context.admin_user_uuid,
     })
 

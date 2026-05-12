@@ -208,35 +208,32 @@ canvas {
 }
 
 .admin_neko_image {
-  width: 384px;
+  width: 96px;
   height: 114.63px;
   max-width: none;
   display: block;
-  animation: neko_blink_sprite 5.4s steps(1, end) infinite;
+}
+
+.admin_neko_blink_eyes {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: admin_neko_blink_eyes_kf 5.2s ease-in-out infinite;
   will-change: transform;
 }
 
-@keyframes neko_blink_sprite {
+@keyframes admin_neko_blink_eyes_kf {
   0%,
-  84%,
+  92%,
   100% {
-    transform: translateX(0);
+    transform: scaleY(1);
   }
 
-  86% {
-    transform: translateX(-96px);
+  95% {
+    transform: scaleY(0.08);
   }
 
-  88% {
-    transform: translateX(-192px);
-  }
-
-  90% {
-    transform: translateX(-288px);
-  }
-
-  92% {
-    transform: translateX(0);
+  97% {
+    transform: scaleY(1);
   }
 }
 

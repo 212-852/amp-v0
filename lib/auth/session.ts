@@ -1,6 +1,7 @@
 import { cache } from 'react'
 
 import { control } from '@/lib/config/control'
+import { participant_idle_status } from '@/lib/chat/participant/rules'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
 import { get_request_visitor_uuid } from '@/lib/visitor/request'
 
@@ -1059,7 +1060,7 @@ export async function promote_browser_visitor_to_user(input: {
         updated_at: promotion_now,
       })
       .eq('role', 'user')
-      .eq('status', 'active')
+      .eq('status', participant_idle_status)
       .eq('user_uuid', input.user_uuid)
       .neq('participant_uuid', guest_participant.participant_uuid)
 

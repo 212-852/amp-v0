@@ -7,6 +7,10 @@ import {
   read_session,
   type browser_session_source_channel,
 } from '@/lib/auth/session'
+import {
+  participant_handling_status,
+  participant_idle_status,
+} from '@/lib/chat/participant/rules'
 import { supabase } from '@/lib/db/supabase'
 import { read_admin_display_name } from '@/lib/admin/management/action'
 import { sync_room_action_context } from '@/lib/notify'
@@ -108,7 +112,7 @@ async function update_room_participant_statuses(input: {
     const bot_result = await supabase
       .from('participants')
       .update({
-        status: 'handling',
+        status: participant_handling_status,
         updated_at: now,
       })
       .eq('room_uuid', input.room_uuid)
@@ -121,7 +125,7 @@ async function update_room_participant_statuses(input: {
     const staff_result = await supabase
       .from('participants')
       .update({
-        status: 'idle',
+        status: participant_idle_status,
         updated_at: now,
       })
       .eq('room_uuid', input.room_uuid)
@@ -137,7 +141,7 @@ async function update_room_participant_statuses(input: {
   const bot_result = await supabase
     .from('participants')
     .update({
-      status: 'idle',
+      status: participant_idle_status,
       updated_at: now,
     })
     .eq('room_uuid', input.room_uuid)
@@ -147,7 +151,9 @@ async function update_room_participant_statuses(input: {
     throw bot_result.error
   }
 
-  const staff_status = input.admin_user_uuid ? 'idle' : 'handling'
+  const staff_status = input.admin_user_uuid
+    ? participant_idle_status
+    : participant_handling_status
   const staff_result = await supabase
     .from('participants')
     .update({
@@ -168,7 +174,7 @@ async function update_room_participant_statuses(input: {
   const admin_result = await supabase
     .from('participants')
     .update({
-      status: 'handling',
+      status: participant_handling_status,
       updated_at: now,
     })
     .eq('room_uuid', input.room_uuid)

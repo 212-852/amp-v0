@@ -1,7 +1,8 @@
-/* eslint-disable @next/next/no-img-element */
 'use client'
 
 import { useState } from 'react'
+
+import AdminAssistantNekoSvg from './neko'
 
 type AdminAssistantProps = {
   display_name: string | null
@@ -10,11 +11,7 @@ type AdminAssistantProps = {
 function AdminAssistantNeko() {
   return (
     <div className="admin_neko_frame">
-      <img
-        src="/images/robo_neko.svg"
-        alt="AI Assistant"
-        className="admin_neko_image"
-      />
+      <AdminAssistantNekoSvg />
     </div>
   )
 }
@@ -61,34 +58,8 @@ export default function AdminAssistant({
           }
 
           .admin_assistant_modal_neko .admin_neko_image {
-            width: 288px;
+            width: 72px;
             height: 84px;
-          }
-
-          .admin_assistant_modal_neko .admin_neko_image {
-            animation-name: admin_assistant_modal_neko_blink;
-          }
-
-          @keyframes admin_assistant_modal_neko_blink {
-            0%, 84%, 100% {
-              transform: translateX(0);
-            }
-
-            86% {
-              transform: translateX(-72px);
-            }
-
-            88% {
-              transform: translateX(-144px);
-            }
-
-            90% {
-              transform: translateX(-216px);
-            }
-
-            92% {
-              transform: translateX(0);
-            }
           }
 
           @keyframes admin_assistant_card_in {

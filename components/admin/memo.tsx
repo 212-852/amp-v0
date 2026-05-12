@@ -1,17 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
+
+import { save_reception_room_memo } from '@/lib/admin/reception/memo/client'
 
 type AdminHandoffMemoProps = {
   room_uuid: string
   initial_memo: string
   initial_updated_at: string | null
-}
-
-type memo_response = {
-  ok: boolean
-  memo?: string
-  updated_at?: string | null
 }
 
 function format_time(iso: string | null): string {
@@ -43,30 +40,14 @@ export default function AdminHandoffMemo({
   const [updated_at, set_updated_at] = useState(initial_updated_at)
   const [is_open, set_is_open] = useState(false)
   const [is_saving, set_is_saving] = useState(false)
-  const [saved_message, set_saved_message] = useState<string | null>(null)
+  const [error_message, set_error_message] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!is_open) {
-      return
-    }
+  const is_dirty = draft !== memo
+  const status_text = is_saving ? '保存中...' : is_dirty ? '未保存' : '保存済み'
+  const updated_time = format_time(updated_at)
 
-    const handle_key_down = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        set_is_open(false)
-      }
-    }
-
-    window.addEventListener('keydown', handle_key_down)
-
-    return () => {
-      window.removeEventListener('keydown', handle_key_down)
-    }
-  }, [is_open])
-
-  const open_modal = () => {
-    set_draft(memo)
-    set_saved_message(null)
-    set_is_open(true)
+  const toggle_open = () => {
+    set_is_open((current) => !current)
   }
 
   const save = async () => {
@@ -75,119 +56,92 @@ export default function AdminHandoffMemo({
     }
 
     set_is_saving(true)
-    set_saved_message(null)
+    set_error_message(null)
 
     try {
-      const response = await fetch(
-        `/api/admin/reception/${room_uuid}/memo`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ memo: draft }),
-        },
-      )
+      const result = await save_reception_room_memo({
+        room_uuid,
+        memo: draft,
+      })
 
-      if (!response.ok) {
-        set_saved_message('保存できませんでした')
-        return
-      }
-
-      const payload = (await response.json()) as memo_response
-
-      if (payload.ok) {
-        const next_memo = payload.memo ?? ''
+      if (result.ok) {
+        const next_memo = result.memo
         set_memo(next_memo)
         set_draft(next_memo)
-        set_updated_at(payload.updated_at ?? null)
-        set_saved_message('保存しました')
+        set_updated_at(result.updated_at)
       } else {
-        set_saved_message('保存できませんでした')
+        set_error_message('保存できませんでした')
       }
     } catch {
-      set_saved_message('保存できませんでした')
+      set_error_message('保存できませんでした')
     } finally {
       set_is_saving(false)
     }
   }
 
   return (
-    <>
-      <div className="inline-flex items-center gap-2">
-        <button
-          type="button"
-          className="rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-black transition-colors hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
-          onClick={open_modal}
-        >
-          引き継ぎメモ
-        </button>
-        {memo ? (
-          <span className="text-[11px] font-medium text-neutral-400">
-            保存済み
+    <section className="rounded-xl border border-neutral-200 bg-white">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+        aria-expanded={is_open}
+        onClick={toggle_open}
+      >
+        <span className="min-w-0">
+          <span className="block text-[13px] font-semibold leading-tight text-black">
+            引き継ぎメモ
           </span>
-        ) : null}
-      </div>
+          <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium leading-tight text-neutral-500">
+            <span>{updated_time ? `更新: ${updated_time}` : '未更新'}</span>
+            <span aria-hidden>{'/'}</span>
+            <span
+              className={
+                is_dirty && !is_saving ? 'text-amber-700' : 'text-neutral-500'
+              }
+            >
+              {status_text}
+            </span>
+          </span>
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-neutral-500 transition-transform ${
+            is_open ? 'rotate-180' : ''
+          }`}
+          strokeWidth={2}
+          aria-hidden
+        />
+      </button>
 
       {is_open ? (
-        <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/40 px-5">
-          <button
-            type="button"
-            aria-label="Close handoff memo"
-            className="absolute inset-0"
-            onClick={() => set_is_open(false)}
+        <div className="border-t border-neutral-200 px-3 pb-3 pt-3">
+          <textarea
+            value={draft}
+            maxLength={2000}
+            onChange={(event) => {
+              set_draft(event.target.value)
+              set_error_message(null)
+            }}
+            placeholder="管理者向けのメモを入力"
+            className="min-h-32 w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13px] leading-relaxed text-black placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900"
           />
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-label="引き継ぎメモ"
-            className="relative z-[181] flex w-full max-w-[420px] flex-col rounded-2xl bg-white p-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)]"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-[16px] font-semibold text-black">
-                  引き継ぎメモ
-                </h2>
-                {updated_at ? (
-                  <p className="mt-1 text-[11px] font-medium text-neutral-400">
-                    更新: {format_time(updated_at)}
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-neutral-600 hover:bg-neutral-100"
-                onClick={() => set_is_open(false)}
-              >
-                閉じる
-              </button>
-            </div>
 
-            <textarea
-              value={draft}
-              maxLength={2000}
-              onChange={(event) => set_draft(event.target.value)}
-              placeholder="管理者向けのメモを入力"
-              className="mt-4 min-h-40 w-full resize-none rounded-xl border border-neutral-200 bg-white px-3 py-2 text-[13px] leading-relaxed text-black placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900"
-            />
-
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <div className="min-w-0 text-[11px] font-medium text-neutral-400">
-                {saved_message}
-              </div>
-              <button
-                type="button"
-                className="rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white transition-opacity disabled:opacity-40"
-                disabled={is_saving}
-                onClick={() => {
-                  void save()
-                }}
-              >
-                保存
-              </button>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div className="min-w-0 text-[11px] font-medium text-red-600">
+              {error_message}
             </div>
-          </section>
+            <button
+              type="button"
+              className="rounded-full bg-black px-4 py-2 text-[12px] font-semibold text-white transition-opacity disabled:opacity-40"
+              disabled={is_saving || !is_dirty}
+              onClick={() => {
+                void save()
+              }}
+            >
+              保存
+            </button>
+          </div>
         </div>
       ) : null}
-    </>
+    </section>
   )
 }

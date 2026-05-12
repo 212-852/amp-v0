@@ -5,6 +5,7 @@ import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 
+import { participant_idle_status } from '@/lib/chat/participant/rules'
 import { room_select_fields } from '@/lib/chat/room/schema'
 
 export type chat_channel =
@@ -211,7 +212,7 @@ function build_user_participant_insert_row(
 
   return {
     role: 'user' as const,
-    status: 'active',
+    status: participant_idle_status,
     last_channel: input.channel,
     updated_at: updated_at_iso,
     ...(sanitized_room_uuid ? { room_uuid: sanitized_room_uuid } : {}),
@@ -264,7 +265,7 @@ function build_bot_participant_insert_row(room_uuid: string) {
 
   return {
     role: 'bot' as const,
-    status: 'active',
+    status: participant_idle_status,
     ...(sanitized_room_uuid ? { room_uuid: sanitized_room_uuid } : {}),
   }
 }
@@ -324,7 +325,7 @@ async function find_canonical_user_participant(
 async function find_canonical_user_participant_after_insert_conflict(
   input: resolve_room_input,
 ): Promise<participant_row | null> {
-  const max_attempts = 6
+  const max_attempts = 12
 
   for (let attempt = 1; attempt <= max_attempts; attempt += 1) {
     const existing = await find_canonical_user_participant(input)
@@ -334,7 +335,7 @@ async function find_canonical_user_participant_after_insert_conflict(
     }
 
     if (attempt < max_attempts) {
-      await new Promise((resolve) => setTimeout(resolve, 45 * attempt))
+      await new Promise((resolve) => setTimeout(resolve, 60 * attempt))
     }
   }
 
@@ -697,11 +698,11 @@ async function try_insert_participant_and_direct_room(
   const existing =
     await find_canonical_user_participant_after_insert_conflict(input)
 
+  await delete_orphan_direct_room(room.room_uuid)
+
   if (!existing) {
     throw participant_result.error
   }
-
-  await delete_orphan_direct_room(room.room_uuid)
 
   return { tag: 'reuse', participant: existing }
 }
