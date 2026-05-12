@@ -173,11 +173,8 @@ export default async function AdminReceptionRoomPage({
         <AdminChatTimeline
           messages={message_result.messages}
           load_failed={!message_result.ok}
+          room_uuid={room_uuid}
         />
-
-        <div className="shrink-0 border-t border-neutral-200 bg-neutral-50 px-6 py-3 text-center text-sm font-medium text-neutral-500">
-          返信機能は次のステップで実装
-        </div>
       </section>
     </div>
   )

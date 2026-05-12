@@ -573,6 +573,28 @@ export function build_user_text_bundle(input: {
   }
 }
 
+export function build_staff_text_bundle(input: {
+  text: string
+  locale?: chat_locale
+  sender: 'admin' | 'concierge'
+  sender_display_name: string
+}): text_bundle {
+  return {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'text',
+    sender: input.sender,
+    version: 1,
+    locale: input.locale,
+    content_key: 'admin.reception.reply',
+    metadata: {
+      sender_display_name: input.sender_display_name,
+    },
+    payload: {
+      text: input.text,
+    },
+  }
+}
+
 const room_mode_switch_text: {
   bot: localized_content
   concierge: localized_content

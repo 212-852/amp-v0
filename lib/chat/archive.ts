@@ -424,6 +424,8 @@ export async function archive_message_bundles(
     room_uuid: string
     participant_uuid: string
     bot_participant_uuid: string
+    /** DB `participant_uuid` for outgoing admin or concierge text bundles */
+    staff_participant_uuid?: string | null
     channel: chat_channel
     bundles: message_bundle[]
   },
@@ -438,6 +440,9 @@ export async function archive_message_bundles(
   const sanitized_room_uuid = clean_uuid(input.room_uuid)
   const sanitized_user_participant_uuid = clean_uuid(input.participant_uuid)
   const sanitized_bot_participant_uuid = clean_uuid(input.bot_participant_uuid)
+  const sanitized_staff_participant_uuid = clean_uuid(
+    input.staff_participant_uuid ?? null,
+  )
 
   if (
     !sanitized_room_uuid ||
@@ -447,6 +452,17 @@ export async function archive_message_bundles(
     throw new Error(
       `archive_message_bundles: invalid uuid (room=${input.room_uuid}, user_participant=${input.participant_uuid}, bot_participant=${input.bot_participant_uuid})`,
     )
+  }
+
+  for (const bundle of input.bundles) {
+    if (
+      (bundle.sender === 'admin' || bundle.sender === 'concierge') &&
+      !sanitized_staff_participant_uuid
+    ) {
+      throw new Error(
+        'archive_message_bundles: staff_participant_uuid required for admin or concierge sender',
+      )
+    }
   }
 
   const rows = input.bundles.map((bundle, index) => {
@@ -460,7 +476,9 @@ export async function archive_message_bundles(
     const sender_participant_uuid =
       bundle.sender === 'user'
         ? sanitized_user_participant_uuid
-        : sanitized_bot_participant_uuid
+        : bundle.sender === 'admin' || bundle.sender === 'concierge'
+          ? sanitized_staff_participant_uuid!
+          : sanitized_bot_participant_uuid
 
     const actor_type = resolve_actor_type(bundle)
 

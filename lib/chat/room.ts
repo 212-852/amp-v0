@@ -1271,3 +1271,125 @@ export async function resolve_chat_room(
     }
   }
 }
+
+export type admin_reception_send_resolve_error =
+  | 'room_not_found'
+  | 'user_missing'
+  | 'bot_missing'
+  | 'staff_missing'
+
+export type admin_reception_send_resolve_ok = {
+  room_uuid: string
+  user_participant_uuid: string
+  bot_participant_uuid: string
+  staff_participant_uuid: string
+  staff_sender_role: 'admin' | 'concierge'
+}
+
+export async function resolve_admin_reception_send_context(input: {
+  room_uuid: string
+  staff_user_uuid: string
+}): Promise<
+  | { ok: true; data: admin_reception_send_resolve_ok }
+  | { ok: false; error: admin_reception_send_resolve_error }
+> {
+  const room_uuid = clean_uuid(input.room_uuid)
+  const staff_user_uuid = clean_uuid(input.staff_user_uuid)
+
+  if (!room_uuid || !staff_user_uuid) {
+    return { ok: false, error: 'room_not_found' }
+  }
+
+  const room_result = await supabase
+    .from('rooms')
+    .select('room_uuid, mode')
+    .eq('room_uuid', room_uuid)
+    .maybeSingle()
+
+  if (room_result.error) {
+    throw room_result.error
+  }
+
+  if (!room_result.data?.room_uuid) {
+    return { ok: false, error: 'room_not_found' }
+  }
+
+  const staff_sender_role: 'admin' | 'concierge' =
+    parse_room_mode(room_result.data.mode) === 'concierge'
+      ? 'concierge'
+      : 'admin'
+
+  const [user_result, bot_result, staff_result] = await Promise.all([
+    supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('role', 'user')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('role', 'bot')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('role', staff_sender_role)
+      .eq('user_uuid', staff_user_uuid)
+      .maybeSingle(),
+  ])
+
+  if (user_result.error) {
+    throw user_result.error
+  }
+
+  if (bot_result.error) {
+    throw bot_result.error
+  }
+
+  if (staff_result.error) {
+    throw staff_result.error
+  }
+
+  const user_participant_uuid = clean_uuid(
+    (user_result.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+  const bot_participant_uuid = clean_uuid(
+    (bot_result.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+  const staff_participant_uuid = clean_uuid(
+    (staff_result.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+
+  if (!user_participant_uuid) {
+    return { ok: false, error: 'user_missing' }
+  }
+
+  if (!bot_participant_uuid) {
+    return { ok: false, error: 'bot_missing' }
+  }
+
+  if (!staff_participant_uuid) {
+    return { ok: false, error: 'staff_missing' }
+  }
+
+  return {
+    ok: true,
+    data: {
+      room_uuid,
+      user_participant_uuid,
+      bot_participant_uuid,
+      staff_participant_uuid,
+      staff_sender_role,
+    },
+  }
+}

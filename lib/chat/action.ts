@@ -31,6 +31,7 @@ import {
   build_line_followup_ack_bundle,
   build_room_mode_notice_bundle,
   build_room_mode_switch_bundle,
+  build_staff_text_bundle,
   build_user_text_bundle,
   pick_room_mode_notice_text,
 } from './message'
@@ -41,6 +42,7 @@ import { normalize_locale } from '@/lib/locale/action'
 import {
   ensure_direct_room_for_visitor,
   parse_room_mode,
+  resolve_admin_reception_send_context,
   resolve_chat_room,
   type chat_channel,
   type chat_room,
@@ -55,6 +57,7 @@ import { decide_bot_action } from './bot/rules'
 import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 import { get_session_user } from '@/lib/auth/route'
+import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
 import {
   create_handoff_memo as create_handoff_memo_core,
   type handoff_memo_debug_context,
@@ -1656,6 +1659,99 @@ export type chat_message_request_result =
 export async function handle_chat_message_request(
   request: Request,
 ): Promise<{ status: number; body: chat_message_request_result }> {
+  const body = (await request.json().catch(() => null)) as {
+    room_uuid?: string
+    participant_uuid?: string
+    locale?: string
+    text?: string
+    source?: string
+  } | null
+
+  const text_value = typeof body?.text === 'string' ? body.text.trim() : ''
+
+  if (body?.source === 'admin_reception') {
+    if (typeof body.room_uuid !== 'string' || text_value.length === 0) {
+      return {
+        status: 400,
+        body: { ok: false, error: 'invalid_message' },
+      }
+    }
+
+    const session = await get_session_user()
+
+    if (session.role !== 'admin') {
+      return {
+        status: 403,
+        body: { ok: false, error: 'forbidden' },
+      }
+    }
+
+    if (!session.user_uuid) {
+      return {
+        status: 401,
+        body: { ok: false, error: 'session_required' },
+      }
+    }
+
+    const resolved = await resolve_admin_reception_send_context({
+      room_uuid: body.room_uuid,
+      staff_user_uuid: session.user_uuid,
+    })
+
+    if (!resolved.ok) {
+      if (resolved.error === 'room_not_found') {
+        return {
+          status: 404,
+          body: { ok: false, error: 'room_not_found' },
+        }
+      }
+
+      if (resolved.error === 'staff_missing') {
+        return {
+          status: 403,
+          body: {
+            ok: false,
+            error: 'admin_send_not_allowed',
+            reason: resolved.error,
+          },
+        }
+      }
+
+      return {
+        status: 400,
+        body: { ok: false, error: 'invalid_room' },
+      }
+    }
+
+    const locale = normalize_locale(body.locale) as chat_locale
+    const sender_display_name = await resolve_handoff_memo_saved_by_name(
+      session.user_uuid,
+    )
+    const incoming_bundle = build_staff_text_bundle({
+      text: text_value,
+      locale,
+      sender: resolved.data.staff_sender_role,
+      sender_display_name,
+    })
+    const archived_messages = await archive_message_bundles({
+      room_uuid: resolved.data.room_uuid,
+      participant_uuid: resolved.data.user_participant_uuid,
+      bot_participant_uuid: resolved.data.bot_participant_uuid,
+      staff_participant_uuid: resolved.data.staff_participant_uuid,
+      channel: 'web',
+      bundles: [incoming_bundle],
+    })
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        kind: 'plain_text',
+        messages: archived_messages,
+      },
+    }
+  }
+
   const visitor_uuid = await get_request_visitor_uuid()
 
   if (!visitor_uuid) {
@@ -1664,15 +1760,6 @@ export async function handle_chat_message_request(
       body: { ok: false, error: 'session_required' },
     }
   }
-
-  const body = (await request.json().catch(() => null)) as {
-    room_uuid?: string
-    participant_uuid?: string
-    locale?: string
-    text?: string
-  } | null
-
-  const text_value = typeof body?.text === 'string' ? body.text.trim() : ''
 
   if (!body?.room_uuid || !body.participant_uuid || text_value.length === 0) {
     return {

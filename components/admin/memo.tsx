@@ -51,7 +51,7 @@ export default function AdminHandoffMemo({
   const [error_message, set_error_message] = useState<string | null>(null)
 
   const is_dirty = draft.trim().length > 0
-  const latest_memo = memos[memos.length - 1] ?? null
+  const latest_memo = memos[0] ?? null
   const status_text = is_saving ? '保存中...' : is_dirty ? '未保存' : '保存済み'
   const updated_time = format_time(latest_memo?.created_at ?? null)
   const saved_by = latest_memo ? memo_actor_line(latest_memo) : null

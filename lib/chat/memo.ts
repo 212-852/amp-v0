@@ -209,7 +209,7 @@ export async function list_handoff_memos(input: {
       .from('chat_handoff_memos')
       .select(handoff_memo_select)
       .eq('room_uuid', room_uuid)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
 
     if (result.error) {
       throw result.error

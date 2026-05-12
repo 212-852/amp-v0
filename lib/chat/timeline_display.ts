@@ -67,13 +67,19 @@ export function archived_message_to_timeline_message(
   const bundle = row.bundle
   const sender = bundle.sender
   const direction = sender === 'user' ? 'incoming' : 'outgoing'
+  const role =
+    bundle.bundle_type === 'text' &&
+    bundle.metadata &&
+    typeof bundle.metadata.sender_display_name === 'string'
+      ? bundle.metadata.sender_display_name.trim() || sender
+      : sender
 
   return {
     message_uuid: row.archive_uuid,
     room_uuid: row.room_uuid,
     direction,
     sender,
-    role: sender,
+    role,
     text: timeline_text_from_bundle(bundle),
     created_at: row.created_at,
     sequence: row.sequence,
