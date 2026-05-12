@@ -94,6 +94,35 @@ export function resolve_debug_rule(input: {
     'chat_message_send_succeeded',
   ])
 
+  const admin_chat_room_list_events = new Set([
+    'admin_chat_room_profile_missing',
+    'admin_chat_room_filtered_out',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    input.event === 'admin_chat_room_profile_missing'
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'warn',
+      channels: ['discord'],
+    }
+  }
+
+  if (
+    input.category === 'admin_chat' &&
+    admin_chat_room_list_events.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.admin_chat_room_list_debug_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
   if (
     input.category === 'chat_message' &&
     chat_message_events.has(input.event)

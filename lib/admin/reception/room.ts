@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
+import { debug_event } from '@/lib/debug/index'
 import { load_archived_messages } from '@/lib/chat/archive'
 import {
   resolve_chat_room_list_preview_text,
@@ -104,10 +105,20 @@ export type reception_room_memo = {
 const room_select =
   'room_uuid, room_type, status, mode, action_id, created_at, updated_at'
 
+const concierge_inbox_customer_tiers = new Set(['member', 'vip'])
+
 function short_room_label(room_uuid: string): string {
   return room_uuid.trim().length > 0
     ? `Room ${room_uuid.slice(0, 8)}`
     : 'Guest'
+}
+
+type normalize_room_options = {
+  /**
+   * When true, concierge rows without enrichment use `Room {uuid}` (internal debug only).
+   * Default: public surfaces use a neutral label, never `Room xxxx`.
+   */
+  room_uuid_label_fallback?: boolean
 }
 
 const guest_subject: reception_room_subject = {
@@ -121,18 +132,24 @@ const guest_subject: reception_room_subject = {
 function normalize_room(
   row: room_row,
   enrichment: room_card_enrichment | null = null,
+  options?: normalize_room_options,
 ): reception_room {
   const mode = row.mode === 'bot' ? 'bot' : 'concierge'
+  const concierge_name_fallback =
+    mode === 'concierge' && options?.room_uuid_label_fallback
+      ? short_room_label(row.room_uuid)
+      : 'Customer'
+  const display_name =
+    enrichment?.display_name ??
+    (mode === 'concierge' ? concierge_name_fallback : 'Bot room')
 
   return {
     room_uuid: row.room_uuid,
-    display_name:
-      enrichment?.display_name ??
-      (mode === 'concierge' ? short_room_label(row.room_uuid) : 'Bot room'),
+    display_name,
     role: enrichment?.role ?? null,
     tier: enrichment?.tier ?? null,
     avatar_url: enrichment?.avatar_url ?? null,
-    title: mode === 'concierge' ? 'Concierge room' : 'Bot room',
+    title: display_name,
     preview: enrichment?.preview ?? '対応が必要です',
     updated_at: row.updated_at,
     mode,
@@ -171,6 +188,44 @@ function resolve_display_name(input: {
   )
 }
 
+function resolve_customer_list_display_name(input: {
+  user: user_profile_row | null | undefined
+  identity: identity_row | null | undefined
+}): string | null {
+  return (
+    string_value(input.user?.display_name) ??
+    string_value(input.identity?.display_name) ??
+    string_value(input.identity?.provider_user_name) ??
+    string_value(input.identity?.provider_id) ??
+    null
+  )
+}
+
+async function emit_admin_chat_room_list_trace(input: {
+  event: 'admin_chat_room_profile_missing' | 'admin_chat_room_filtered_out'
+  room_uuid: string
+  reason: string
+  user_uuid: string | null
+  user_tier: string | null
+  participant_role: string | null
+  room_type: string | null
+  concierge_enabled: boolean | null
+}) {
+  await debug_event({
+    category: 'admin_chat',
+    event: input.event,
+    payload: {
+      room_uuid: input.room_uuid,
+      reason: input.reason,
+      user_uuid: input.user_uuid,
+      user_tier: input.user_tier,
+      participant_role: input.participant_role,
+      room_type: input.room_type,
+      concierge_enabled: input.concierge_enabled,
+    },
+  })
+}
+
 function message_text(body: Record<string, unknown> | null): string {
   const payload = pick_object(body?.payload)
   const payload_text = pick_string(payload?.text)
@@ -207,8 +262,22 @@ function message_sequence_from_body(
   return pick_number(body?.sequence) ?? pick_number(bundle?.sequence)
 }
 
+function choose_customer_user_participant(
+  participants: participant_row[],
+): participant_row | null {
+  const user_rows = participants.filter((participant) => {
+    const role = participant.role?.trim().toLowerCase() ?? ''
+    return role === 'user'
+  })
+
+  return (
+    user_rows.find((row) => string_value(row.user_uuid)) ?? user_rows[0] ?? null
+  )
+}
+
 async function enrich_room_cards(
   rows: room_row[],
+  list_mode: reception_room_mode,
 ): Promise<Map<string, room_card_enrichment>> {
   const enrichments = new Map<string, room_card_enrichment>()
 
@@ -251,11 +320,11 @@ async function enrich_room_cards(
 
   for (const room_uuid of room_uuids) {
     const room_ps = participants_by_room.get(room_uuid) ?? []
-    const subject = choose_subject_participant(room_ps)
+    const customer = choose_customer_user_participant(room_ps)
 
-    if (subject) {
-      participant_by_room.set(room_uuid, subject)
-      const uid = string_value(subject.user_uuid)
+    if (customer) {
+      participant_by_room.set(room_uuid, customer)
+      const uid = string_value(customer.user_uuid)
 
       if (uid) {
         user_uuid_by_room.set(room_uuid, uid)
@@ -376,6 +445,101 @@ async function enrich_room_cards(
       typing_placeholder_ja: '入力中...',
       fallback_when_empty: '対応が必要です',
     })
+
+    if (list_mode === 'concierge') {
+      const room_type_raw = string_value(row.room_type)
+
+      if (room_type_raw && room_type_raw !== 'direct') {
+        await emit_admin_chat_room_list_trace({
+          event: 'admin_chat_room_filtered_out',
+          room_uuid: row.room_uuid,
+          reason: 'room_type_not_direct',
+          user_uuid: null,
+          user_tier: null,
+          participant_role: null,
+          room_type: row.room_type,
+          concierge_enabled: null,
+        })
+        continue
+      }
+
+      const customer = choose_customer_user_participant(room_ps)
+      const customer_user_uuid = string_value(customer?.user_uuid ?? null)
+
+      if (!customer || !customer_user_uuid) {
+        await emit_admin_chat_room_list_trace({
+          event: 'admin_chat_room_filtered_out',
+          room_uuid: row.room_uuid,
+          reason: 'no_user_participant_or_user_uuid_null',
+          user_uuid: customer_user_uuid,
+          user_tier: null,
+          participant_role: string_value(customer?.role),
+          room_type: row.room_type,
+          concierge_enabled: null,
+        })
+        continue
+      }
+
+      const customer_user = users_by_uuid.get(customer_user_uuid)
+      const tier_raw =
+        string_value(customer_user?.tier)?.trim().toLowerCase() ?? null
+
+      if (!tier_raw || !concierge_inbox_customer_tiers.has(tier_raw)) {
+        await emit_admin_chat_room_list_trace({
+          event: 'admin_chat_room_filtered_out',
+          room_uuid: row.room_uuid,
+          reason: 'tier_not_member_or_vip',
+          user_uuid: customer_user_uuid,
+          user_tier: tier_raw,
+          participant_role: string_value(customer?.role),
+          room_type: row.room_type,
+          concierge_enabled: null,
+        })
+        continue
+      }
+
+      const identity =
+        identities_by_user_uuid.get(customer_user_uuid) ?? null
+      const resolved_display = resolve_customer_list_display_name({
+        user: customer_user,
+        identity,
+      })
+
+      if (!resolved_display) {
+        await emit_admin_chat_room_list_trace({
+          event: 'admin_chat_room_profile_missing',
+          room_uuid: row.room_uuid,
+          reason: 'unresolved_customer_display_name',
+          user_uuid: customer_user_uuid,
+          user_tier: tier_raw,
+          participant_role: string_value(customer?.role),
+          room_type: row.room_type,
+          concierge_enabled: null,
+        })
+        await emit_admin_chat_room_list_trace({
+          event: 'admin_chat_room_filtered_out',
+          room_uuid: row.room_uuid,
+          reason: 'customer_profile_unresolved',
+          user_uuid: customer_user_uuid,
+          user_tier: tier_raw,
+          participant_role: string_value(customer?.role),
+          room_type: row.room_type,
+          concierge_enabled: null,
+        })
+        continue
+      }
+
+      enrichments.set(row.room_uuid, {
+        display_name: resolved_display,
+        role:
+          string_value(customer_user?.role) ??
+          string_value(customer?.role),
+        tier: string_value(customer_user?.tier),
+        avatar_url: string_value(customer_user?.image_url),
+        preview: preview_resolved,
+      })
+      continue
+    }
 
     enrichments.set(row.room_uuid, {
       display_name: resolve_display_name({
@@ -507,25 +671,57 @@ export async function list_reception_rooms({
       ? Math.max(1, Math.min(Math.floor(limit), 100))
       : 50
 
-  const result = await supabase
+  const fetch_limit =
+    mode === 'concierge'
+      ? Math.min(Math.max(normalized_limit * 10, normalized_limit), 200)
+      : normalized_limit
+
+  let query = supabase
     .from('rooms')
     .select(room_select)
     .eq('mode', mode)
     .order('updated_at', { ascending: false })
-    .limit(normalized_limit)
+    .limit(fetch_limit)
+
+  if (mode === 'concierge') {
+    query = query.or('room_type.eq.direct,room_type.is.null')
+  }
+
+  const result = await query
 
   if (result.error) {
     throw result.error
   }
 
   const rows = (result.data ?? []) as room_row[]
-  const enrichments = await enrich_room_cards(rows)
+  const enrichments = await enrich_room_cards(rows, mode)
+
+  if (mode === 'concierge') {
+    const kept: reception_room[] = []
+
+    for (const row of rows) {
+      const enrichment = enrichments.get(row.room_uuid)
+
+      if (!enrichment) {
+        continue
+      }
+
+      kept.push(
+        normalize_room(row, enrichment, { room_uuid_label_fallback: false }),
+      )
+
+      if (kept.length >= normalized_limit) {
+        break
+      }
+    }
+
+    return kept
+  }
 
   return rows.map((row) =>
-    normalize_room(
-      row,
-      enrichments.get(row.room_uuid) ?? null,
-    ),
+    normalize_room(row, enrichments.get(row.room_uuid) ?? null, {
+      room_uuid_label_fallback: false,
+    }),
   )
 }
 
@@ -547,12 +743,13 @@ export async function get_reception_room(
   }
 
   const row = result.data as room_row
-  const enrichments = await enrich_room_cards([row])
+  const list_mode: reception_room_mode =
+    row.mode === 'bot' ? 'bot' : 'concierge'
+  const enrichments = await enrich_room_cards([row], list_mode)
 
-  return normalize_room(
-    row,
-    enrichments.get(row.room_uuid) ?? null,
-  )
+  return normalize_room(row, enrichments.get(row.room_uuid) ?? null, {
+    room_uuid_label_fallback: false,
+  })
 }
 
 export async function read_reception_room({

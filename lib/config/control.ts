@@ -29,6 +29,7 @@ export const control = {
       'line_webhook',
       'handoff_memo',
       'admin_management',
+      'admin_chat',
       'chat_message',
       'chat_realtime',
     ],
