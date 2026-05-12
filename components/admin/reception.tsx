@@ -91,7 +91,7 @@ export default function AdminReception({ rooms, state }: AdminReceptionProps) {
                   </span>
                 </div>
                 <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-600">
-                  {room.display_name} - {room.preview}
+                  {room.preview}
                 </p>
               </div>
             </Link>

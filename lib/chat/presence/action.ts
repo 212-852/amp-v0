@@ -1,14 +1,18 @@
 import 'server-only'
 
+import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import { supabase } from '@/lib/db/supabase'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 
 import {
   decide_active_participants,
   decide_typing_participants,
   is_participant_role,
+  resolve_chat_room_list_preview_text,
   type participant_role,
   type presence_participant,
   type reception_room_card,
+  typing_timestamp_is_fresh,
 } from './rules'
 
 type participant_row = {
@@ -292,6 +296,86 @@ export async function list_room_presence(input: {
   }
 }
 
+export async function resolve_admin_room_typing_banner_lines(input: {
+  room_uuid: string
+  viewer_participant_uuid: string
+}): Promise<string[]> {
+  const room_uuid = clean_uuid(input.room_uuid)
+  const viewer = clean_uuid(input.viewer_participant_uuid)
+
+  if (!room_uuid || !viewer) {
+    return []
+  }
+
+  const result = await supabase
+    .from('participants')
+    .select('participant_uuid, user_uuid, role, is_typing, typing_at')
+    .eq('room_uuid', room_uuid)
+    .neq('participant_uuid', viewer)
+
+  if (result.error) {
+    throw result.error
+  }
+
+  const rows = (result.data ?? []) as Array<{
+    participant_uuid: string
+    user_uuid: string | null
+    role: string | null
+    is_typing: boolean | null
+    typing_at: string | null
+  }>
+
+  const now = new Date()
+  const staff_user_set = new Set<string>()
+  let user_typing = false
+  let bot_typing = false
+
+  for (const row of rows) {
+    const role = row.role?.trim().toLowerCase() ?? ''
+
+    if (!typing_timestamp_is_fresh(row.typing_at, row.is_typing, now)) {
+      continue
+    }
+
+    if (role === 'user') {
+      user_typing = true
+    }
+
+    if (role === 'bot') {
+      bot_typing = true
+    }
+
+    if ((role === 'admin' || role === 'concierge') && row.user_uuid) {
+      const u = clean_uuid(row.user_uuid)
+
+      if (u) {
+        staff_user_set.add(u)
+      }
+    }
+  }
+
+  const label_map = await batch_resolve_admin_operator_display(
+    [...staff_user_set],
+    'memo_list',
+  )
+  const lines: string[] = []
+
+  if (user_typing) {
+    lines.push('入力中...')
+  }
+
+  for (const uuid of staff_user_set) {
+    const label = label_map.get(uuid) ?? 'Staff'
+    lines.push(`${label} が入力中...`)
+  }
+
+  if (bot_typing) {
+    lines.push('Bot が入力中...')
+  }
+
+  return lines
+}
+
 export async function list_reception_room_cards(
   query: reception_room_card_query,
 ): Promise<reception_room_card[]> {
@@ -378,17 +462,43 @@ export async function list_reception_room_cards(
         })
       : null
 
+    const typing_visible = decide_typing_participants(
+      presence_participants,
+      now,
+    )
+    const staff_lines = typing_visible
+      .filter(
+        (participant) =>
+          participant.role === 'admin' ||
+          participant.role === 'concierge' ||
+          participant.role === 'bot',
+      )
+      .map((participant) =>
+        participant.role === 'bot'
+          ? 'Bot が入力中...'
+          : `${participant.display_name} が入力中...`,
+      )
+    const typing_user_active = typing_visible.some(
+      (participant) => participant.role === 'user',
+    )
+    const base_preview = extract_text_from_message_body(latest?.body ?? null)
+    const preview_resolved = resolve_chat_room_list_preview_text({
+      audience: 'admin_inbox',
+      latest_message_text: base_preview,
+      typing_user_active,
+      typing_staff_lines: staff_lines,
+      typing_placeholder_ja: '入力中...',
+      fallback_when_empty: '対応が必要です',
+    })
+
     return {
       room_uuid: room.room_uuid,
       display_name: user_presence?.display_name ?? null,
       avatar_url: user_presence?.avatar_url ?? null,
-      latest_message_text: extract_text_from_message_body(latest?.body ?? null),
+      latest_message_text: preview_resolved,
       latest_message_at: latest?.created_at ?? null,
       active_participants: decide_active_participants(presence_participants),
-      typing_participants: decide_typing_participants(
-        presence_participants,
-        now,
-      ),
+      typing_participants: typing_visible,
     }
   })
 }

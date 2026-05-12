@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import AdminChatTimeline from '@/components/admin/c'
 import AdminHandoffMemo from '@/components/admin/memo'
+import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import {
   list_reception_room_messages,
   read_reception_room,
@@ -11,7 +12,7 @@ import {
   type reception_room_subject,
 } from '@/lib/admin/reception/room'
 import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
-import { get_session_user } from '@/lib/auth/route'
+import { resolve_admin_reception_send_context } from '@/lib/chat/room'
 
 export const dynamic = 'force-dynamic'
 
@@ -112,6 +113,14 @@ export default async function AdminReceptionRoomPage({
   params,
 }: AdminReceptionRoomPageProps) {
   const { room_uuid } = await params
+  const access = await require_admin_route_access('/admin/reception')
+  const send_context = await resolve_admin_reception_send_context({
+    room_uuid,
+    staff_user_uuid: access.user_uuid,
+  })
+  const staff_participant_uuid = send_context.ok
+    ? send_context.data.staff_participant_uuid
+    : ''
   const room_result = await load_room(room_uuid)
   const subject = await load_subject(room_uuid)
   const memos = await load_memos(room_uuid)
@@ -174,6 +183,7 @@ export default async function AdminReceptionRoomPage({
           messages={message_result.messages}
           load_failed={!message_result.ok}
           room_uuid={room_uuid}
+          staff_participant_uuid={staff_participant_uuid}
         />
       </section>
     </div>

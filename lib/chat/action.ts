@@ -30,6 +30,7 @@ import {
   build_initial_chat_bundles,
   build_line_followup_ack_bundle,
   build_room_mode_notice_bundle,
+  build_room_action_log_bundle,
   build_room_mode_switch_bundle,
   build_staff_text_bundle,
   build_user_text_bundle,
@@ -1727,6 +1728,160 @@ async function emit_chat_message_send_debug(input: {
       ...(input.extra ?? {}),
     },
   })
+}
+
+export type admin_reception_room_open_result =
+  | { ok: true; skipped?: boolean }
+  | { ok: false; error: string }
+
+export async function handle_admin_reception_room_opened(
+  request: Request,
+): Promise<{ status: number; body: admin_reception_room_open_result }> {
+  const body = (await request.json().catch(() => null)) as {
+    room_uuid?: string
+  } | null
+
+  const room_uuid = clean_uuid(body?.room_uuid)
+
+  if (!room_uuid) {
+    return {
+      status: 400,
+      body: { ok: false, error: 'invalid_room' },
+    }
+  }
+
+  const session = await get_session_user()
+
+  if (session.role !== 'admin' || !session.user_uuid) {
+    return {
+      status: 403,
+      body: { ok: false, error: 'forbidden' },
+    }
+  }
+
+  const admin_uuid = clean_uuid(session.user_uuid)
+
+  if (!admin_uuid) {
+    return {
+      status: 400,
+      body: { ok: false, error: 'invalid_room' },
+    }
+  }
+
+  const recent = await supabase
+    .from('messages')
+    .select('message_uuid, body, created_at')
+    .eq('room_uuid', room_uuid)
+    .order('created_at', { ascending: false })
+    .limit(20)
+
+  if (recent.error) {
+    throw recent.error
+  }
+
+  const now_ms = Date.now()
+
+  for (const row of (recent.data ?? []) as {
+    body: string | null
+    created_at: string
+  }[]) {
+    try {
+      const parsed = JSON.parse(row.body ?? '{}') as {
+        bundle?: {
+          content_key?: string
+          metadata?: { admin_user_uuid?: string }
+        }
+      }
+      const key = parsed?.bundle?.content_key
+      const row_admin = clean_uuid(
+        parsed?.bundle?.metadata?.admin_user_uuid ?? null,
+      )
+
+      if (
+        key === 'room.reception.admin_opened' &&
+        row_admin &&
+        row_admin === admin_uuid
+      ) {
+        const created = new Date(row.created_at).getTime()
+
+        if (!Number.isNaN(created) && now_ms - created < 25_000) {
+          return {
+            status: 200,
+            body: { ok: true, skipped: true },
+          }
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  const [user_result, bot_result] = await Promise.all([
+    supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('role', 'user')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('role', 'bot')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  if (user_result.error) {
+    throw user_result.error
+  }
+
+  if (bot_result.error) {
+    throw bot_result.error
+  }
+
+  const user_participant_uuid = clean_uuid(
+    (user_result.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+  const bot_participant_uuid = clean_uuid(
+    (bot_result.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+
+  if (!user_participant_uuid || !bot_participant_uuid) {
+    return {
+      status: 400,
+      body: { ok: false, error: 'invalid_room' },
+    }
+  }
+
+  const display_name = await resolve_handoff_memo_saved_by_name(
+    session.user_uuid,
+  )
+  const text = `${display_name} が対応を始めました`
+  const bundle = build_room_action_log_bundle({
+    text,
+    locale: 'ja',
+    actor_display_name: display_name,
+    admin_user_uuid: admin_uuid,
+  })
+
+  await archive_message_bundles({
+    room_uuid,
+    participant_uuid: user_participant_uuid,
+    bot_participant_uuid,
+    channel: 'web',
+    bundles: [bundle],
+  })
+
+  return {
+    status: 200,
+    body: { ok: true },
+  }
 }
 
 export async function handle_chat_message_request(

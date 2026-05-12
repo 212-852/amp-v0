@@ -383,6 +383,7 @@ const SYSTEM_BUNDLE_CONTENT_KEY_PREFIXES: ReadonlyArray<string> = [
 const SYSTEM_BUNDLE_TYPES: ReadonlySet<string> = new Set([
   'welcome',
   'initial_carousel',
+  'room_action_log',
 ])
 
 function resolve_actor_type(bundle: message_bundle): actor_type {

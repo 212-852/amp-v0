@@ -1,11 +1,17 @@
 import 'server-only'
 
+import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import { load_archived_messages } from '@/lib/chat/archive'
+import {
+  resolve_chat_room_list_preview_text,
+  typing_timestamp_is_fresh,
+} from '@/lib/chat/presence/rules'
 import {
   archived_messages_to_reception_timeline,
   compare_chat_room_timeline_messages,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 import { supabase } from '@/lib/db/supabase'
 
 type room_row = {
@@ -53,6 +59,8 @@ type participant_row = {
   user_uuid: string | null
   visitor_uuid: string | null
   role: string | null
+  is_typing: boolean | null
+  typing_at: string | null
 }
 
 type user_profile_row = {
@@ -214,7 +222,9 @@ async function enrich_room_cards(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select('room_uuid, user_uuid, visitor_uuid, role')
+      .select(
+        'room_uuid, user_uuid, visitor_uuid, role, is_typing, typing_at',
+      )
       .in('room_uuid', room_uuids)
 
     if (!participant_result.error) {
@@ -288,10 +298,87 @@ async function enrich_room_cards(
 
   const preview_by_room = await read_latest_message_previews(room_uuids)
 
+  const participants_by_room = new Map<string, participant_row[]>()
+
+  for (const participant of participants) {
+    if (!participant.room_uuid) {
+      continue
+    }
+
+    const list = participants_by_room.get(participant.room_uuid) ?? []
+    list.push(participant)
+    participants_by_room.set(participant.room_uuid, list)
+  }
+
+  const now = new Date()
+  const staff_user_for_labels = new Set<string>()
+
+  for (const row of rows) {
+    const room_ps = participants_by_room.get(row.room_uuid) ?? []
+
+    for (const p of room_ps) {
+      const role = p.role?.trim().toLowerCase() ?? ''
+
+      if (
+        (role === 'admin' || role === 'concierge') &&
+        p.user_uuid &&
+        typing_timestamp_is_fresh(p.typing_at, p.is_typing, now)
+      ) {
+        const u = clean_uuid(p.user_uuid)
+
+        if (u) {
+          staff_user_for_labels.add(u)
+        }
+      }
+    }
+  }
+
+  const staff_labels = await batch_resolve_admin_operator_display(
+    [...staff_user_for_labels],
+    'memo_list',
+  )
+
   for (const row of rows) {
     const user_uuid = user_uuid_by_room.get(row.room_uuid) ?? null
     const participant = participant_by_room.get(row.room_uuid) ?? null
     const user = user_uuid ? users_by_uuid.get(user_uuid) : null
+    const room_ps = participants_by_room.get(row.room_uuid) ?? []
+    let typing_user_active = false
+    const staff_lines: string[] = []
+
+    for (const p of room_ps) {
+      const role = p.role?.trim().toLowerCase() ?? ''
+
+      if (!typing_timestamp_is_fresh(p.typing_at, p.is_typing, now)) {
+        continue
+      }
+
+      if (role === 'user') {
+        typing_user_active = true
+      }
+
+      if (role === 'admin' || role === 'concierge') {
+        const u = clean_uuid(p.user_uuid)
+        const name =
+          u && staff_labels.has(u)
+            ? (staff_labels.get(u) as string)
+            : 'Staff'
+
+        staff_lines.push(`${name} が入力中...`)
+      } else if (role === 'bot') {
+        staff_lines.push('Bot が入力中...')
+      }
+    }
+
+    const base_preview = preview_by_room.get(row.room_uuid) ?? null
+    const preview_resolved = resolve_chat_room_list_preview_text({
+      audience: 'admin_inbox',
+      latest_message_text: base_preview,
+      typing_user_active,
+      typing_staff_lines: staff_lines,
+      typing_placeholder_ja: '入力中...',
+      fallback_when_empty: '対応が必要です',
+    })
 
     enrichments.set(row.room_uuid, {
       display_name: resolve_display_name({
@@ -303,7 +390,7 @@ async function enrich_room_cards(
       role: string_value(user?.role) ?? string_value(participant?.role),
       tier: string_value(user?.tier),
       avatar_url: string_value(user?.image_url),
-      preview: preview_by_room.get(row.room_uuid) ?? null,
+      preview: preview_resolved,
     })
   }
 

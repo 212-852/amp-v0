@@ -16,10 +16,13 @@ export type chat_room_timeline_message = {
   text: string
   created_at: string | null
   sequence: number | null
+  bundle_type: string | null
 }
 
 function timeline_text_from_bundle(bundle: message_bundle): string {
   switch (bundle.bundle_type) {
+    case 'room_action_log':
+      return bundle.payload.text?.trim() ?? ''
     case 'text':
       return bundle.payload.text?.trim() ?? ''
     case 'welcome':
@@ -65,6 +68,27 @@ export function archived_message_to_timeline_message(
   row: archived_message,
 ): chat_room_timeline_message {
   const bundle = row.bundle
+
+  if (bundle.bundle_type === 'room_action_log') {
+    const actor =
+      bundle.metadata &&
+      typeof bundle.metadata.actor_display_name === 'string'
+        ? bundle.metadata.actor_display_name.trim() || 'action'
+        : 'action'
+
+    return {
+      message_uuid: row.archive_uuid,
+      room_uuid: row.room_uuid,
+      direction: 'system',
+      sender: 'system',
+      role: actor,
+      text: timeline_text_from_bundle(bundle),
+      created_at: row.created_at,
+      sequence: row.sequence,
+      bundle_type: bundle.bundle_type,
+    }
+  }
+
   const sender = bundle.sender
   const direction = sender === 'user' ? 'incoming' : 'outgoing'
   const role =
@@ -83,6 +107,7 @@ export function archived_message_to_timeline_message(
     text: timeline_text_from_bundle(bundle),
     created_at: row.created_at,
     sequence: row.sequence,
+    bundle_type: bundle.bundle_type,
   }
 }
 

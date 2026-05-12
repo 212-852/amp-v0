@@ -70,21 +70,69 @@ function to_visible_participant(
   }
 }
 
-function typing_is_fresh(
-  participant: presence_participant,
+export function typing_timestamp_is_fresh(
+  typing_at: string | null,
+  is_typing: boolean | null,
   now: Date,
 ) {
-  if (!participant.is_typing || !participant.typing_at) {
+  if (is_typing !== true || !typing_at) {
     return false
   }
 
-  const typed_at = new Date(participant.typing_at).getTime()
+  const typed_at = new Date(typing_at).getTime()
 
   if (Number.isNaN(typed_at)) {
     return false
   }
 
   return now.getTime() - typed_at <= typing_timeout_ms
+}
+
+function typing_is_fresh(
+  participant: presence_participant,
+  now: Date,
+) {
+  return typing_timestamp_is_fresh(
+    participant.typing_at,
+    participant.is_typing,
+    now,
+  )
+}
+
+export type chat_room_list_preview_audience = 'admin_inbox' | 'user_home'
+
+/**
+ * Single resolver for chat list / HOME preview: typing overrides latest text.
+ */
+export function resolve_chat_room_list_preview_text(input: {
+  audience: chat_room_list_preview_audience
+  latest_message_text: string | null
+  typing_user_active: boolean
+  typing_staff_lines: string[]
+  typing_placeholder_ja: string
+  fallback_when_empty: string
+}): string {
+  if (input.audience === 'user_home') {
+    if (input.typing_staff_lines.length > 0) {
+      return input.typing_placeholder_ja
+    }
+  } else {
+    if (input.typing_user_active) {
+      return input.typing_placeholder_ja
+    }
+
+    if (input.typing_staff_lines.length > 0) {
+      return input.typing_staff_lines.join(' / ')
+    }
+  }
+
+  const text = input.latest_message_text?.trim() ?? ''
+
+  if (text.length > 0) {
+    return text
+  }
+
+  return input.fallback_when_empty
 }
 
 export function decide_active_participants(

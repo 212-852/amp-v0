@@ -198,6 +198,9 @@ export function resolve_text_mode_switch(input: {
 }
 
 /**
- * @deprecated Use detect_switch_mode (kept for backwards compatibility).
+ * Whether end-user chat bubbles should render `room_action_log` bundles.
+ * Decided in rules only; UI must not branch on content_key.
  */
-export const resolve_line_text_mode_switch = resolve_text_mode_switch
+export function end_user_should_see_room_action_log_bundle(): boolean {
+  return false
+}

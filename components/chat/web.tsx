@@ -2,14 +2,17 @@
 
 import Image from 'next/image'
 import {
+  useCallback,
   useEffect,
   useRef,
+  useState,
 } from 'react'
 
 import { useUserChat } from '@/components/chat/context'
 import type { archived_message } from '@/lib/chat/archive'
 import { archived_message_from_message_row } from '@/lib/chat/realtime/row'
 import type { message_insert_row } from '@/lib/chat/realtime/row'
+import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
   faq_bundle,
   how_to_use_bundle,
@@ -21,6 +24,7 @@ import type {
 } from '@/lib/chat/message'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
+import { typing_timestamp_is_fresh } from '@/lib/chat/presence/rules'
 import { create_browser_supabase } from '@/lib/db/browser'
 
 function post_presence(input: {
@@ -311,6 +315,12 @@ function SingleCardRow({ bundle }: { bundle: initial_carousel_card }) {
 function WebChatMessageRow({ message }: { message: archived_message }) {
   const bundle = message.bundle
 
+  if (bundle.bundle_type === 'room_action_log') {
+    if (!end_user_should_see_room_action_log_bundle()) {
+      return null
+    }
+  }
+
   if (bundle.bundle_type === 'welcome') {
     return <WelcomeBubble bundle={bundle} />
   }
@@ -357,6 +367,43 @@ export function WebChat({
     messages: active_messages,
   } = chat
   const did_initial_scroll_ref = useRef(false)
+  const typing_rows_ref = useRef<
+    Map<
+      string,
+      {
+        participant_uuid: string
+        role: string | null
+        is_typing: boolean | null
+        typing_at: string | null
+      }
+    >
+  >(new Map())
+  const [typing_banner, set_typing_banner] = useState<string | null>(null)
+
+  const recompute_staff_typing_banner = useCallback(() => {
+    const now = new Date()
+    let has_other_staff = false
+
+    for (const row of typing_rows_ref.current.values()) {
+      if (row.participant_uuid === participant_uuid) {
+        continue
+      }
+
+      const role = row.role?.trim().toLowerCase() ?? ''
+
+      if (
+        (role === 'admin' ||
+          role === 'concierge' ||
+          role === 'bot') &&
+        typing_timestamp_is_fresh(row.typing_at, row.is_typing, now)
+      ) {
+        has_other_staff = true
+        break
+      }
+    }
+
+    set_typing_banner(has_other_staff ? 'スタッフが入力中...' : null)
+  }, [participant_uuid])
 
   useEffect(() => {
     hydrate_chat({
@@ -417,9 +464,18 @@ export function WebChat({
             payload.new as message_insert_row,
           )
 
-          if (message) {
-            append_message(message)
+          if (!message) {
+            return
           }
+
+          if (
+            message.bundle.bundle_type === 'room_action_log' &&
+            !end_user_should_see_room_action_log_bundle()
+          ) {
+            return
+          }
+
+          append_message(message)
         },
       )
       .subscribe()
@@ -429,9 +485,83 @@ export function WebChat({
     }
   }, [append_message, room_uuid])
 
+  useEffect(() => {
+    if (!room_uuid) {
+      return
+    }
+
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      return
+    }
+
+    const client = supabase
+
+    async function bootstrap_typing_rows() {
+      const { data, error } = await client
+        .from('participants')
+        .select('participant_uuid, role, is_typing, typing_at')
+        .eq('room_uuid', room_uuid)
+
+      if (error || !data) {
+        return
+      }
+
+      for (const row of data as Array<{
+        participant_uuid: string
+        role: string | null
+        is_typing: boolean | null
+        typing_at: string | null
+      }>) {
+        typing_rows_ref.current.set(row.participant_uuid, row)
+      }
+
+      recompute_staff_typing_banner()
+    }
+
+    void bootstrap_typing_rows()
+
+    const typing_channel = client
+      .channel(`room_participants_typing:${room_uuid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'participants',
+          filter: `room_uuid=eq.${room_uuid}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            participant_uuid: string
+            role: string | null
+            is_typing: boolean | null
+            typing_at: string | null
+          }
+
+          typing_rows_ref.current.set(row.participant_uuid, row)
+          recompute_staff_typing_banner()
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void client.removeChannel(typing_channel)
+    }
+  }, [recompute_staff_typing_banner, room_uuid])
+
   const render_messages = active_room_uuid === room_uuid
     ? active_messages
     : messages
+
+  const visible_messages = render_messages.filter((message) => {
+    if (message.bundle.bundle_type === 'room_action_log') {
+      return end_user_should_see_room_action_log_bundle()
+    }
+
+    return true
+  })
 
   useEffect(() => {
     scroll_to_bottom('auto')
@@ -457,8 +587,13 @@ export function WebChat({
         ref={set_scroll_container}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4"
       >
+        {typing_banner ? (
+          <div className="px-5 pb-2 text-center text-[12px] font-medium text-[#8a7568]">
+            {typing_banner}
+          </div>
+        ) : null}
         <div className="flex flex-col gap-5">
-          {render_messages.map((message) => (
+          {visible_messages.map((message) => (
             <WebChatMessageRow
               key={message.archive_uuid}
               message={message}

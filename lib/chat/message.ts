@@ -131,12 +131,26 @@ export type text_bundle = {
   }
 }
 
+export type room_action_log_bundle = {
+  bundle_uuid: string
+  bundle_type: 'room_action_log'
+  sender: 'bot'
+  version: 1
+  locale?: chat_locale
+  content_key?: string
+  metadata?: Record<string, unknown>
+  payload: {
+    text: string
+  }
+}
+
 export type message_bundle =
   | welcome_bundle
   | initial_carousel_bundle
   | quick_menu_bundle
   | how_to_use_bundle
   | faq_bundle
+  | room_action_log_bundle
   | text_bundle
 
 function create_bundle_uuid() {
@@ -588,6 +602,31 @@ export function build_staff_text_bundle(input: {
     content_key: 'admin.reception.reply',
     metadata: {
       sender_display_name: input.sender_display_name,
+    },
+    payload: {
+      text: input.text,
+    },
+  }
+}
+
+export function build_room_action_log_bundle(input: {
+  text: string
+  locale?: chat_locale
+  actor_display_name: string
+  admin_user_uuid: string
+}): room_action_log_bundle {
+  return {
+    bundle_uuid: create_bundle_uuid(),
+    bundle_type: 'room_action_log',
+    sender: 'bot',
+    version: 1,
+    locale: input.locale,
+    content_key: 'room.reception.admin_opened',
+    metadata: {
+      action: 'admin_reception_open',
+      actor_display_name: input.actor_display_name,
+      admin_user_uuid: input.admin_user_uuid,
+      visibility: 'admin',
     },
     payload: {
       text: input.text,

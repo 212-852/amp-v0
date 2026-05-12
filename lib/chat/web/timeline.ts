@@ -50,6 +50,8 @@ function is_visible_on_web_chat(bundle: message_bundle): boolean {
     case 'faq':
     case 'text':
       return true
+    case 'room_action_log':
+      return false
     default: {
       const unknown_bundle: never = bundle
 

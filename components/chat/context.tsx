@@ -57,17 +57,17 @@ function append_unique(
   current_messages: archived_message[],
   next_messages: archived_message[],
 ) {
-  const keys = new Set(current_messages.map(message_key))
   const merged = [...current_messages]
+  const seen_archive = new Set(
+    current_messages.map((message) => message.archive_uuid),
+  )
 
   next_messages.forEach((message) => {
-    const key = message_key(message)
-
-    if (keys.has(key)) {
+    if (seen_archive.has(message.archive_uuid)) {
       return
     }
 
-    keys.add(key)
+    seen_archive.add(message.archive_uuid)
     merged.push(message)
   })
 
@@ -75,17 +75,23 @@ function append_unique(
 }
 
 function unique_messages(messages: archived_message[]) {
-  const keys = new Set<string>()
+  const bundle_keys = new Set<string>()
+  const archive_keys = new Set<string>()
   const unique: archived_message[] = []
 
   messages.forEach((message) => {
-    const key = message_key(message)
+    const bundle_key = message_key(message)
 
-    if (keys.has(key)) {
+    if (archive_keys.has(message.archive_uuid)) {
       return
     }
 
-    keys.add(key)
+    if (bundle_keys.has(bundle_key)) {
+      return
+    }
+
+    bundle_keys.add(bundle_key)
+    archive_keys.add(message.archive_uuid)
     unique.push(message)
   })
 
