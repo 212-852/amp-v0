@@ -368,7 +368,7 @@ export function WebChat({
     scroll_to_bottom,
     room_uuid: active_room_uuid,
     messages: active_messages,
-    room_realtime_channel_ref,
+    room_realtime_channel_ref: room_realtime_channelRef,
   } = chat
   const did_initial_scroll_ref = useRef(false)
   const typing_rows_ref = useRef<
@@ -492,17 +492,17 @@ export function WebChat({
       },
     })
 
-    room_realtime_channel_ref.current = channel
+    room_realtime_channelRef.current = channel
 
     return () => {
-      room_realtime_channel_ref.current = null
+      room_realtime_channelRef.current = null
       void supabase.removeChannel(channel)
     }
   }, [
     append_message,
     participant_uuid,
     recompute_staff_typing_banner,
-    room_realtime_channel_ref,
+    room_realtime_channelRef,
     room_uuid,
     active_room_uuid,
     session?.user_uuid,
