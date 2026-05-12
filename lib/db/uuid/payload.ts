@@ -24,5 +24,5 @@ export function clean_uuid(value: unknown): string | null {
     return null
   }
 
-  return trimmed
+  return trimmed.toLowerCase()
 }

@@ -31,11 +31,13 @@ function format_time(iso: string | null): string {
 }
 
 function memo_actor_name(memo: handoff_memo | null): string {
-  return memo?.saved_by_name || 'Admin'
+  return memo?.saved_by_name?.trim() ?? ''
 }
 
 function memo_actor_line(memo: handoff_memo | null): string {
-  return `${memo_actor_name(memo)} が追加`
+  const name = memo_actor_name(memo)
+
+  return name.length > 0 ? `${name} が追加` : 'メモを追加'
 }
 
 export default function AdminHandoffMemo({

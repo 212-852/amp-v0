@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
+import { batch_resolve_admin_operator_display, resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
@@ -223,12 +223,12 @@ export async function list_handoff_memos(input: {
 
     return rows.map((row) => {
       const uuid = clean_uuid(row.saved_by_user_uuid)
-      const resolved = uuid ? label_map.get(uuid) : undefined
+      const display_saved_by =
+        uuid !== null && label_map.has(uuid)
+          ? (label_map.get(uuid) as string)
+          : row.saved_by_name
 
-      return row_to_handoff_memo(
-        row,
-        uuid ? (resolved ?? row.saved_by_name) : row.saved_by_name,
-      )
+      return row_to_handoff_memo(row, display_saved_by)
     })
   } catch (error) {
     await emit_handoff_memo_debug({
@@ -354,13 +354,8 @@ export async function create_handoff_memo(
   let saved_by_name_for_insert: string | null = input.saved_by_name?.trim() || null
 
   if (saved_by_user_uuid) {
-    const label_map = await batch_resolve_admin_operator_display(
-      [saved_by_user_uuid],
-      'memo_snapshot',
-    )
-
     saved_by_name_for_insert =
-      label_map.get(saved_by_user_uuid) ?? saved_by_name_for_insert ?? 'Admin'
+      await resolve_handoff_memo_saved_by_name(saved_by_user_uuid)
   }
 
   try {

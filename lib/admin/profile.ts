@@ -4,7 +4,7 @@ import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 
 /**
- * Single core for operator-facing labels from `users` + `admin_profiles`.
+ * Single core for operator-facing labels from `admin_profiles` + `users`.
  * Uses `admin_profiles.internal_name` only (never real_name / birth_date).
  */
 
@@ -41,57 +41,110 @@ function email_local_part(email: string | null): string | null {
   return at > 0 ? email.slice(0, at) : null
 }
 
-function build_operator_label(
-  row: users_embed_row,
-  internal_name: string | null,
-  policy: admin_operator_display_policy,
-): string | null {
-  if (internal_name) {
-    return internal_name
+/**
+ * Handoff memo display: internal_name, display_name, email local, Admin.
+ * Does not use users.name or real_name.
+ */
+function compose_handoff_saved_by_label(input: {
+  internal_name: string | null
+  display_name: string | null
+  email: string | null
+}): string {
+  if (input.internal_name) {
+    return input.internal_name
   }
 
-  const display = string_value(row.display_name)
-
-  if (display) {
-    return display
+  if (input.display_name) {
+    return input.display_name
   }
 
-  if (policy !== 'memo_snapshot') {
-    const name = string_value(row.name)
+  const local = email_local_part(input.email)
 
-    if (name) {
-      return name
-    }
+  if (local) {
+    return local
   }
 
-  if (policy === 'memo_snapshot' || policy === 'memo_list') {
-    const local = email_local_part(string_value(row.email))
+  return 'Admin'
+}
 
-    if (local) {
-      return local
-    }
+function compose_admin_display_label(input: {
+  internal_name: string | null
+  display_name: string | null
+  name: string | null
+  email: string | null
+}): string | null {
+  if (input.internal_name) {
+    return input.internal_name
   }
 
-  if (policy === 'admin_display') {
-    const local = email_local_part(string_value(row.email))
-
-    if (local) {
-      return local
-    }
-
-    return string_value(row.email)
+  if (input.display_name) {
+    return input.display_name
   }
 
-  if (policy === 'memo_snapshot' || policy === 'memo_list') {
-    return 'Admin'
+  if (input.name) {
+    return input.name
   }
 
-  return null
+  const local = email_local_part(input.email)
+
+  if (local) {
+    return local
+  }
+
+  return string_value(input.email)
 }
 
 /**
- * Single core: resolve labels from `admin_profiles.internal_name` + `users`.
- * Deduplicates UUIDs. On read error returns an empty map (callers fall back).
+ * One saved_by snapshot for handoff memo insert (admin_profiles first).
+ */
+export async function resolve_handoff_memo_saved_by_name(
+  user_uuid_raw: string | null | undefined,
+): Promise<string> {
+  const user_uuid = clean_uuid(user_uuid_raw)
+
+  if (!user_uuid) {
+    return 'Admin'
+  }
+
+  const profile_result = await supabase
+    .from('admin_profiles')
+    .select('internal_name')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  const internal =
+    !profile_result.error && profile_result.data
+      ? string_value(
+          (profile_result.data as { internal_name?: unknown }).internal_name,
+        )
+      : null
+
+  if (internal) {
+    return internal
+  }
+
+  const user_result = await supabase
+    .from('users')
+    .select('display_name, email')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  if (user_result.error || !user_result.data) {
+    return 'Admin'
+  }
+
+  const row = user_result.data as { display_name?: unknown; email?: unknown }
+
+  return compose_handoff_saved_by_label({
+    internal_name: null,
+    display_name: string_value(row.display_name),
+    email: string_value(row.email),
+  })
+}
+
+/**
+ * Batch resolve for list views: `admin_profiles` then `users`, one pass each.
+ * Map keys are lower-case UUIDs (see `clean_uuid`).
  */
 export async function batch_resolve_admin_operator_display(
   user_uuids: ReadonlyArray<string | null | undefined>,
@@ -114,6 +167,23 @@ export async function batch_resolve_admin_operator_display(
     return map
   }
 
+  const internal_by_user = new Map<string, string | null>()
+
+  const profile_result = await supabase
+    .from('admin_profiles')
+    .select('user_uuid, internal_name')
+    .in('user_uuid', cleaned)
+
+  if (!profile_result.error) {
+    for (const raw of (profile_result.data ?? []) as admin_profile_row[]) {
+      const uuid = clean_uuid(raw.user_uuid)
+
+      if (uuid) {
+        internal_by_user.set(uuid, string_value(raw.internal_name))
+      }
+    }
+  }
+
   const users_result = await supabase
     .from('users')
     .select('user_uuid, display_name, name, email')
@@ -123,35 +193,32 @@ export async function batch_resolve_admin_operator_display(
     return map
   }
 
-  const profile_result = await supabase
-    .from('admin_profiles')
-    .select('user_uuid, internal_name')
-    .in('user_uuid', cleaned)
-
-  const internal_by_user = new Map<string, string | null>()
-
-  if (!profile_result.error) {
-    for (const raw of (profile_result.data ?? []) as admin_profile_row[]) {
-      const uuid = string_value(raw.user_uuid)
-
-      if (uuid) {
-        internal_by_user.set(uuid, string_value(raw.internal_name))
-      }
-    }
-  }
-
   for (const raw of (users_result.data ?? []) as unknown as users_embed_row[]) {
-    const uuid = string_value(raw.user_uuid)
+    const uuid = clean_uuid(raw.user_uuid)
 
     if (!uuid) {
       continue
     }
 
-    const label = build_operator_label(
-      raw,
-      internal_by_user.get(uuid) ?? null,
-      policy,
-    )
+    const internal = internal_by_user.get(uuid) ?? null
+
+    let label: string | null = null
+
+    if (policy === 'admin_display') {
+      label =
+        compose_admin_display_label({
+          internal_name: internal,
+          display_name: string_value(raw.display_name),
+          name: string_value(raw.name),
+          email: string_value(raw.email),
+        }) ?? null
+    } else {
+      label = compose_handoff_saved_by_label({
+        internal_name: internal,
+        display_name: string_value(raw.display_name),
+        email: string_value(raw.email),
+      })
+    }
 
     if (label) {
       map.set(uuid, label)
