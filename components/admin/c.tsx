@@ -207,37 +207,40 @@ export default function AdminChatTimeline({
   const typing_active_ref = useRef(false)
 
   const staff_participant_uuid_ref = useRef(staff_participant_uuid)
-  staff_participant_uuid_ref.current = staff_participant_uuid
 
   const latest_room_uuid_ref = useRef(room_uuid)
-  latest_room_uuid_ref.current = room_uuid
 
   const admin_rt_ctx_ref = useRef({
     staff_participant_uuid,
     staff_user_uuid,
     staff_tier,
   })
-  admin_rt_ctx_ref.current = {
-    staff_participant_uuid,
-    staff_user_uuid,
-    staff_tier,
-  }
 
   const active_typing_identity_ref = useRef({
     user_uuid: null as string | null,
     participant_uuid: null as string | null,
     role: null as string | null,
   })
-  active_typing_identity_ref.current = {
-    user_uuid: staff_user_uuid,
-    participant_uuid: staff_participant_uuid,
-    role: 'admin',
-  }
 
   const set_rows_ref = useRef(set_rows)
-  set_rows_ref.current = set_rows
 
   const subscribed_room_uuid_ref = useRef<string | null>(null)
+
+  useEffect(() => {
+    staff_participant_uuid_ref.current = staff_participant_uuid
+    latest_room_uuid_ref.current = room_uuid
+    admin_rt_ctx_ref.current = {
+      staff_participant_uuid,
+      staff_user_uuid,
+      staff_tier,
+    }
+    active_typing_identity_ref.current = {
+      user_uuid: staff_user_uuid,
+      participant_uuid: staff_participant_uuid,
+      role: 'admin',
+    }
+    set_rows_ref.current = set_rows
+  }, [room_uuid, staff_participant_uuid, staff_tier, staff_user_uuid])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {

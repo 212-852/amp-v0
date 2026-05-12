@@ -42,6 +42,7 @@ type chat_debug_body = {
   cleanup_reason?: unknown
   is_self_sender?: unknown
   comparison_strategy?: unknown
+  guest_strategy_used?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -108,6 +109,10 @@ export async function POST(request: Request) {
       is_self_sender:
         typeof body?.is_self_sender === 'boolean' ? body.is_self_sender : null,
       comparison_strategy: string_or_null(body?.comparison_strategy),
+      guest_strategy_used:
+        typeof body?.guest_strategy_used === 'boolean'
+          ? body.guest_strategy_used
+          : null,
     },
   })
 

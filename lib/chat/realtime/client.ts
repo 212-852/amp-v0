@@ -87,6 +87,7 @@ type chat_realtime_debug_payload = {
   cleanup_reason?: string | null
   is_self_sender?: boolean | null
   comparison_strategy?: string | null
+  guest_strategy_used?: boolean | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -408,6 +409,8 @@ export function subscribe_chat_room_realtime(input: {
         active_role: active_identity.role,
         is_self_sender: self_result.is_self,
         comparison_strategy: self_result.comparison_strategy,
+        guest_strategy_used:
+          self_result.comparison_strategy === 'guest_participant_only',
         phase: 'broadcast_typing_identity',
       })
 
@@ -456,7 +459,10 @@ export function subscribe_chat_room_realtime(input: {
           display_name: typing.display_name ?? null,
           is_typing: typing.is_typing,
           ignored_reason: 'self_typing',
+          is_self_sender: true,
           comparison_strategy: self_result.comparison_strategy,
+          guest_strategy_used:
+            self_result.comparison_strategy === 'guest_participant_only',
           phase: 'broadcast_typing',
         })
 
@@ -484,6 +490,10 @@ export function subscribe_chat_room_realtime(input: {
         sender_role: typing.role,
         display_name: typing.display_name ?? null,
         is_typing: typing.is_typing,
+        is_self_sender: false,
+        comparison_strategy: self_result.comparison_strategy,
+        guest_strategy_used:
+          self_result.comparison_strategy === 'guest_participant_only',
         phase: 'broadcast_typing',
       })
 

@@ -374,13 +374,10 @@ export function WebChat({
     room_realtime_channel_ref: room_realtime_channelRef,
   } = chat
   const append_realtime_message_ref = useRef(append_realtime_message)
-  append_realtime_message_ref.current = append_realtime_message
 
   const latest_room_uuid_ref = useRef(room_uuid)
-  latest_room_uuid_ref.current = room_uuid
 
   const self_participant_uuid_ref = useRef(participant_uuid)
-  self_participant_uuid_ref.current = participant_uuid
 
   const web_rt_ctx_ref = useRef({
     active_room_uuid: active_room_uuid ?? room_uuid,
@@ -389,24 +386,12 @@ export function WebChat({
     tier: session?.tier ?? null,
     source_channel: session?.source_channel ?? 'web',
   })
-  web_rt_ctx_ref.current = {
-    active_room_uuid: active_room_uuid ?? room_uuid,
-    participant_uuid,
-    user_uuid: session?.user_uuid ?? null,
-    tier: session?.tier ?? null,
-    source_channel: session?.source_channel ?? 'web',
-  }
 
   const active_typing_identity_ref = useRef({
     user_uuid: null as string | null,
     participant_uuid: null as string | null,
     role: null as string | null,
   })
-  active_typing_identity_ref.current = {
-    user_uuid: session?.user_uuid ?? null,
-    participant_uuid,
-    role: 'user',
-  }
 
   const subscribed_room_uuid_ref = useRef<string | null>(null)
 
@@ -423,6 +408,32 @@ export function WebChat({
     >
   >(new Map())
   const [typing_banner, set_typing_banner] = useState<string | null>(null)
+
+  useEffect(() => {
+    append_realtime_message_ref.current = append_realtime_message
+    latest_room_uuid_ref.current = room_uuid
+    self_participant_uuid_ref.current = participant_uuid
+    web_rt_ctx_ref.current = {
+      active_room_uuid: active_room_uuid ?? room_uuid,
+      participant_uuid,
+      user_uuid: session?.user_uuid ?? null,
+      tier: session?.tier ?? null,
+      source_channel: session?.source_channel ?? 'web',
+    }
+    active_typing_identity_ref.current = {
+      user_uuid: session?.user_uuid ?? null,
+      participant_uuid,
+      role: 'user',
+    }
+  }, [
+    active_room_uuid,
+    append_realtime_message,
+    participant_uuid,
+    room_uuid,
+    session?.source_channel,
+    session?.tier,
+    session?.user_uuid,
+  ])
 
   const recompute_staff_typing_banner = useCallback(() => {
     const now = new Date()

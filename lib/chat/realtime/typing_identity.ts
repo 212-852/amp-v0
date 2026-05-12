@@ -28,8 +28,9 @@ export type typing_broadcast_active = {
 
 /**
  * Decide whether a typing broadcast originated from this client session.
- * - Guest (no active user_uuid): participant_uuid + role must match.
- * - Member / admin (active user_uuid set): user_uuid + participant_uuid + role must match.
+ * - Guest / visitor: compare participant_uuid only.
+ * - Member / admin / driver: compare user_uuid + role when both user UUIDs exist.
+ * - Fallback: compare participant_uuid when either side has no user_uuid.
  */
 export function is_self_typing_broadcast(input: {
   active: typing_broadcast_active
@@ -46,29 +47,24 @@ export function is_self_typing_broadcast(input: {
     return { is_self: false, comparison_strategy: 'invalid_sender_participant' }
   }
 
-  if (active_u) {
+  if (!active_u || !sender_u) {
     const is_self =
-      Boolean(sender_u) &&
-      sender_u === active_u &&
       Boolean(active_p) &&
-      sender_p === active_p &&
-      Boolean(active_r) &&
-      sender_r === active_r
+      sender_p === active_p
 
     return {
       is_self,
-      comparison_strategy: 'member_user_participant_role',
+      comparison_strategy: 'guest_participant_only',
     }
   }
 
   const is_self =
-    Boolean(active_p) &&
-    sender_p === active_p &&
+    sender_u === active_u &&
     Boolean(active_r) &&
     sender_r === active_r
 
   return {
     is_self,
-    comparison_strategy: 'guest_participant_and_role',
+    comparison_strategy: 'member_user_participant_role',
   }
 }
