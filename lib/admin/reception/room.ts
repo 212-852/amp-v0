@@ -1,5 +1,11 @@
 import 'server-only'
 
+import { load_archived_messages } from '@/lib/chat/archive'
+import {
+  archived_messages_to_reception_timeline,
+  compare_chat_room_timeline_messages,
+  type chat_room_timeline_message,
+} from '@/lib/chat/timeline_display'
 import { supabase } from '@/lib/db/supabase'
 
 type room_row = {
@@ -26,16 +32,7 @@ export type reception_room = {
 
 export type reception_room_mode = 'concierge' | 'bot'
 
-export type reception_room_message = {
-  message_uuid: string
-  room_uuid: string
-  direction: string | null
-  sender: string | null
-  role: string | null
-  text: string
-  created_at: string | null
-  sequence: number | null
-}
+export type reception_room_message = chat_room_timeline_message
 
 type message_row = {
   message_uuid: string
@@ -521,61 +518,6 @@ function pick_number(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function normalize_message(row: message_row): reception_room_message {
-  const body = parse_body(row.body)
-  const bundle = pick_object(body?.bundle)
-  const metadata = pick_object(body?.metadata)
-  const sender =
-    pick_string(body?.sender) ??
-    pick_string(body?.sender_role) ??
-    pick_string(bundle?.sender) ??
-    null
-  const role =
-    pick_string(body?.sender_role) ??
-    pick_string(bundle?.sender) ??
-    pick_string(body?.actor_type) ??
-    pick_string(metadata?.actor_type) ??
-    sender
-  const direction =
-    pick_string(body?.direction) ??
-    (sender === 'user' ? 'incoming' : sender ? 'outgoing' : null)
-  const sequence =
-    pick_number(body?.sequence) ?? pick_number(bundle?.sequence)
-
-  return {
-    message_uuid: row.message_uuid,
-    room_uuid: row.room_uuid,
-    direction,
-    sender,
-    role,
-    text: message_text(body),
-    created_at: row.created_at,
-    sequence,
-  }
-}
-
-function compare_messages(
-  a: reception_room_message,
-  b: reception_room_message,
-) {
-  if (a.sequence !== null && b.sequence !== null) {
-    return a.sequence - b.sequence
-  }
-
-  if (a.sequence !== null) {
-    return -1
-  }
-
-  if (b.sequence !== null) {
-    return 1
-  }
-
-  return (
-    new Date(a.created_at ?? 0).getTime() -
-    new Date(b.created_at ?? 0).getTime()
-  )
-}
-
 function compare_latest_message_rows(a: message_row, b: message_row) {
   const a_body = parse_body(a.body)
   const b_body = parse_body(b.body)
@@ -651,19 +593,11 @@ export async function list_reception_room_messages({
 }: {
   room_uuid: string
 }): Promise<reception_room_message[]> {
-  const result = await supabase
-    .from('messages')
-    .select('message_uuid, room_uuid, body, created_at')
-    .eq('room_uuid', room_uuid)
-    .order('created_at', { ascending: true })
+  const archived = await load_archived_messages(room_uuid)
 
-  if (result.error) {
-    throw result.error
-  }
-
-  return ((result.data ?? []) as message_row[])
-    .map(normalize_message)
-    .sort(compare_messages)
+  return archived_messages_to_reception_timeline(archived).sort(
+    compare_chat_room_timeline_messages,
+  )
 }
 
 function normalize_memo(row: memo_row): reception_room_memo {

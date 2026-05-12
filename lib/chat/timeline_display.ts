@@ -1,0 +1,109 @@
+import 'server-only'
+
+import type { archived_message } from './archive'
+import type { message_bundle } from './message'
+
+/**
+ * Admin reception timeline row derived from the same `archived_message` source
+ * as user WebChat (`load_archived_messages` / message bundles).
+ */
+export type chat_room_timeline_message = {
+  message_uuid: string
+  room_uuid: string
+  direction: string | null
+  sender: string | null
+  role: string | null
+  text: string
+  created_at: string | null
+  sequence: number | null
+}
+
+function timeline_text_from_bundle(bundle: message_bundle): string {
+  switch (bundle.bundle_type) {
+    case 'text':
+      return bundle.payload.text?.trim() ?? ''
+    case 'welcome':
+      return [bundle.payload.title, bundle.payload.text]
+        .filter((line) => line.trim().length > 0)
+        .join('\n')
+    case 'quick_menu':
+      return bundle.payload.title?.trim() || bundle.bundle_type
+    case 'how_to_use':
+      return bundle.payload.title?.trim() || bundle.bundle_type
+    case 'faq':
+      return bundle.payload.title?.trim() || bundle.bundle_type
+    case 'initial_carousel':
+      return bundle.cards
+        .map((card) => {
+          if (card.bundle_type === 'quick_menu') {
+            return card.payload.title
+          }
+
+          if (card.bundle_type === 'how_to_use') {
+            return card.payload.title
+          }
+
+          if (card.bundle_type === 'faq') {
+            return card.payload.title
+          }
+
+          return null
+        })
+        .filter((value): value is string => Boolean(value && value.trim()))
+        .join(' / ') || '[initial_carousel]'
+    default: {
+      const exhaustive: never = bundle
+
+      void exhaustive
+
+      return '(message)'
+    }
+  }
+}
+
+export function archived_message_to_timeline_message(
+  row: archived_message,
+): chat_room_timeline_message {
+  const bundle = row.bundle
+  const sender = bundle.sender
+  const direction = sender === 'user' ? 'incoming' : 'outgoing'
+
+  return {
+    message_uuid: row.archive_uuid,
+    room_uuid: row.room_uuid,
+    direction,
+    sender,
+    role: sender,
+    text: timeline_text_from_bundle(bundle),
+    created_at: row.created_at,
+    sequence: row.sequence,
+  }
+}
+
+export function archived_messages_to_reception_timeline(
+  rows: archived_message[],
+): chat_room_timeline_message[] {
+  return rows.map(archived_message_to_timeline_message)
+}
+
+export function compare_chat_room_timeline_messages(
+  a: chat_room_timeline_message,
+  b: chat_room_timeline_message,
+): number {
+  if (a.sequence !== null && b.sequence !== null) {
+    return a.sequence - b.sequence
+  }
+
+  if (a.sequence !== null) {
+    return -1
+  }
+
+  if (b.sequence !== null) {
+    return 1
+  }
+
+  return (
+    new Date(a.created_at ?? 0).getTime() -
+    new Date(b.created_at ?? 0).getTime()
+  )
+}
