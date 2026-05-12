@@ -18,6 +18,10 @@ export type discord_action_context_result = {
 export type discord_notify_result = {
   channel: 'discord'
   action_id?: string | null
+  /** When false, the webhook returned a non-2xx response or delivery was skipped. */
+  ok?: boolean
+  http_status?: number
+  error_text?: string | null
 }
 
 function action_id_from_discord_thread_id(
@@ -529,7 +533,7 @@ export async function send_discord_notify(
     return null
   }
 
-  await fetch(webhook_url, {
+  const response = await fetch(webhook_url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -539,7 +543,19 @@ export async function send_discord_notify(
     }),
   })
 
+  const error_text = await response.text()
+
+  if (!response.ok) {
+    return {
+      channel: 'discord',
+      ok: false,
+      http_status: response.status,
+      error_text: error_text.length > 0 ? error_text.slice(0, 800) : null,
+    }
+  }
+
   return {
     channel: 'discord',
+    ok: true,
   }
 }

@@ -87,6 +87,7 @@ export default async function AdminManagementDetailPage({
   const admin = result.admin
   const is_saved = query.saved === '1'
   const has_error = Boolean(query.error)
+  const error_code = query.error ?? null
 
   async function save_admin_profile(form_data: FormData) {
     'use server'
@@ -96,7 +97,7 @@ export default async function AdminManagementDetailPage({
     const result = await update_admin_profile({
       user_uuid,
       updated_by_user_uuid: access.admin_user_uuid,
-      updated_by_role: 'admin',
+      updated_by_role: access.role,
       updated_by_tier: access.tier,
       source_channel: 'web',
       real_name: String(form_data.get('real_name') ?? ''),
@@ -195,7 +196,10 @@ export default async function AdminManagementDetailPage({
               ) : null}
               {has_error ? (
                 <span className="text-[12px] font-semibold text-neutral-500">
-                  入力内容を確認してください
+                  {error_code === 'persist_failed' ||
+                  error_code === 'target_load_failed'
+                    ? '保存に失敗しました。時間をおいて再度お試しください。'
+                    : '入力内容を確認してください'}
                 </span>
               ) : null}
             </div>

@@ -10,6 +10,7 @@ export type admin_management_context =
   | {
       ok: true
       admin_user_uuid: string
+      role: string | null
       tier: admin_management_tier
       display_name: string | null
       image_url: string | null
@@ -66,6 +67,7 @@ export async function resolve_admin_management_context(): Promise<admin_manageme
   return {
     ok: true,
     admin_user_uuid: session.user_uuid,
+    role: session.role,
     tier: session.tier,
     display_name: session.display_name,
     image_url: session.image_url,
@@ -78,6 +80,7 @@ export async function resolve_admin_management_context(): Promise<admin_manageme
  */
 export async function require_admin_management_access(): Promise<{
   admin_user_uuid: string
+  role: string | null
   tier: admin_management_tier
   display_name: string | null
   image_url: string | null
@@ -90,6 +93,7 @@ export async function require_admin_management_access(): Promise<{
 
   return {
     admin_user_uuid: result.admin_user_uuid,
+    role: result.role,
     tier: result.tier,
     display_name: result.display_name,
     image_url: result.image_url,

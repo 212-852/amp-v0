@@ -47,6 +47,29 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const admin_management_events = new Set([
+    'admin_profile_save_started',
+    'admin_profile_save_failed',
+    'admin_profile_save_succeeded',
+    'admin_internal_name_notify_failed',
+    'admin_internal_name_notify_succeeded',
+  ])
+
+  if (
+    input.category === 'admin_management' &&
+    admin_management_events.has(input.event)
+  ) {
+    const is_failed =
+      input.event === 'admin_profile_save_failed' ||
+      input.event === 'admin_internal_name_notify_failed'
+
+    return {
+      category: 'admin_management',
+      level: is_failed ? 'error' : 'info',
+      channels: ['discord'],
+    }
+  }
+
   return {
     category: input.category,
     level: 'info',

@@ -2,7 +2,8 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
-import { notify } from '@/lib/notify'
+import { debug_event } from '@/lib/debug'
+import { deliver_admin_internal_name_updated } from '@/lib/notify'
 import {
   can_update_admin_profile,
   validate_admin_profile_input,
@@ -306,7 +307,134 @@ export type update_admin_profile_result =
         | 'real_name_too_long'
         | 'work_name_too_long'
         | 'invalid_birth_date'
+        | 'persist_failed'
+        | 'target_load_failed'
     }
+
+/**
+ * admin_profiles (see migration 20260510130000_admin_profiles): real_name,
+ * birth_date, work_name (internal display name). users has no internal_name
+ * column. Writes use the service-role client (RLS not applied).
+ */
+type admin_profile_debug_row = {
+  target_user_uuid: string
+  updated_by_user_uuid: string
+  role: string | null
+  tier: string | null
+  source_channel: string
+  changed_fields: string[]
+  phase: string
+  error_code: string | null
+  error_message: string | null
+  error_details: string | null
+  error_hint: string | null
+}
+
+function compute_changed_field_names(input: {
+  before: {
+    real_name: string | null
+    birth_date: string | null
+    work_name: string | null
+  }
+  after: {
+    real_name: string | null
+    birth_date: string | null
+    work_name: string | null
+  }
+}): string[] {
+  const keys: ('real_name' | 'birth_date' | 'work_name')[] = [
+    'real_name',
+    'birth_date',
+    'work_name',
+  ]
+
+  return keys.filter((key) => input.before[key] !== input.after[key])
+}
+
+function serialize_service_error(error: unknown): {
+  error_code: string
+  error_message: string
+  error_details: string | null
+  error_hint: string | null
+} {
+  if (error && typeof error === 'object') {
+    const e = error as Record<string, unknown>
+    const message = typeof e.message === 'string' ? e.message : null
+
+    if (message) {
+      const code = typeof e.code === 'string' ? e.code : 'postgrest_error'
+      const details = typeof e.details === 'string' ? e.details : null
+      const hint = typeof e.hint === 'string' ? e.hint : null
+
+      return {
+        error_code: code,
+        error_message: message,
+        error_details: details,
+        error_hint: hint ?? hint_for_postgrest_code(code),
+      }
+    }
+  }
+
+  if (error instanceof Error) {
+    return {
+      error_code: 'exception',
+      error_message: error.message,
+      error_details: null,
+      error_hint: null,
+    }
+  }
+
+  return {
+    error_code: 'unknown',
+    error_message: String(error),
+    error_details: null,
+    error_hint: null,
+  }
+}
+
+function hint_for_postgrest_code(code: string): string | null {
+  if (code === 'PGRST204') {
+    return 'column_missing_or_rpc_schema_mismatch'
+  }
+
+  if (code === '23503') {
+    return 'foreign_key_violation'
+  }
+
+  return null
+}
+
+function empty_debug_errors(): Pick<
+  admin_profile_debug_row,
+  'error_code' | 'error_message' | 'error_details' | 'error_hint'
+> {
+  return {
+    error_code: null,
+    error_message: null,
+    error_details: null,
+    error_hint: null,
+  }
+}
+
+async function emit_admin_management_debug(input: {
+  event:
+    | 'admin_profile_save_started'
+    | 'admin_profile_save_failed'
+    | 'admin_profile_save_succeeded'
+    | 'admin_internal_name_notify_failed'
+    | 'admin_internal_name_notify_succeeded'
+  base: admin_profile_debug_row
+  extra?: Record<string, unknown>
+}) {
+  await debug_event({
+    category: 'admin_management',
+    event: input.event,
+    payload: {
+      ...input.base,
+      ...(input.extra ?? {}),
+    },
+  })
+}
 
 export async function update_admin_profile(input: {
   user_uuid: string
@@ -317,8 +445,52 @@ export async function update_admin_profile(input: {
 } & admin_profile_input): Promise<update_admin_profile_result> {
   const user_uuid = clean_uuid(input.user_uuid)
   const updated_by_user_uuid = clean_uuid(input.updated_by_user_uuid)
+  const source_channel = input.source_channel ?? 'web'
+
+  const base_debug = (
+    partial: Pick<
+      admin_profile_debug_row,
+      'phase' | 'changed_fields'
+    > &
+      Partial<
+        Pick<
+          admin_profile_debug_row,
+          | 'target_user_uuid'
+          | 'updated_by_user_uuid'
+          | 'role'
+          | 'tier'
+          | 'source_channel'
+        >
+      >,
+  ): admin_profile_debug_row => ({
+    target_user_uuid: partial.target_user_uuid ?? user_uuid ?? '',
+    updated_by_user_uuid:
+      partial.updated_by_user_uuid ?? updated_by_user_uuid ?? '',
+    role: partial.role ?? input.updated_by_role ?? null,
+    tier: partial.tier ?? input.updated_by_tier ?? null,
+    source_channel: partial.source_channel ?? source_channel,
+    changed_fields: partial.changed_fields,
+    phase: partial.phase,
+    ...empty_debug_errors(),
+  })
 
   if (!user_uuid) {
+    await emit_admin_management_debug({
+      event: 'admin_profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'ingress',
+          changed_fields: [],
+        }),
+        target_user_uuid: '',
+        updated_by_user_uuid: updated_by_user_uuid ?? '',
+        error_code: 'invalid_user',
+        error_message: 'invalid_target_uuid',
+        error_details: null,
+        error_hint: 'check_url_uuid',
+      },
+    })
+
     return { ok: false, error: 'invalid_user' }
   }
 
@@ -329,12 +501,40 @@ export async function update_admin_profile(input: {
       tier: input.updated_by_tier,
     })
   ) {
+    await emit_admin_management_debug({
+      event: 'admin_profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'gate',
+          changed_fields: [],
+        }),
+        error_code: 'not_allowed',
+        error_message: 'caller_not_owner_or_core',
+        error_details: null,
+        error_hint: 'check_session_tier',
+      },
+    })
+
     return { ok: false, error: 'not_allowed' }
   }
 
   const validation = validate_admin_profile_input(input)
 
   if (!validation.ok) {
+    await emit_admin_management_debug({
+      event: 'admin_profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'validate_input',
+          changed_fields: [],
+        }),
+        error_code: validation.error,
+        error_message: validation.error,
+        error_details: null,
+        error_hint: 'fix_form_input',
+      },
+    })
+
     return validation
   }
 
@@ -346,28 +546,87 @@ export async function update_admin_profile(input: {
     .maybeSingle()
 
   if (user_result.error) {
-    throw user_result.error
+    const serialized = serialize_service_error(user_result.error)
+
+    await emit_admin_management_debug({
+      event: 'admin_profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'validate_target',
+          changed_fields: [],
+        }),
+        ...serialized,
+      },
+    })
+
+    return { ok: false, error: 'target_load_failed' }
   }
 
   if (!user_result.data) {
+    await emit_admin_management_debug({
+      event: 'admin_profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'validate_target',
+          changed_fields: [],
+        }),
+        error_code: 'admin_not_found',
+        error_message: 'target_user_not_admin_or_missing',
+        error_details: null,
+        error_hint: 'check_user_uuid',
+      },
+    })
+
     return { ok: false, error: 'admin_not_found' }
   }
 
   const current_profile_result = await supabase
     .from('admin_profiles')
-    .select('work_name')
+    .select('real_name, birth_date, work_name')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
   if (current_profile_result.error) {
-    throw current_profile_result.error
+    const serialized = serialize_service_error(current_profile_result.error)
+
+    await emit_admin_management_debug({
+      event: 'admin_profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'load_profile',
+          changed_fields: [],
+        }),
+        ...serialized,
+      },
+    })
+
+    return { ok: false, error: 'target_load_failed' }
   }
 
-  const old_work_name = string_value(
-    (current_profile_result.data as admin_profiles_row | null)?.['work_name'],
-  )
+  const current_row =
+    (current_profile_result.data as admin_profiles_row | null) ?? null
+  const before = {
+    real_name: string_value(current_row?.['real_name']),
+    birth_date: string_value(current_row?.['birth_date']),
+    work_name: string_value(current_row?.['work_name']),
+  }
 
+  const changed_fields = compute_changed_field_names({
+    before,
+    after: validation.value,
+  })
+
+  await emit_admin_management_debug({
+    event: 'admin_profile_save_started',
+    base: base_debug({
+      phase: 'persist',
+      changed_fields,
+    }),
+  })
+
+  const old_work_name = before.work_name
   const updated_at = new Date().toISOString()
+
   const result = await supabase
     .from('admin_profiles')
     .upsert({
@@ -381,32 +640,90 @@ export async function update_admin_profile(input: {
     .maybeSingle()
 
   if (result.error) {
-    throw result.error
+    const serialized = serialize_service_error(result.error)
+
+    await emit_admin_management_debug({
+      event: 'admin_profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'persist',
+          changed_fields,
+        }),
+        ...serialized,
+      },
+    })
+
+    return { ok: false, error: 'persist_failed' }
   }
 
   const row = (result.data ?? {}) as admin_profiles_row
   const next_work_name = string_value(row['work_name'])
+  const profile: admin_profile = {
+    real_name: string_value(row['real_name']),
+    birth_date: string_value(row['birth_date']),
+    work_name: next_work_name,
+    updated_at: string_value(row['updated_at']) ?? updated_at,
+  }
+
+  await emit_admin_management_debug({
+    event: 'admin_profile_save_succeeded',
+    base: base_debug({
+      phase: 'persist_complete',
+      changed_fields,
+    }),
+  })
 
   if (next_work_name && next_work_name !== old_work_name) {
-    await notify({
-      event: 'admin_internal_name_updated',
+    const notify_payload = {
+      event: 'admin_internal_name_updated' as const,
       admin_user_uuid: user_uuid,
       old_internal_name: old_work_name,
       new_internal_name: next_work_name,
       updated_by_user_uuid,
       updated_at,
-      source_channel: input.source_channel ?? 'web',
-    })
+      source_channel,
+    }
+
+    const notify_outcome =
+      await deliver_admin_internal_name_updated(notify_payload)
+
+    if (notify_outcome.ok) {
+      await emit_admin_management_debug({
+        event: 'admin_internal_name_notify_succeeded',
+        base: base_debug({
+          phase: notify_outcome.skipped ? 'notify_skipped' : 'notify_delivered',
+          changed_fields: ['work_name'],
+        }),
+        extra: {
+          old_internal_name: old_work_name,
+          new_internal_name: next_work_name,
+          notify_skipped: notify_outcome.skipped,
+        },
+      })
+    } else {
+      await emit_admin_management_debug({
+        event: 'admin_internal_name_notify_failed',
+        base: {
+          ...base_debug({
+            phase: 'notify',
+            changed_fields: ['work_name'],
+          }),
+          error_code: 'notify_delivery_failed',
+          error_message: notify_outcome.error_message,
+          error_details: notify_outcome.error_details,
+          error_hint: 'profile_saved_check_discord_webhook',
+        },
+        extra: {
+          old_internal_name: old_work_name,
+          new_internal_name: next_work_name,
+        },
+      })
+    }
   }
 
   return {
     ok: true,
-    profile: {
-      real_name: string_value(row['real_name']),
-      birth_date: string_value(row['birth_date']),
-      work_name: string_value(row['work_name']),
-      updated_at: string_value(row['updated_at']) ?? updated_at,
-    },
+    profile,
   }
 }
 

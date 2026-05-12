@@ -26,6 +26,7 @@ export const control = {
       'liff',
       'line_webhook',
       'handoff_memo',
+      'admin_management',
     ],
   },
 

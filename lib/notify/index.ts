@@ -360,3 +360,62 @@ function build_concierge_escalated_content(input: {
     ...format_outcome_lines(input.personal_outcomes),
   ].join('\n')
 }
+
+export type admin_internal_name_notify_outcome =
+  | { ok: true; skipped: boolean }
+  | {
+      ok: false
+      error_message: string
+      error_details: string | null
+    }
+
+/**
+ * Discord delivery for `admin_internal_name_updated` only.
+ * Profile save callers use this so a webhook failure never rolls back DB.
+ */
+export async function deliver_admin_internal_name_updated(
+  event: Extract<notify_event, { event: 'admin_internal_name_updated' }>,
+): Promise<admin_internal_name_notify_outcome> {
+  const rule = resolve_notify_rule(event)
+
+  if (rule.channels.length === 0) {
+    return { ok: true, skipped: true }
+  }
+
+  try {
+    const result = await send_discord_notify(event)
+
+    if (!result) {
+      return {
+        ok: false,
+        error_message: 'discord_notify_returned_null',
+        error_details: null,
+      }
+    }
+
+    if (result.ok === false) {
+      const details =
+        typeof result.error_text === 'string' && result.error_text.length > 0
+          ? result.error_text
+          : null
+
+      return {
+        ok: false,
+        error_message:
+          typeof result.http_status === 'number'
+            ? `discord_http_${result.http_status}`
+            : 'discord_notify_failed',
+        error_details: details,
+      }
+    }
+
+    return { ok: true, skipped: false }
+  } catch (error) {
+    return {
+      ok: false,
+      error_message:
+        error instanceof Error ? error.message : String(error),
+      error_details: null,
+    }
+  }
+}
