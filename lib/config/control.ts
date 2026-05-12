@@ -6,6 +6,8 @@ export const control = {
     /** Core session/cookie `debug_event` emissions from `lib/auth/session.ts`. */
     session_core: false,
     chat_room: false,
+    /** When true, success-path `chat_realtime_*` Discord traces are allowed (failures still use rules). */
+    chat_realtime: false,
     locale: false,
     identity: false,
     line: false,

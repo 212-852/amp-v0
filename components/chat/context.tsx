@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from 'react'
 
+import type { RealtimeChannel } from '@supabase/supabase-js'
+
 import type { archived_message } from '@/lib/chat/archive'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
@@ -45,6 +47,8 @@ type chat_context_value = chat_room_client_state & {
   close_chat: () => void
   set_scroll_container: (node: HTMLDivElement | null) => void
   scroll_to_bottom: (behavior?: ScrollBehavior) => void
+  /** Same channel as `WebChat` postgres_changes + typing broadcast (do not subscribe again). */
+  room_realtime_channel_ref: React.MutableRefObject<RealtimeChannel | null>
 }
 
 const UserChatContext = createContext<chat_context_value | null>(null)
@@ -104,6 +108,7 @@ export function UserChatProvider({
   children: ReactNode
 }) {
   const scroll_area_ref = useRef<HTMLDivElement | null>(null)
+  const room_realtime_channel_ref = useRef<RealtimeChannel | null>(null)
   const [room_state, set_room_state] =
     useState<chat_room_client_state>({
       room_uuid: null,
@@ -249,6 +254,7 @@ export function UserChatProvider({
       close_chat,
       set_scroll_container,
       scroll_to_bottom,
+      room_realtime_channel_ref,
     }),
     [
       room_state,

@@ -25,7 +25,6 @@ import type { archived_message } from '@/lib/chat/archive'
 import type { room_mode } from '@/lib/chat/room'
 import { can_switch_to_concierge } from '@/lib/chat/rules'
 import {
-  chat_room_realtime_channel_name,
   publish_chat_typing,
 } from '@/lib/chat/realtime/client'
 import {
@@ -33,8 +32,6 @@ import {
   subscribe_locale,
 } from '@/lib/locale/state'
 import { use_session_profile } from '@/components/session/profile'
-import { create_browser_supabase } from '@/lib/db/browser'
-import type { RealtimeChannel } from '@supabase/supabase-js'
 
 const content = {
   mypage: {
@@ -211,7 +208,6 @@ export default function UserFooter() {
   const input_ref = useRef<HTMLInputElement | null>(null)
   const typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
-  const typing_channel_ref = useRef<RealtimeChannel | null>(null)
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [pending_switch_mode, set_pending_switch_mode] =
@@ -243,7 +239,7 @@ export default function UserFooter() {
 
       typing_active_ref.current = action === 'typing_start'
 
-      const channel = typing_channel_ref.current
+      const channel = chat.room_realtime_channel_ref.current
 
       if (!channel) {
         return
@@ -252,41 +248,17 @@ export default function UserFooter() {
       publish_chat_typing({
         channel,
         room_uuid: chat.room_uuid,
+        active_room_uuid: chat.room_uuid,
         participant_uuid: chat.participant_uuid,
+        user_uuid: session?.user_uuid ?? null,
         role: 'user',
         display_name: 'user',
         is_typing: action === 'typing_start',
+        source_channel: session?.source_channel ?? 'web',
       })
     },
-    [chat.participant_uuid, chat.room_uuid],
+    [chat.participant_uuid, chat.room_uuid, chat.room_realtime_channel_ref, session?.user_uuid, session?.source_channel],
   )
-
-  useEffect(() => {
-    if (!chat.room_uuid) {
-      typing_channel_ref.current = null
-
-      return
-    }
-
-    const supabase = create_browser_supabase()
-
-    if (!supabase) {
-      typing_channel_ref.current = null
-
-      return
-    }
-
-    const channel = supabase
-      .channel(chat_room_realtime_channel_name(chat.room_uuid))
-      .subscribe()
-
-    typing_channel_ref.current = channel
-
-    return () => {
-      typing_channel_ref.current = null
-      void supabase.removeChannel(channel)
-    }
-  }, [chat.room_uuid])
 
   useEffect(() => {
     const mounted_timer = window.setTimeout(() => {

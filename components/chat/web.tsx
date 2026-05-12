@@ -9,6 +9,7 @@ import {
 } from 'react'
 
 import { useUserChat } from '@/components/chat/context'
+import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
 import {
   chat_typing_is_fresh,
@@ -359,6 +360,7 @@ export function WebChat({
   mode: room_mode
 }) {
   const chat = useUserChat()
+  const { session } = use_session_profile()
   const {
     hydrate_chat,
     append_message,
@@ -366,6 +368,7 @@ export function WebChat({
     scroll_to_bottom,
     room_uuid: active_room_uuid,
     messages: active_messages,
+    room_realtime_channel_ref,
   } = chat
   const did_initial_scroll_ref = useRef(false)
   const typing_rows_ref = useRef<
@@ -457,8 +460,11 @@ export function WebChat({
     const channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid,
+      active_room_uuid,
       participant_uuid,
+      user_uuid: session?.user_uuid ?? null,
       role: 'user',
+      source_channel: 'web',
       on_message: (message) => {
         if (!message) {
           return
@@ -486,10 +492,21 @@ export function WebChat({
       },
     })
 
+    room_realtime_channel_ref.current = channel
+
     return () => {
+      room_realtime_channel_ref.current = null
       void supabase.removeChannel(channel)
     }
-  }, [append_message, participant_uuid, recompute_staff_typing_banner, room_uuid])
+  }, [
+    append_message,
+    participant_uuid,
+    recompute_staff_typing_banner,
+    room_realtime_channel_ref,
+    room_uuid,
+    active_room_uuid,
+    session?.user_uuid,
+  ])
 
   const render_messages = active_room_uuid === room_uuid
     ? active_messages

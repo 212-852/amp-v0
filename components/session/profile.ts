@@ -19,6 +19,7 @@ export type session_profile_snapshot = {
   requires_line_auth?: boolean
   line_auth_method?: string | null
   visitor_uuid?: string | null
+  user_uuid?: string | null
   source_channel?: 'web' | 'liff' | 'pwa' | 'line'
 }
 

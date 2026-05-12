@@ -263,8 +263,11 @@ export default function AdminChatTimeline({
     const channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid,
+      active_room_uuid: room_uuid,
       participant_uuid: staff_participant_uuid,
+      user_uuid: null,
       role: 'admin',
+      source_channel: 'admin',
       on_message: (archived) => {
         if (!archived) {
           return
@@ -321,10 +324,13 @@ export default function AdminChatTimeline({
       publish_chat_typing({
         channel,
         room_uuid,
+        active_room_uuid: room_uuid,
         participant_uuid: staff_participant_uuid,
+        user_uuid: null,
         role: 'admin',
         display_name: staff_display_name,
         is_typing: action === 'typing_start',
+        source_channel: 'admin',
       })
     },
     [room_uuid, staff_display_name, staff_participant_uuid],

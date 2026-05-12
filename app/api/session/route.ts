@@ -193,6 +193,7 @@ function format_session_error(error: unknown) {
 
 function create_session_payload(input: {
   visitor_uuid: string | null
+  user_uuid: string | null
   is_new_visitor: boolean
   is_new_session: boolean
   locale: locale_key
@@ -211,6 +212,7 @@ function create_session_payload(input: {
   const session = input.visitor_uuid
     ? {
         visitor_uuid: input.visitor_uuid,
+        user_uuid: input.user_uuid,
         locale: input.locale,
         role: input.role,
         tier: input.tier,
@@ -227,6 +229,7 @@ function create_session_payload(input: {
     ok: true,
     session,
     visitor_uuid: input.visitor_uuid,
+    user_uuid: input.user_uuid,
     is_new_visitor: input.is_new_visitor,
     is_new_session: input.is_new_session,
     locale: input.locale,
@@ -413,6 +416,7 @@ async function resolve_session_payload() {
   return {
     payload: create_session_payload({
       visitor_uuid: visitor.visitor_uuid,
+      user_uuid: session_state.user_uuid,
       is_new_visitor: visitor.is_new_visitor,
       is_new_session: visitor.is_new_session,
       locale: resolved_locale,
@@ -473,6 +477,7 @@ export async function GET() {
     return NextResponse.json(
       create_session_payload({
         visitor_uuid: null,
+        user_uuid: null,
         is_new_visitor: false,
         is_new_session: false,
         locale: 'ja',

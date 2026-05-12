@@ -98,31 +98,40 @@ export function resolve_debug_rule(input: {
     }
   }
 
-  const chat_realtime_events = new Set([
-    'chat_realtime_subscribe_started',
+  const chat_realtime_always_discord = new Set([
     'chat_realtime_subscribe_failed',
-    'chat_realtime_message_received',
-    'chat_realtime_typing_received',
-    'chat_typing_publish_started',
-    'chat_typing_publish_failed',
-    'chat_typing_publish_succeeded',
+    'chat_realtime_message_callback_ignored',
+    'chat_typing_broadcast_ignored',
+  ])
+
+  const chat_realtime_success_gated = new Set([
+    'chat_realtime_channel_subscribe_status',
+    'chat_realtime_message_callback_received',
+    'chat_typing_broadcast_sent',
+    'chat_typing_broadcast_received',
   ])
 
   if (
     input.category === 'chat_realtime' &&
-    chat_realtime_events.has(input.event)
+    chat_realtime_always_discord.has(input.event)
   ) {
-    const is_failed =
-      input.event === 'chat_realtime_subscribe_failed' ||
-      input.event === 'chat_typing_publish_failed'
+    const is_error = input.event === 'chat_realtime_subscribe_failed'
 
     return {
       category: 'chat_realtime',
-      level: is_failed ? 'error' : 'info',
-      channels:
-        is_failed || debug_control.chat_message_debug_enabled
-          ? ['discord']
-          : [],
+      level: is_error ? 'error' : 'warn',
+      channels: ['discord'],
+    }
+  }
+
+  if (
+    input.category === 'chat_realtime' &&
+    chat_realtime_success_gated.has(input.event)
+  ) {
+    return {
+      category: 'chat_realtime',
+      level: 'info',
+      channels: debug_control.chat_realtime_debug_enabled ? ['discord'] : [],
     }
   }
 
