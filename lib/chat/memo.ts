@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
@@ -145,14 +146,20 @@ async function emit_handoff_memo_debug(input: {
   })
 }
 
-function row_to_handoff_memo(row: handoff_memo_row): handoff_memo {
+function row_to_handoff_memo(
+  row: handoff_memo_row,
+  saved_by_name_override?: string | null,
+): handoff_memo {
   return {
     memo_uuid: row.memo_uuid,
     room_uuid: row.room_uuid,
     body: row.body,
     saved_by_participant_uuid: row.saved_by_participant_uuid,
     saved_by_user_uuid: row.saved_by_user_uuid,
-    saved_by_name: row.saved_by_name,
+    saved_by_name:
+      saved_by_name_override !== undefined
+        ? saved_by_name_override
+        : row.saved_by_name,
     saved_by_role: row.saved_by_role,
     source_channel: normalize_source_channel(row.source_channel as chat_channel),
     created_at: row.created_at,
@@ -208,9 +215,21 @@ export async function list_handoff_memos(input: {
       throw result.error
     }
 
-    return ((result.data ?? []) as unknown as handoff_memo_row[]).map(
-      row_to_handoff_memo,
+    const rows = (result.data ?? []) as unknown as handoff_memo_row[]
+    const label_map = await batch_resolve_admin_operator_display(
+      rows.map((row) => row.saved_by_user_uuid),
+      'memo_list',
     )
+
+    return rows.map((row) => {
+      const uuid = clean_uuid(row.saved_by_user_uuid)
+      const resolved = uuid ? label_map.get(uuid) : undefined
+
+      return row_to_handoff_memo(
+        row,
+        uuid ? (resolved ?? row.saved_by_name) : row.saved_by_name,
+      )
+    })
   } catch (error) {
     await emit_handoff_memo_debug({
       event: 'handoff_memo_list_failed',
@@ -332,6 +351,18 @@ export async function create_handoff_memo(
 
   phase = 'insert_handoff_memo'
 
+  let saved_by_name_for_insert: string | null = input.saved_by_name?.trim() || null
+
+  if (saved_by_user_uuid) {
+    const label_map = await batch_resolve_admin_operator_display(
+      [saved_by_user_uuid],
+      'memo_snapshot',
+    )
+
+    saved_by_name_for_insert =
+      label_map.get(saved_by_user_uuid) ?? saved_by_name_for_insert ?? 'Admin'
+  }
+
   try {
     const result = await supabase
       .from('chat_handoff_memos')
@@ -340,7 +371,7 @@ export async function create_handoff_memo(
         body,
         saved_by_participant_uuid,
         saved_by_user_uuid,
-        saved_by_name: input.saved_by_name?.trim() || null,
+        saved_by_name: saved_by_name_for_insert,
         saved_by_role: input.saved_by_role?.trim() || null,
         source_channel,
       })

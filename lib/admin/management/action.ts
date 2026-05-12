@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
@@ -748,20 +749,14 @@ export async function read_admin_display_name(
     return null
   }
 
-  const profile_result = await supabase
-    .from('admin_profiles')
-    .select('internal_name')
-    .eq('user_uuid', sanitized)
-    .maybeSingle()
+  const label_map = await batch_resolve_admin_operator_display(
+    [sanitized],
+    'admin_display',
+  )
+  const resolved = label_map.get(sanitized)
 
-  if (!profile_result.error) {
-    const internal_name = string_value(
-      (profile_result.data as admin_profiles_row | null)?.['internal_name'],
-    )
-
-    if (internal_name) {
-      return internal_name
-    }
+  if (resolved) {
+    return resolved
   }
 
   const user_result = await supabase
