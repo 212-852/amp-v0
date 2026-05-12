@@ -90,6 +90,13 @@ type room_card_enrichment = {
   preview: string | null
 }
 
+type admin_chat_list_debug_event =
+  | 'admin_chat_list_load_started'
+  | 'admin_chat_list_query_failed'
+  | 'admin_chat_list_query_succeeded'
+  | 'admin_chat_list_filtered_empty'
+  | 'admin_chat_list_normalize_failed'
+
 export type reception_room_subject = {
   display_name: string
   role: string | null
@@ -108,7 +115,60 @@ export type reception_room_memo = {
 const room_select =
   'room_uuid, room_type, status, mode, action_id, created_at, updated_at, concierge_enabled'
 
-const unset_customer_label = 'Unset user'
+const unset_customer_label = '未設定ユーザー'
+
+function error_field(error: unknown, key: string): string | null {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const value = (error as Record<string, unknown>)[key]
+
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function error_message(error: unknown): string | null {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error.trim()
+  }
+
+  return error_field(error, 'message')
+}
+
+async function emit_admin_chat_list_debug(input: {
+  event: admin_chat_list_debug_event
+  raw_room_count?: number | null
+  filtered_room_count?: number | null
+  filter_reason_counts?: Record<string, number>
+  error?: unknown
+  phase: string
+}) {
+  await debug_event({
+    category: 'admin_chat',
+    event: input.event,
+    payload: {
+      raw_room_count: input.raw_room_count ?? null,
+      filtered_room_count: input.filtered_room_count ?? null,
+      filter_reason_counts: input.filter_reason_counts ?? {},
+      error_code: error_field(input.error, 'code'),
+      error_message: error_message(input.error),
+      error_details: error_field(input.error, 'details'),
+      error_hint: error_field(input.error, 'hint'),
+      phase: input.phase,
+    },
+  })
+}
+
+function increment_reason(
+  counts: Record<string, number>,
+  reason: string,
+) {
+  counts[reason] = (counts[reason] ?? 0) + 1
+}
 
 function email_local_part(email: string | null | undefined): string | null {
   if (!email || typeof email !== 'string') {
@@ -157,7 +217,7 @@ function normalize_room(
   const concierge_name_fallback =
     mode === 'concierge' && options?.room_uuid_label_fallback
       ? short_room_label(row.room_uuid)
-      : 'Customer'
+      : unset_customer_label
   const display_name =
     enrichment?.display_name ??
     (mode === 'concierge' ? concierge_name_fallback : 'Bot room')
@@ -332,10 +392,25 @@ async function enrich_room_cards(
       )
       .in('room_uuid', room_uuids)
 
-    if (!participant_result.error) {
+    if (participant_result.error) {
+      await emit_admin_chat_list_debug({
+        event: 'admin_chat_list_query_failed',
+        raw_room_count: rows.length,
+        filtered_room_count: null,
+        error: participant_result.error,
+        phase: 'participants_query',
+      })
+    } else {
       participants = (participant_result.data ?? []) as participant_row[]
     }
-  } catch {
+  } catch (error) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_query_failed',
+      raw_room_count: rows.length,
+      filtered_room_count: null,
+      error,
+      phase: 'participants_query',
+    })
     participants = []
   }
 
@@ -380,13 +455,27 @@ async function enrich_room_cards(
         .select('user_uuid, display_name, role, tier, image_url, email')
         .in('user_uuid', user_uuids)
 
-      if (!user_result.error) {
+      if (user_result.error) {
+        await emit_admin_chat_list_debug({
+          event: 'admin_chat_list_query_failed',
+          raw_room_count: rows.length,
+          filtered_room_count: null,
+          error: user_result.error,
+          phase: 'users_query',
+        })
+      } else {
         for (const user of (user_result.data ?? []) as user_profile_row[]) {
           users_by_uuid.set(user.user_uuid, user)
         }
       }
-    } catch {
-      // Optional user profile enrichment must not block room rendering.
+    } catch (error) {
+      await emit_admin_chat_list_debug({
+        event: 'admin_chat_list_query_failed',
+        raw_room_count: rows.length,
+        filtered_room_count: null,
+        error,
+        phase: 'users_query',
+      })
     }
 
     try {
@@ -395,7 +484,15 @@ async function enrich_room_cards(
         .select('user_uuid, provider_id')
         .in('user_uuid', user_uuids)
 
-      if (!identity_result.error) {
+      if (identity_result.error) {
+        await emit_admin_chat_list_debug({
+          event: 'admin_chat_list_query_failed',
+          raw_room_count: rows.length,
+          filtered_room_count: null,
+          error: identity_result.error,
+          phase: 'identities_query',
+        })
+      } else {
         for (const identity of (identity_result.data ?? []) as identity_row[]) {
           if (
             identity.user_uuid &&
@@ -405,12 +502,30 @@ async function enrich_room_cards(
           }
         }
       }
-    } catch {
-      // Optional identity enrichment must not block room rendering.
+    } catch (error) {
+      await emit_admin_chat_list_debug({
+        event: 'admin_chat_list_query_failed',
+        raw_room_count: rows.length,
+        filtered_room_count: null,
+        error,
+        phase: 'identities_query',
+      })
     }
   }
 
-  const preview_by_room = await read_latest_message_previews(room_uuids)
+  let preview_by_room = new Map<string, string>()
+
+  try {
+    preview_by_room = await read_latest_message_previews(room_uuids)
+  } catch (error) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_query_failed',
+      raw_room_count: rows.length,
+      filtered_room_count: null,
+      error,
+      phase: 'latest_messages_query',
+    })
+  }
 
   const now = new Date()
   const staff_user_for_labels = new Set<string>()
@@ -435,10 +550,22 @@ async function enrich_room_cards(
     }
   }
 
-  const staff_labels = await batch_resolve_admin_operator_display(
-    [...staff_user_for_labels],
-    'memo_list',
-  )
+  let staff_labels = new Map<string, string>()
+
+  try {
+    staff_labels = await batch_resolve_admin_operator_display(
+      [...staff_user_for_labels],
+      'memo_list',
+    )
+  } catch (error) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_query_failed',
+      raw_room_count: rows.length,
+      filtered_room_count: null,
+      error,
+      phase: 'admin_profiles_query',
+    })
+  }
 
   for (const row of rows) {
     const user_uuid = user_uuid_by_room.get(row.room_uuid) ?? null
@@ -483,52 +610,6 @@ async function enrich_room_cards(
     })
 
     if (list_mode === 'concierge') {
-      const status_raw = string_value(row.status)?.toLowerCase() ?? ''
-
-      if (status_raw === 'inactive') {
-        await emit_admin_chat_trace({
-          event: 'concierge_room_filtered',
-          room_uuid: row.room_uuid,
-          reason: 'room_status_inactive',
-          user_uuid: null,
-          user_tier: null,
-          participant_role: null,
-          room_type: row.room_type,
-          concierge_enabled: row.concierge_enabled,
-        })
-        continue
-      }
-
-      if (row.concierge_enabled === false) {
-        await emit_admin_chat_trace({
-          event: 'concierge_room_filtered',
-          room_uuid: row.room_uuid,
-          reason: 'concierge_disabled',
-          user_uuid: null,
-          user_tier: null,
-          participant_role: null,
-          room_type: row.room_type,
-          concierge_enabled: row.concierge_enabled,
-        })
-        continue
-      }
-
-      const room_type_raw = string_value(row.room_type)
-
-      if (room_type_raw && room_type_raw !== 'direct') {
-        await emit_admin_chat_trace({
-          event: 'concierge_room_filtered',
-          room_uuid: row.room_uuid,
-          reason: 'room_type_not_direct',
-          user_uuid: null,
-          user_tier: null,
-          participant_role: null,
-          room_type: row.room_type,
-          concierge_enabled: row.concierge_enabled,
-        })
-        continue
-      }
-
       const customer = choose_customer_user_participant(room_ps)
       const customer_user_uuid = string_value(customer?.user_uuid ?? null)
       const customer_user = customer_user_uuid
@@ -700,10 +781,14 @@ export async function list_reception_rooms({
       ? Math.max(1, Math.min(Math.floor(limit), 100))
       : 50
 
-  const fetch_limit =
-    mode === 'concierge'
-      ? Math.min(Math.max(normalized_limit * 10, normalized_limit), 200)
-      : normalized_limit
+  const fetch_limit = normalized_limit
+
+  await emit_admin_chat_list_debug({
+    event: 'admin_chat_list_load_started',
+    raw_room_count: null,
+    filtered_room_count: null,
+    phase: `rooms_query_${mode}`,
+  })
 
   let query = supabase
     .from('rooms')
@@ -713,48 +798,120 @@ export async function list_reception_rooms({
     .limit(fetch_limit)
 
   if (mode === 'concierge') {
-    query = query
-      .or('room_type.eq.direct,room_type.is.null')
-      .or('concierge_enabled.is.null,concierge_enabled.eq.true')
-      .or('status.is.null,status.neq.inactive')
+    // Keep the initial list read intentionally loose. Optional room flags are
+    // normalized later so one stale field cannot blank the whole inbox.
+    query = supabase
+      .from('rooms')
+      .select(room_select)
+      .eq('mode', mode)
+      .order('updated_at', { ascending: false })
+      .limit(fetch_limit)
   }
 
-  const result = await query
+  let result: Awaited<typeof query>
+
+  try {
+    result = await query
+  } catch (error) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_query_failed',
+      raw_room_count: null,
+      filtered_room_count: null,
+      error,
+      phase: `rooms_query_${mode}`,
+    })
+
+    return []
+  }
 
   if (result.error) {
-    throw result.error
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_query_failed',
+      raw_room_count: null,
+      filtered_room_count: null,
+      error: result.error,
+      phase: `rooms_query_${mode}`,
+    })
+
+    return []
   }
 
   const rows = (result.data ?? []) as room_row[]
-  const enrichments = await enrich_room_cards(rows, mode)
 
-  if (mode === 'concierge') {
-    const kept: reception_room[] = []
+  await emit_admin_chat_list_debug({
+    event: 'admin_chat_list_query_succeeded',
+    raw_room_count: rows.length,
+    filtered_room_count: rows.length,
+    phase: `rooms_query_${mode}`,
+  })
 
-    for (const row of rows) {
-      const enrichment = enrichments.get(row.room_uuid)
+  if (rows.length === 0) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_filtered_empty',
+      raw_room_count: 0,
+      filtered_room_count: 0,
+      filter_reason_counts: { rooms_query_returned_empty: 1 },
+      phase: `rooms_query_${mode}`,
+    })
 
-      if (!enrichment) {
-        continue
-      }
-
-      kept.push(
-        normalize_room(row, enrichment, { room_uuid_label_fallback: false }),
-      )
-
-      if (kept.length >= normalized_limit) {
-        break
-      }
-    }
-
-    return kept
+    return []
   }
 
-  return rows.map((row) =>
-    normalize_room(row, enrichments.get(row.room_uuid) ?? null, {
-      room_uuid_label_fallback: false,
-    }),
-  )
+  let enrichments = new Map<string, room_card_enrichment>()
+
+  try {
+    enrichments = await enrich_room_cards(rows, mode)
+  } catch (error) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_query_failed',
+      raw_room_count: rows.length,
+      filtered_room_count: null,
+      error,
+      phase: `enrich_room_cards_${mode}`,
+    })
+  }
+
+  const kept: reception_room[] = []
+  const filter_reason_counts: Record<string, number> = {}
+
+  for (const row of rows) {
+    if (kept.length >= normalized_limit) {
+      break
+    }
+
+    try {
+      kept.push(
+        normalize_room(row, enrichments.get(row.room_uuid) ?? null, {
+          room_uuid_label_fallback: false,
+        }),
+      )
+    } catch (error) {
+      increment_reason(filter_reason_counts, 'normalize_failed')
+      await emit_admin_chat_list_debug({
+        event: 'admin_chat_list_normalize_failed',
+        raw_room_count: rows.length,
+        filtered_room_count: kept.length,
+        filter_reason_counts,
+        error,
+        phase: `normalize_room_${mode}`,
+      })
+    }
+  }
+
+  if (rows.length > 0 && kept.length === 0) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_filtered_empty',
+      raw_room_count: rows.length,
+      filtered_room_count: 0,
+      filter_reason_counts:
+        Object.keys(filter_reason_counts).length > 0
+          ? filter_reason_counts
+          : { normalize_returned_empty: 1 },
+      phase: `normalize_room_${mode}`,
+    })
+  }
+
+  return kept
 }
 
 export async function get_reception_room(

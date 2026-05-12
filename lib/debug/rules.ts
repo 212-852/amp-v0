@@ -115,6 +115,42 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const admin_chat_list_lifecycle_events = new Set([
+    'admin_chat_list_load_started',
+    'admin_chat_list_query_succeeded',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    admin_chat_list_lifecycle_events.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: ['discord'],
+    }
+  }
+
+  const admin_chat_list_problem_events = new Set([
+    'admin_chat_list_query_failed',
+    'admin_chat_list_filtered_empty',
+    'admin_chat_list_normalize_failed',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    admin_chat_list_problem_events.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level:
+        input.event === 'admin_chat_list_query_failed'
+          ? 'error'
+          : 'warn',
+      channels: ['discord'],
+    }
+  }
+
   const support_started_ok_debug = new Set([
     'support_started_action_created',
     'support_started_notify_started',
