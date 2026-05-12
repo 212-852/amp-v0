@@ -164,6 +164,19 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  if (
+    input.category === 'admin_chat' &&
+    input.event === 'admin_chat_customer_identity_payload_shape'
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.admin_chat_room_list_debug_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
   const customer_identity_resolve_lifecycle = new Set([
     'admin_chat_customer_identity_resolve_started',
     'admin_chat_customer_identity_resolve_succeeded',

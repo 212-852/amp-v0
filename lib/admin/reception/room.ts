@@ -10,14 +10,15 @@ import {
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
 import {
-  admin_chat_unset_customer_label,
-  build_identity_display_bundles,
   load_admin_chat_schema_snapshot,
   pick_users_select_list,
-  resolve_admin_chat_customer_card_label,
-  type identity_display_bundle,
-  type resolved_admin_chat_customer_source,
 } from '@/lib/auth/customer_display'
+import {
+  admin_chat_unset_customer_label,
+  resolve_admin_chat_list_customer_display,
+  summarize_admin_chat_identity_payload_shape,
+  type resolved_admin_chat_customer_source,
+} from '@/lib/chat/identity/admin_list_customer_name'
 import { supabase } from '@/lib/db/supabase'
 
 type room_row = {
@@ -393,7 +394,7 @@ async function enrich_room_cards(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
+      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role, display_name')
       .in('room_uuid', room_uuids)
 
     if (participant_result.error) {
@@ -448,7 +449,7 @@ async function enrich_room_cards(
   const user_uuids = Array.from(new Set(user_uuid_by_room.values()))
 
   const users_by_uuid = new Map<string, Record<string, unknown>>()
-  const identities_by_user_uuid = new Map<string, identity_display_bundle>()
+  const identity_rows_by_user = new Map<string, Record<string, unknown>[]>()
 
   if (user_uuids.length > 0) {
     const schema_snapshot = await load_admin_chat_schema_snapshot(supabase)
@@ -517,12 +518,18 @@ async function enrich_room_cards(
           phase: 'identities_query',
         })
       } else {
-        const merged = build_identity_display_bundles(
-          (identity_result.data ?? []) as Record<string, unknown>[],
-        )
+        const raw = (identity_result.data ?? []) as Record<string, unknown>[]
 
-        for (const [user_uuid, row] of merged) {
-          identities_by_user_uuid.set(user_uuid, row)
+        for (const row of raw) {
+          const uid = pick_string(row['user_uuid'])
+
+          if (!uid) {
+            continue
+          }
+
+          const list = identity_rows_by_user.get(uid) ?? []
+          list.push(row)
+          identity_rows_by_user.set(uid, list)
         }
       }
     } catch (error) {
@@ -556,11 +563,11 @@ async function enrich_room_cards(
     const room_ps = participants_by_room.get(row.room_uuid) ?? []
     const customer = choose_customer_user_participant(room_ps)
     const customer_user_uuid = string_value(customer?.user_uuid ?? null)
+    const identity_rows_for_user = customer_user_uuid
+      ? identity_rows_by_user.get(customer_user_uuid) ?? []
+      : []
     const customer_user = customer_user_uuid
       ? users_by_uuid.get(customer_user_uuid)
-      : null
-    const identity = customer_user_uuid
-      ? identities_by_user_uuid.get(customer_user_uuid) ?? null
       : null
 
     const base_preview = preview_by_room.get(row.room_uuid) ?? null
@@ -577,12 +584,7 @@ async function enrich_room_cards(
     const has_display_name = Boolean(
       customer_user && pick_string(customer_user['display_name']),
     )
-    const has_identity = Boolean(
-      identity &&
-        (string_value(identity.line_profile_display_name) ||
-          string_value(identity.provider_id) ||
-          string_value(identity.provider)),
-    )
+    const has_identity = identity_rows_for_user.length > 0
 
     if (has_user_uuid) {
       await emit_customer_identity_resolve({
@@ -601,10 +603,10 @@ async function enrich_room_cards(
       })
     }
 
-    const resolved = resolve_admin_chat_customer_card_label({
+    const resolved = resolve_admin_chat_list_customer_display({
       user: customer_user ?? null,
-      identity: identity ?? null,
-      customer,
+      identity_rows: identity_rows_for_user,
+      participant: customer,
     })
 
     if (has_user_uuid) {
@@ -625,6 +627,17 @@ async function enrich_room_cards(
             ? 'user_row_not_found_after_batch_and_backfill'
             : 'no_display_source_after_resolve',
         })
+
+        if (has_identity && identity_rows_for_user.length > 0) {
+          await debug_event({
+            category: 'admin_chat',
+            event: 'admin_chat_customer_identity_payload_shape',
+            payload: summarize_admin_chat_identity_payload_shape(
+              identity_rows_for_user,
+              pick_string(customer?.display_name),
+            ),
+          })
+        }
       } else {
         await emit_customer_identity_resolve({
           event: 'admin_chat_customer_identity_resolve_succeeded',
@@ -697,7 +710,7 @@ export async function resolve_room_subject(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
+      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role, display_name')
       .eq('room_uuid', room_uuid)
 
     if (participant_result.error) {
@@ -732,7 +745,6 @@ export async function resolve_room_subject(
   const users_select_list = pick_users_select_list(schema_snapshot)
 
   let user: Record<string, unknown> | null = null
-  let identity: identity_display_bundle | null = null
 
   try {
     const user_result = await supabase
@@ -767,13 +779,10 @@ export async function resolve_room_subject(
     identity_rows = []
   }
 
-  const bundles = build_identity_display_bundles(identity_rows)
-  identity = bundles.get(user_uuid) ?? null
-
-  const resolved = resolve_admin_chat_customer_card_label({
+  const resolved = resolve_admin_chat_list_customer_display({
     user,
-    identity,
-    customer: subject_participant,
+    identity_rows,
+    participant: subject_participant,
   })
 
   const display_name =
