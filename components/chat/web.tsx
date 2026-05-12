@@ -373,6 +373,32 @@ export function WebChat({
     messages: active_messages,
     room_realtime_channel_ref: room_realtime_channelRef,
   } = chat
+  const append_realtime_message_ref = useRef(append_realtime_message)
+  append_realtime_message_ref.current = append_realtime_message
+
+  const latest_room_uuid_ref = useRef(room_uuid)
+  latest_room_uuid_ref.current = room_uuid
+
+  const self_participant_uuid_ref = useRef(participant_uuid)
+  self_participant_uuid_ref.current = participant_uuid
+
+  const web_rt_ctx_ref = useRef({
+    active_room_uuid: active_room_uuid ?? room_uuid,
+    participant_uuid,
+    user_uuid: session?.user_uuid ?? null,
+    tier: session?.tier ?? null,
+    source_channel: session?.source_channel ?? 'web',
+  })
+  web_rt_ctx_ref.current = {
+    active_room_uuid: active_room_uuid ?? room_uuid,
+    participant_uuid,
+    user_uuid: session?.user_uuid ?? null,
+    tier: session?.tier ?? null,
+    source_channel: session?.source_channel ?? 'web',
+  }
+
+  const subscribed_room_uuid_ref = useRef<string | null>(null)
+
   const did_initial_scroll_ref = useRef(false)
   const typing_rows_ref = useRef<
     Map<
@@ -390,9 +416,10 @@ export function WebChat({
   const recompute_staff_typing_banner = useCallback(() => {
     const now = new Date()
     let has_other_staff = false
+    const self = self_participant_uuid_ref.current
 
     for (const row of typing_rows_ref.current.values()) {
-      if (row.participant_uuid === participant_uuid) {
+      if (row.participant_uuid === self) {
         continue
       }
 
@@ -414,7 +441,7 @@ export function WebChat({
     }
 
     set_typing_banner(has_other_staff ? 'スタッフが入力中...' : null)
-  }, [participant_uuid])
+  }, [])
 
   useEffect(() => {
     hydrate_chat({
@@ -460,21 +487,41 @@ export function WebChat({
       return
     }
 
+    if (
+      subscribed_room_uuid_ref.current === room_uuid &&
+      room_realtime_channelRef.current
+    ) {
+      const ctx = web_rt_ctx_ref.current
+
+      send_chat_realtime_debug({
+        event: 'chat_realtime_subscribe_skipped',
+        room_uuid,
+        active_room_uuid: ctx.active_room_uuid,
+        participant_uuid: ctx.participant_uuid,
+        user_uuid: ctx.user_uuid,
+        role: 'user',
+        tier: ctx.tier,
+        source_channel: ctx.source_channel,
+        channel_name: chat_room_realtime_channel_name(room_uuid),
+        cleanup_reason: 'duplicate_subscribe',
+        phase: 'web_chat_realtime_guard',
+      })
+
+      return
+    }
+
     const locked_room = room_uuid
-    const locked_active_room_uuid = active_room_uuid ?? room_uuid
-    const locked_user_uuid = session?.user_uuid ?? null
-    const locked_tier = session?.tier ?? null
-    const locked_source_channel = session?.source_channel ?? 'web'
+    const ctx = web_rt_ctx_ref.current
 
     send_chat_realtime_debug({
       event: 'chat_realtime_client_created',
       room_uuid: locked_room,
-      active_room_uuid: locked_active_room_uuid,
-      participant_uuid,
-      user_uuid: locked_user_uuid,
+      active_room_uuid: ctx.active_room_uuid,
+      participant_uuid: ctx.participant_uuid,
+      user_uuid: ctx.user_uuid,
       role: 'user',
-      tier: locked_tier,
-      source_channel: locked_source_channel,
+      tier: ctx.tier,
+      source_channel: ctx.source_channel,
       channel_name: chat_room_realtime_channel_name(locked_room),
       phase: 'web_chat_create_browser_supabase',
     })
@@ -482,12 +529,12 @@ export function WebChat({
     const channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid: locked_room,
-      active_room_uuid: locked_active_room_uuid,
-      participant_uuid,
-      user_uuid: locked_user_uuid,
+      active_room_uuid: ctx.active_room_uuid,
+      participant_uuid: ctx.participant_uuid,
+      user_uuid: ctx.user_uuid,
       role: 'user',
-      tier: locked_tier,
-      source_channel: locked_source_channel,
+      tier: ctx.tier,
+      source_channel: ctx.source_channel,
       on_message: (message) => {
         if (!message) {
           return
@@ -500,17 +547,18 @@ export function WebChat({
           return
         }
 
-        const update_result = append_realtime_message(message)
+        const dbg = web_rt_ctx_ref.current
+        const update_result = append_realtime_message_ref.current(message)
 
         send_chat_realtime_debug({
           event: 'chat_realtime_message_state_updated',
           room_uuid: locked_room,
-          active_room_uuid: locked_active_room_uuid,
-          participant_uuid,
-          user_uuid: locked_user_uuid,
+          active_room_uuid: dbg.active_room_uuid,
+          participant_uuid: dbg.participant_uuid,
+          user_uuid: dbg.user_uuid,
           role: 'user',
-          tier: locked_tier,
-          source_channel: locked_source_channel,
+          tier: dbg.tier,
+          source_channel: dbg.source_channel,
           channel_name: chat_room_realtime_channel_name(locked_room),
           event_name: 'INSERT',
           schema: 'public',
@@ -538,21 +586,23 @@ export function WebChat({
 
         window.setTimeout(recompute_staff_typing_banner, 3_100)
 
+        const dbg = web_rt_ctx_ref.current
+
         send_chat_realtime_debug({
           event: 'chat_typing_state_updated',
           room_uuid: locked_room,
-          active_room_uuid: locked_active_room_uuid,
-          participant_uuid,
-          user_uuid: locked_user_uuid,
+          active_room_uuid: dbg.active_room_uuid,
+          participant_uuid: dbg.participant_uuid,
+          user_uuid: dbg.user_uuid,
           role: 'user',
-          tier: locked_tier,
-          source_channel: locked_source_channel,
+          tier: dbg.tier,
+          source_channel: dbg.source_channel,
           channel_name: chat_room_realtime_channel_name(locked_room),
           event_name: 'typing',
           payload_room_uuid: typing.room_uuid,
           sender_user_uuid: typing.user_uuid ?? null,
           sender_participant_uuid: typing.participant_uuid,
-          active_participant_uuid: participant_uuid,
+          active_participant_uuid: dbg.participant_uuid,
           sender_role: typing.role,
           display_name: typing.display_name ?? null,
           is_typing: typing.is_typing,
@@ -561,37 +611,38 @@ export function WebChat({
       },
     })
 
+    subscribed_room_uuid_ref.current = locked_room
     room_realtime_channelRef.current = channel
 
     return () => {
+      const cleanup_reason =
+        latest_room_uuid_ref.current !== locked_room
+          ? 'room_uuid_changed'
+          : 'unmount'
+      const dbg = web_rt_ctx_ref.current
+
       cleanup_chat_room_realtime({
         supabase,
         channel,
         room_uuid: locked_room,
-        active_room_uuid: locked_active_room_uuid,
-        participant_uuid,
-        user_uuid: locked_user_uuid,
+        active_room_uuid: dbg.active_room_uuid,
+        participant_uuid: dbg.participant_uuid,
+        user_uuid: dbg.user_uuid,
         role: 'user',
-        tier: locked_tier,
-        source_channel: locked_source_channel,
-        cleanup_reason: 'effect_cleanup',
+        tier: dbg.tier,
+        source_channel: dbg.source_channel,
+        cleanup_reason,
       })
+
+      if (subscribed_room_uuid_ref.current === locked_room) {
+        subscribed_room_uuid_ref.current = null
+      }
 
       if (room_realtime_channelRef.current === channel) {
         room_realtime_channelRef.current = null
       }
     }
-  }, [
-    active_room_uuid,
-    append_realtime_message,
-    participant_uuid,
-    recompute_staff_typing_banner,
-    room_realtime_channelRef,
-    room_uuid,
-    session?.source_channel,
-    session?.tier,
-    session?.user_uuid,
-  ])
+  }, [room_uuid])
 
   const render_messages = active_room_uuid === room_uuid
     ? active_messages

@@ -571,7 +571,7 @@ export function publish_chat_typing(input: {
 
       if (result === 'ok') {
         send_chat_realtime_debug({
-          event: 'chat_typing_broadcast_sent',
+          event: 'chat_typing_broadcast_send_succeeded',
           room_uuid: input.room_uuid,
           active_room_uuid: input.active_room_uuid ?? input.room_uuid,
           participant_uuid: input.participant_uuid,
