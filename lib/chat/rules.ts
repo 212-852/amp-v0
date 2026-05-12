@@ -13,6 +13,12 @@ export function can_switch_to_concierge(input: {
   )
 }
 
+export function can_create_handoff_memo(input: {
+  role: string | null | undefined
+}): boolean {
+  return input.role === 'admin' || input.role === 'concierge'
+}
+
 function room_has_line_initial_or_ack(archived_messages: archived_message[]) {
   return archived_messages.some((row) => {
     const bundle = row.bundle

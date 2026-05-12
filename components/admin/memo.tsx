@@ -4,11 +4,11 @@ import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 
 import { save_reception_room_memo } from '@/lib/admin/reception/memo/client'
+import type { handoff_memo } from '@/lib/chat/handoff'
 
 type AdminHandoffMemoProps = {
   room_uuid: string
-  initial_memo: string
-  initial_updated_at: string | null
+  initial_memos: handoff_memo[]
 }
 
 function format_time(iso: string | null): string {
@@ -32,19 +32,19 @@ function format_time(iso: string | null): string {
 
 export default function AdminHandoffMemo({
   room_uuid,
-  initial_memo,
-  initial_updated_at,
+  initial_memos,
 }: AdminHandoffMemoProps) {
-  const [memo, set_memo] = useState(initial_memo)
-  const [draft, set_draft] = useState(initial_memo)
-  const [updated_at, set_updated_at] = useState(initial_updated_at)
+  const [memos, set_memos] = useState(initial_memos)
+  const [draft, set_draft] = useState('')
   const [is_open, set_is_open] = useState(false)
   const [is_saving, set_is_saving] = useState(false)
   const [error_message, set_error_message] = useState<string | null>(null)
 
-  const is_dirty = draft !== memo
+  const is_dirty = draft.trim().length > 0
+  const latest_memo = memos[memos.length - 1] ?? null
   const status_text = is_saving ? '保存中...' : is_dirty ? '未保存' : '保存済み'
-  const updated_time = format_time(updated_at)
+  const updated_time = format_time(latest_memo?.created_at ?? null)
+  const saved_by = latest_memo?.saved_by_name || latest_memo?.saved_by_role
 
   const toggle_open = () => {
     set_is_open((current) => !current)
@@ -65,10 +65,8 @@ export default function AdminHandoffMemo({
       })
 
       if (result.ok) {
-        const next_memo = result.memo
-        set_memo(next_memo)
-        set_draft(next_memo)
-        set_updated_at(result.updated_at)
+        set_memos((current) => [...current, result.memo])
+        set_draft('')
       } else {
         set_error_message('保存できませんでした')
       }
@@ -93,6 +91,12 @@ export default function AdminHandoffMemo({
           </span>
           <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium leading-tight text-neutral-500">
             <span>{updated_time ? `更新: ${updated_time}` : '未更新'}</span>
+            {saved_by ? (
+              <>
+                <span aria-hidden>{'/'}</span>
+                <span>{saved_by}</span>
+              </>
+            ) : null}
             <span aria-hidden>{'/'}</span>
             <span
               className={
@@ -113,7 +117,45 @@ export default function AdminHandoffMemo({
       </button>
 
       {is_open ? (
-        <div className="border-t border-neutral-200 px-3 pb-3 pt-3">
+        <div className="flex max-h-[70svh] flex-col border-t border-neutral-200 px-3 pb-3 pt-3">
+          <div className="max-h-[32svh] overflow-y-auto pr-1">
+            {memos.length > 0 ? (
+              <ol className="flex flex-col gap-2">
+                {memos.map((memo_item) => {
+                  const item_saved_by =
+                    memo_item.saved_by_name ||
+                    memo_item.saved_by_role ||
+                    'admin'
+                  const item_time = format_time(memo_item.created_at)
+
+                  return (
+                    <li
+                      key={memo_item.memo_uuid}
+                      className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-neutral-500">
+                        <span>{item_saved_by}</span>
+                        {item_time ? (
+                          <>
+                            <span aria-hidden>{'/'}</span>
+                            <span>{item_time}</span>
+                          </>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 max-h-[22svh] overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-black">
+                        {memo_item.body}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ol>
+            ) : (
+              <div className="rounded-lg border border-dashed border-neutral-200 px-3 py-6 text-center text-[12px] font-medium text-neutral-500">
+                引き継ぎメモはまだありません
+              </div>
+            )}
+          </div>
+
           <textarea
             value={draft}
             maxLength={2000}
@@ -122,10 +164,10 @@ export default function AdminHandoffMemo({
               set_error_message(null)
             }}
             placeholder="管理者向けのメモを入力"
-            className="max-h-[50vh] min-h-[260px] w-full resize-y overflow-y-auto rounded-lg border border-neutral-200 bg-white px-4 py-3 text-[13px] leading-7 text-black placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900"
+            className="mt-3 max-h-[26svh] min-h-[160px] w-full resize-y overflow-y-auto rounded-lg border border-neutral-200 bg-white px-4 py-3 text-[13px] leading-7 text-black placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900"
           />
 
-          <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="sticky bottom-0 mt-3 flex items-center justify-between gap-3 bg-white pt-1">
             <div className="min-w-0 text-[11px] font-medium text-red-600">
               {error_message}
             </div>

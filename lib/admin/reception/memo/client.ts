@@ -1,8 +1,9 @@
+import type { handoff_memo } from '@/lib/chat/handoff'
+
 export type save_reception_room_memo_result =
   | {
       ok: true
-      memo: string
-      updated_at: string | null
+      memo: handoff_memo
     }
   | {
       ok: false
@@ -11,8 +12,7 @@ export type save_reception_room_memo_result =
 
 type memo_response = {
   ok: boolean
-  memo?: string
-  updated_at?: string | null
+  memo?: handoff_memo
   error?: string
 }
 
@@ -34,7 +34,7 @@ export async function save_reception_room_memo({
     | memo_response
     | null
 
-  if (!response.ok || !payload?.ok) {
+  if (!response.ok || !payload?.ok || !payload.memo) {
     return {
       ok: false,
       error: payload?.error ?? 'memo_update_failed',
@@ -43,7 +43,6 @@ export async function save_reception_room_memo({
 
   return {
     ok: true,
-    memo: payload.memo ?? '',
-    updated_at: payload.updated_at ?? null,
+    memo: payload.memo,
   }
 }

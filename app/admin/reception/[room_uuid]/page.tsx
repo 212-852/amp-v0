@@ -4,14 +4,13 @@ import AdminChatTimeline from '@/components/admin/c'
 import AdminHandoffMemo from '@/components/admin/memo'
 import {
   list_reception_room_messages,
-  read_reception_room_memo,
   read_reception_room,
   resolve_room_subject,
   type reception_room,
-  type reception_room_memo,
   type reception_room_message,
   type reception_room_subject,
 } from '@/lib/admin/reception/room'
+import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,21 +84,16 @@ async function load_subject(
   }
 }
 
-async function load_memo(room_uuid: string): Promise<reception_room_memo> {
+async function load_memos(room_uuid: string): Promise<handoff_memo[]> {
   try {
-    return await read_reception_room_memo({ room_uuid })
+    return await list_handoff_memos({ room_uuid })
   } catch (error) {
-    console.error('[admin_reception_room_page] read_memo_failed', {
+    console.error('[admin_reception_room_page] list_memos_failed', {
       room_uuid,
       error: error instanceof Error ? error.message : String(error),
     })
 
-    return {
-      room_uuid,
-      handoff_memo: '',
-      handoff_memo_updated_at: null,
-      handoff_memo_updated_by: null,
-    }
+    return []
   }
 }
 
@@ -109,7 +103,7 @@ export default async function AdminReceptionRoomPage({
   const { room_uuid } = await params
   const room_result = await load_room(room_uuid)
   const subject = await load_subject(room_uuid)
-  const memo = await load_memo(room_uuid)
+  const memos = await load_memos(room_uuid)
   const message_result = await load_messages(room_uuid)
   const room = room_result.room
 
@@ -160,8 +154,7 @@ export default async function AdminReceptionRoomPage({
             </div>
             <AdminHandoffMemo
               room_uuid={room_uuid}
-              initial_memo={memo.handoff_memo}
-              initial_updated_at={memo.handoff_memo_updated_at}
+              initial_memos={memos}
             />
           </div>
         </div>

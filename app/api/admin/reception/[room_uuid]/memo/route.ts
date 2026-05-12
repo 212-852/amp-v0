@@ -2,9 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { resolve_admin_reception_context } from '@/lib/admin/reception/context'
 import { apply_reception_room_memo_request } from '@/lib/admin/reception/memo/action'
-import {
-  read_reception_room_memo,
-} from '@/lib/admin/reception/room'
+import { list_handoff_memos } from '@/lib/chat/action'
 
 type route_context = {
   params: Promise<{ room_uuid: string }>
@@ -32,13 +30,11 @@ export async function GET(_request: Request, context: route_context) {
 
   try {
     const { room_uuid } = await context.params
-    const memo = await read_reception_room_memo({ room_uuid })
+    const memos = await list_handoff_memos({ room_uuid })
 
     return NextResponse.json({
       ok: true,
-      memo: memo.handoff_memo,
-      updated_at: memo.handoff_memo_updated_at,
-      updated_by: memo.handoff_memo_updated_by,
+      memos,
     })
   } catch (error) {
     return NextResponse.json(
@@ -71,13 +67,19 @@ export async function POST(request: Request, context: route_context) {
       room_uuid,
       body,
       updated_by: admin_context.admin_user_uuid,
+      saved_by_role: admin_context.role,
     })
+
+    if (!memo.ok) {
+      return NextResponse.json(
+        { ok: false, error: memo.error },
+        { status: memo.error === 'not_allowed' ? 403 : 400 },
+      )
+    }
 
     return NextResponse.json({
       ok: true,
-      memo: memo.handoff_memo,
-      updated_at: memo.handoff_memo_updated_at,
-      updated_by: memo.handoff_memo_updated_by,
+      memo: memo.memo,
     })
   } catch (error) {
     return NextResponse.json(
