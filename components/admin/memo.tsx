@@ -122,7 +122,7 @@ export default function AdminHandoffMemo({
               set_error_message(null)
             }}
             placeholder="管理者向けのメモを入力"
-            className="min-h-32 w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13px] leading-relaxed text-black placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900"
+            className="max-h-[50vh] min-h-[260px] w-full resize-y overflow-y-auto rounded-lg border border-neutral-200 bg-white px-4 py-3 text-[13px] leading-7 text-black placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900"
           />
 
           <div className="mt-3 flex items-center justify-between gap-3">
