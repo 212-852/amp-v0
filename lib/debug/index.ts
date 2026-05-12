@@ -80,6 +80,7 @@ export async function debug_event(input: {
   const rule = resolve_debug_rule({
     category: input.category,
     event: input.event,
+    payload: input.payload,
   })
 
   if (

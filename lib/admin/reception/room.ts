@@ -237,20 +237,29 @@ async function enrich_room_cards(
   const user_uuid_by_room = new Map<string, string>()
   const participant_by_room = new Map<string, participant_row>()
 
+  const participants_by_room = new Map<string, participant_row[]>()
+
   for (const participant of participants) {
-    if (
-      participant.room_uuid &&
-      !participant_by_room.has(participant.room_uuid)
-    ) {
-      participant_by_room.set(participant.room_uuid, participant)
+    if (!participant.room_uuid) {
+      continue
     }
 
-    if (
-      participant.room_uuid &&
-      participant.user_uuid &&
-      !user_uuid_by_room.has(participant.room_uuid)
-    ) {
-      user_uuid_by_room.set(participant.room_uuid, participant.user_uuid)
+    const list = participants_by_room.get(participant.room_uuid) ?? []
+    list.push(participant)
+    participants_by_room.set(participant.room_uuid, list)
+  }
+
+  for (const room_uuid of room_uuids) {
+    const room_ps = participants_by_room.get(room_uuid) ?? []
+    const subject = choose_subject_participant(room_ps)
+
+    if (subject) {
+      participant_by_room.set(room_uuid, subject)
+      const uid = string_value(subject.user_uuid)
+
+      if (uid) {
+        user_uuid_by_room.set(room_uuid, uid)
+      }
     }
   }
 
@@ -297,18 +306,6 @@ async function enrich_room_cards(
   }
 
   const preview_by_room = await read_latest_message_previews(room_uuids)
-
-  const participants_by_room = new Map<string, participant_row[]>()
-
-  for (const participant of participants) {
-    if (!participant.room_uuid) {
-      continue
-    }
-
-    const list = participants_by_room.get(participant.room_uuid) ?? []
-    list.push(participant)
-    participants_by_room.set(participant.room_uuid, list)
-  }
 
   const now = new Date()
   const staff_user_for_labels = new Set<string>()

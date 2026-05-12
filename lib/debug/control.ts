@@ -6,4 +6,6 @@ export const debug_control = {
   chat_message_debug_enabled: false,
   /** Success-path Discord traces for chat realtime (subscribe ok, message received, typing ok). */
   chat_realtime_debug_enabled: false,
+  /** Extra noisy realtime traces used only while diagnosing live sync. */
+  realtime_verbose_debug_enabled: false,
 } as const

@@ -14,6 +14,7 @@ export type debug_rule = {
 export function resolve_debug_rule(input: {
   category: string
   event: string
+  payload?: Record<string, unknown>
 }): debug_rule {
   if (
     input.event === 'handoff_memo_save_blocked' ||
@@ -80,7 +81,9 @@ export function resolve_debug_rule(input: {
     return {
       category: 'chat_message',
       level: 'info',
-      channels: ['discord'],
+      channels: debug_control.realtime_verbose_debug_enabled
+        ? ['discord']
+        : [],
     }
   }
 
@@ -110,20 +113,15 @@ export function resolve_debug_rule(input: {
   }
 
   const chat_realtime_always_discord = new Set([
-    'chat_realtime_subscribe_status',
     'chat_realtime_subscribe_failed',
     'chat_realtime_message_callback_ignored',
     'chat_realtime_typing_callback_ignored',
     'chat_realtime_action_callback_ignored',
     'chat_realtime_cleanup_started',
     'chat_realtime_cleanup_completed',
-    'chat_typing_broadcast_ignored',
     'chat_typing_broadcast_failed',
-    'chat_realtime_postgres_changes_callback_fired',
     'chat_typing_listener_not_registered',
     'chat_typing_send_before_subscribed',
-    'chat_typing_broadcast_received',
-    'chat_typing_state_updated',
   ])
 
   const chat_realtime_success_gated = new Set([
@@ -132,6 +130,8 @@ export function resolve_debug_rule(input: {
     'chat_realtime_subscribe_started',
     'chat_realtime_subscribe_skipped',
     'chat_realtime_channel_subscribe_status',
+    'chat_realtime_subscribe_status',
+    'chat_realtime_postgres_changes_callback_fired',
     'chat_realtime_message_callback_received',
     'chat_realtime_message_state_updated',
     'chat_realtime_typing_callback_received',
@@ -141,6 +141,8 @@ export function resolve_debug_rule(input: {
     'chat_typing_listener_registered',
     'chat_typing_listener_callback_received',
     'chat_typing_broadcast_send_succeeded',
+    'chat_typing_broadcast_received',
+    'chat_typing_state_updated',
     'chat_support_started_insert_started',
     'chat_support_started_insert_succeeded',
   ])
@@ -177,12 +179,59 @@ export function resolve_debug_rule(input: {
 
   if (
     input.category === 'chat_realtime' &&
+    input.event === 'chat_typing_broadcast_ignored'
+  ) {
+    const ignored_reason =
+      typeof input.payload?.ignored_reason === 'string'
+        ? input.payload.ignored_reason
+        : null
+
+    return {
+      category: 'chat_realtime',
+      level: 'warn',
+      channels:
+        ignored_reason === 'self_typing' &&
+        !debug_control.realtime_verbose_debug_enabled
+          ? []
+          : ['discord'],
+    }
+  }
+
+  if (
+    input.category === 'chat_realtime' &&
+    input.event === 'chat_realtime_subscribe_status'
+  ) {
+    const status =
+      typeof input.payload?.subscribe_status === 'string'
+        ? input.payload.subscribe_status
+        : null
+    const is_failed =
+      status === 'CHANNEL_ERROR' ||
+      status === 'TIMED_OUT' ||
+      status === 'CLOSED'
+
+    return {
+      category: 'chat_realtime',
+      level: is_failed ? 'error' : 'info',
+      channels:
+        is_failed || debug_control.realtime_verbose_debug_enabled
+          ? ['discord']
+          : [],
+    }
+  }
+
+  if (
+    input.category === 'chat_realtime' &&
     chat_realtime_success_gated.has(input.event)
   ) {
     return {
       category: 'chat_realtime',
       level: 'info',
-      channels: debug_control.chat_realtime_debug_enabled ? ['discord'] : [],
+      channels:
+        debug_control.chat_realtime_debug_enabled ||
+        debug_control.realtime_verbose_debug_enabled
+          ? ['discord']
+          : [],
     }
   }
 
