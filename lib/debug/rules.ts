@@ -120,6 +120,8 @@ export function resolve_debug_rule(input: {
     'chat_typing_broadcast_ignored',
     'chat_typing_broadcast_failed',
     'chat_realtime_postgres_changes_callback_fired',
+    'chat_typing_listener_not_registered',
+    'chat_typing_send_before_subscribed',
   ])
 
   const chat_realtime_success_gated = new Set([
@@ -133,6 +135,9 @@ export function resolve_debug_rule(input: {
     'chat_realtime_typing_callback_received',
     'chat_realtime_action_callback_received',
     'chat_typing_identity_compare',
+    'chat_typing_channel_instance_created',
+    'chat_typing_listener_registered',
+    'chat_typing_listener_callback_received',
     'chat_typing_broadcast_send_succeeded',
     'chat_typing_broadcast_received',
     'chat_typing_state_updated',

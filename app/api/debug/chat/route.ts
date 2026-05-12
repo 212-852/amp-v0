@@ -43,6 +43,10 @@ type chat_debug_body = {
   is_self_sender?: unknown
   comparison_strategy?: unknown
   guest_strategy_used?: unknown
+  channel_topic?: unknown
+  listener_registered?: unknown
+  client_instance_id?: unknown
+  payload_preview?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -113,6 +117,13 @@ export async function POST(request: Request) {
         typeof body?.guest_strategy_used === 'boolean'
           ? body.guest_strategy_used
           : null,
+      channel_topic: string_or_null(body?.channel_topic),
+      listener_registered:
+        typeof body?.listener_registered === 'boolean'
+          ? body.listener_registered
+          : null,
+      client_instance_id: string_or_null(body?.client_instance_id),
+      payload_preview: string_or_null(body?.payload_preview),
     },
   })
 

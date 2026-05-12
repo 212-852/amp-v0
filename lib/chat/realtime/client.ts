@@ -3,6 +3,8 @@
 import type { MutableRefObject } from 'react'
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 
+import { get_browser_supabase_client_instance_id } from '@/lib/db/browser'
+
 import {
   archived_message_from_message_row,
   type message_insert_row,
@@ -47,6 +49,39 @@ export function chat_typing_is_fresh(input: {
   return (input.now ?? new Date()).getTime() - sent_at <= chat_typing_expire_ms
 }
 
+type chat_room_realtime_channel_meta_type = {
+  typing_listener_bound: boolean
+  subscribe_callback_status: string | null
+  room_uuid: string
+}
+
+const chat_room_realtime_channel_meta = new WeakMap<
+  RealtimeChannel,
+  chat_room_realtime_channel_meta_type
+>()
+
+const chat_room_channel_client_ids = new WeakMap<RealtimeChannel, string>()
+
+function read_realtime_channel_state(channel: RealtimeChannel): string | null {
+  const state = (channel as { state?: string }).state
+
+  return typeof state === 'string' && state.length ? state : null
+}
+
+function broadcast_inner_payload_preview(value: unknown): string {
+  if (value === null || value === undefined) {
+    return 'empty'
+  }
+
+  if (typeof value !== 'object') {
+    return typeof value
+  }
+
+  const keys = Object.keys(value as Record<string, unknown>).sort().join(',')
+
+  return `keys:${keys}`
+}
+
 type chat_realtime_debug_payload = {
   event: string
   room_uuid: string | null
@@ -88,6 +123,10 @@ type chat_realtime_debug_payload = {
   is_self_sender?: boolean | null
   comparison_strategy?: string | null
   guest_strategy_used?: boolean | null
+  channel_topic?: string | null
+  listener_registered?: boolean | null
+  client_instance_id?: string | null
+  payload_preview?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -188,6 +227,26 @@ export function subscribe_chat_room_realtime(input: {
         broadcast: { self: true },
       },
     })
+
+  const client_instance_id =
+    get_browser_supabase_client_instance_id(input.supabase) ?? 'unknown_client'
+
+  chat_room_realtime_channel_meta.set(channel, {
+    typing_listener_bound: false,
+    subscribe_callback_status: null,
+    room_uuid: input.room_uuid,
+  })
+  chat_room_channel_client_ids.set(channel, client_instance_id)
+
+  send_chat_realtime_debug({
+    event: 'chat_typing_channel_instance_created',
+    ...base_debug,
+    channel_topic: channel_name,
+    subscribe_status: read_realtime_channel_state(channel),
+    listener_registered: false,
+    client_instance_id,
+    phase: 'typing_channel_constructed',
+  })
 
   send_chat_realtime_debug({
     event: 'chat_realtime_channel_created',
@@ -352,13 +411,37 @@ export function subscribe_chat_room_realtime(input: {
       },
     )
     .on('broadcast', { event: 'typing' }, (payload) => {
-      const raw = payload.payload
       const active_identity =
         input.active_typing_identity_ref?.current ?? {
           user_uuid: input.user_uuid ?? null,
           participant_uuid: input.participant_uuid ?? null,
           role: input.role ?? null,
         }
+
+      const cid_listener = chat_room_channel_client_ids.get(channel) ?? 'unknown_channel_client'
+      const meta_listener = chat_room_realtime_channel_meta.get(channel)
+
+      send_chat_realtime_debug({
+        event: 'chat_typing_listener_callback_received',
+        ...base_debug,
+        event_name: 'typing',
+        table: null,
+        filter: null,
+        channel_topic: channel_name,
+        subscribe_status:
+          read_realtime_channel_state(channel) ??
+          meta_listener?.subscribe_callback_status ??
+          null,
+        listener_registered: meta_listener?.typing_listener_bound ?? false,
+        client_instance_id: cid_listener,
+        active_user_uuid: active_identity.user_uuid,
+        active_participant_uuid: active_identity.participant_uuid,
+        active_role: active_identity.role,
+        payload_preview: broadcast_inner_payload_preview(payload.payload),
+        phase: 'broadcast_typing_listener_raw',
+      })
+
+      const raw = payload.payload
 
       if (!is_chat_typing_payload(raw)) {
         send_chat_realtime_debug({
@@ -505,33 +588,89 @@ export function subscribe_chat_room_realtime(input: {
 
       input.on_typing(typing)
     })
-    .subscribe((status, err) => {
-      console_chat_realtime('subscribe_status', {
-        channel: channel_name,
-        status,
-        err: err ? String(err) : null,
-      })
 
+  const typing_bind_meta = chat_room_realtime_channel_meta.get(channel)
+
+  if (typing_bind_meta) {
+    typing_bind_meta.typing_listener_bound = true
+  }
+
+  const active_listener_identity =
+    input.active_typing_identity_ref?.current ?? {
+      user_uuid: input.user_uuid ?? null,
+      participant_uuid: input.participant_uuid ?? null,
+      role: input.role ?? null,
+    }
+
+  send_chat_realtime_debug({
+    event: 'chat_typing_listener_registered',
+    ...base_debug,
+    event_name: 'typing',
+    table: null,
+    filter: null,
+    channel_topic: channel_name,
+    subscribe_status:
+      read_realtime_channel_state(channel) ??
+      typing_bind_meta?.subscribe_callback_status ??
+      'bindings_attached',
+    listener_registered: true,
+    client_instance_id,
+    active_user_uuid: active_listener_identity.user_uuid,
+    active_participant_uuid: active_listener_identity.participant_uuid,
+    active_role: active_listener_identity.role,
+    phase: 'typing_listener_bound_before_subscribe',
+  })
+
+  channel.subscribe((status, err) => {
+    const sub_meta = chat_room_realtime_channel_meta.get(channel)
+    if (sub_meta) {
+      sub_meta.subscribe_callback_status = status
+    }
+
+    console_chat_realtime('subscribe_status', {
+      channel: channel_name,
+      status,
+      err: err ? String(err) : null,
+    })
+
+    send_chat_realtime_debug({
+      event: 'chat_realtime_subscribe_status',
+      ...base_debug,
+      subscribe_status: status,
+      postgres_event: 'INSERT',
+      error_message: err ? String(err) : null,
+      phase: 'subscribe_callback',
+    })
+
+    if (status === 'SUBSCRIBED') {
       send_chat_realtime_debug({
-        event: 'chat_realtime_subscribe_status',
+        event: 'chat_typing_listener_registered',
+        ...base_debug,
+        event_name: 'typing',
+        table: null,
+        filter: null,
+        channel_topic: channel_name,
+        subscribe_status: status,
+        listener_registered: true,
+        client_instance_id,
+        active_user_uuid: input.user_uuid ?? null,
+        active_participant_uuid: input.participant_uuid ?? null,
+        active_role: input.role ?? null,
+        phase: 'typing_channel_subscribed',
+      })
+    }
+
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      send_chat_realtime_debug({
+        event: 'chat_realtime_subscribe_failed',
         ...base_debug,
         subscribe_status: status,
-        postgres_event: 'INSERT',
-        error_message: err ? String(err) : null,
+        error_code: status,
+        error_message: 'Realtime subscription failed',
         phase: 'subscribe_callback',
       })
-
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        send_chat_realtime_debug({
-          event: 'chat_realtime_subscribe_failed',
-          ...base_debug,
-          subscribe_status: status,
-          error_code: status,
-          error_message: 'Realtime subscription failed',
-          phase: 'subscribe_callback',
-        })
-      }
-    })
+    }
+  })
 
   return channel
 }
@@ -626,9 +765,72 @@ export function publish_chat_typing(input: {
   })
 
   void (async () => {
+    const meta = chat_room_realtime_channel_meta.get(input.channel)
+    const cid =
+      chat_room_channel_client_ids.get(input.channel) ?? 'unknown_channel_client'
+
+    if (!meta?.typing_listener_bound) {
+      send_chat_realtime_debug({
+        event: 'chat_typing_listener_not_registered',
+        room_uuid: input.room_uuid,
+        active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+        participant_uuid: input.participant_uuid,
+        user_uuid: input.user_uuid ?? null,
+        role: input.role,
+        tier: input.tier ?? null,
+        source_channel: source,
+        channel_name,
+        channel_topic: channel_name,
+        subscribe_status:
+          meta?.subscribe_callback_status ??
+          read_realtime_channel_state(input.channel) ??
+          'no_meta',
+        listener_registered: false,
+        client_instance_id: cid,
+        sender_user_uuid: input.user_uuid ?? null,
+        active_user_uuid: input.user_uuid ?? null,
+        sender_participant_uuid: input.participant_uuid,
+        active_participant_uuid: input.participant_uuid,
+        sender_role: input.role,
+        active_role: input.role,
+        phase: 'typing_publish_guard',
+      })
+    }
+
     let last_result: string | null = null
 
     for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (
+        attempt === 0 &&
+        meta?.subscribe_callback_status !== 'SUBSCRIBED'
+      ) {
+        send_chat_realtime_debug({
+          event: 'chat_typing_send_before_subscribed',
+          room_uuid: input.room_uuid,
+          active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+          participant_uuid: input.participant_uuid,
+          user_uuid: input.user_uuid ?? null,
+          role: input.role,
+          tier: input.tier ?? null,
+          source_channel: source,
+          channel_name,
+          channel_topic: channel_name,
+          subscribe_status:
+            meta?.subscribe_callback_status ??
+            read_realtime_channel_state(input.channel) ??
+            'unknown',
+          listener_registered: meta?.typing_listener_bound ?? false,
+          client_instance_id: cid,
+          sender_user_uuid: input.user_uuid ?? null,
+          active_user_uuid: input.user_uuid ?? null,
+          sender_participant_uuid: input.participant_uuid,
+          active_participant_uuid: input.participant_uuid,
+          sender_role: input.role,
+          active_role: input.role,
+          phase: 'typing_publish_before_subscribed',
+        })
+      }
+
       const result = await input.channel.send({
         type: 'broadcast',
         event: 'typing',
@@ -649,6 +851,8 @@ export function publish_chat_typing(input: {
           source_channel: source,
           subscribe_status: 'broadcast_ok',
           channel_name,
+          channel_topic: channel_name,
+          client_instance_id: cid,
           event_name: 'typing',
           payload_room_uuid: input.room_uuid,
           sender_user_uuid: input.user_uuid ?? null,
@@ -657,6 +861,7 @@ export function publish_chat_typing(input: {
           sender_role: input.role,
           display_name: input.display_name ?? null,
           is_typing: input.is_typing,
+          listener_registered: meta?.typing_listener_bound ?? false,
           phase: 'typing_broadcast_send',
         })
 
