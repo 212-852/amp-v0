@@ -151,6 +151,35 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const customer_identity_resolve_lifecycle = new Set([
+    'admin_chat_customer_identity_resolve_started',
+    'admin_chat_customer_identity_resolve_succeeded',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    customer_identity_resolve_lifecycle.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.admin_chat_room_list_debug_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
+  if (
+    input.category === 'admin_chat' &&
+    input.event === 'admin_chat_customer_identity_resolve_failed'
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'warn',
+      channels: ['discord'],
+    }
+  }
+
   const support_started_ok_debug = new Set([
     'support_started_action_created',
     'support_started_notify_started',

@@ -1,19 +1,14 @@
 import 'server-only'
 
-import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import { debug_control } from '@/lib/debug/control'
 import { debug_event } from '@/lib/debug/index'
 import { load_archived_messages } from '@/lib/chat/archive'
-import {
-  resolve_chat_room_list_preview_text,
-  typing_timestamp_is_fresh,
-} from '@/lib/chat/presence/rules'
+import { resolve_chat_room_list_preview_text } from '@/lib/chat/presence/rules'
 import {
   archived_messages_to_reception_timeline,
   compare_chat_room_timeline_messages,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
-import { clean_uuid } from '@/lib/db/uuid/payload'
 import { supabase } from '@/lib/db/supabase'
 
 type room_row = {
@@ -57,17 +52,18 @@ type memo_row = {
 }
 
 type participant_row = {
+  participant_uuid?: string | null
   room_uuid: string | null
   user_uuid: string | null
   visitor_uuid: string | null
   role: string | null
-  is_typing: boolean | null
-  typing_at: string | null
+  display_name?: string | null
 }
 
 type user_profile_row = {
   user_uuid: string
   display_name?: string | null
+  name?: string | null
   role?: string | null
   tier?: string | null
   image_url?: string | null
@@ -76,10 +72,26 @@ type user_profile_row = {
 
 type identity_row = {
   user_uuid: string | null
+  provider?: string | null
   provider_id: string | null
   display_name?: string | null
   provider_user_name?: string | null
 }
+
+type resolved_display_name_source =
+  | 'users.display_name'
+  | 'users.name'
+  | 'identities.display_name'
+  | 'identities.provider_user_name'
+  | 'identities.provider_id'
+  | 'participants.display_name'
+  | 'email_local_part'
+  | 'unset'
+
+type customer_identity_resolve_debug_event =
+  | 'admin_chat_customer_identity_resolve_started'
+  | 'admin_chat_customer_identity_resolve_succeeded'
+  | 'admin_chat_customer_identity_resolve_failed'
 
 type room_card_enrichment = {
   display_name: string | null
@@ -243,55 +255,196 @@ function string_value(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function resolve_display_name(input: {
-  room_uuid: string
-  user_uuid: string | null
-  users_by_uuid: Map<string, user_profile_row>
-  identities_by_user_uuid: Map<string, identity_row>
-}) {
-  const user = input.user_uuid
-    ? input.users_by_uuid.get(input.user_uuid)
-    : null
-  const identity = input.user_uuid
-    ? input.identities_by_user_uuid.get(input.user_uuid)
-    : null
+function merge_identity_rows_for_display(rows: identity_row[]): identity_row | null {
+  if (rows.length === 0) {
+    return null
+  }
 
-  return (
-    string_value(user?.display_name) ??
-    string_value(identity?.display_name) ??
-    string_value(identity?.provider_user_name) ??
-    string_value(identity?.provider_id) ??
-    unset_customer_label
-  )
+  const user_uuid =
+    string_value(rows[0]?.user_uuid) ??
+    string_value(
+      rows.map((r) => string_value(r.user_uuid)).find((u) => u !== null) ?? null,
+    )
+
+  if (!user_uuid) {
+    return null
+  }
+
+  const sorted = [...rows].sort((a, b) => {
+    const a_line = string_value(a.provider)?.toLowerCase() === 'line' ? 0 : 1
+    const b_line = string_value(b.provider)?.toLowerCase() === 'line' ? 0 : 1
+
+    return a_line - b_line
+  })
+
+  let display_name: string | null = null
+  let provider_user_name: string | null = null
+  let provider_id: string | null = null
+
+  for (const row of sorted) {
+    display_name = display_name ?? string_value(row.display_name)
+    provider_user_name =
+      provider_user_name ?? string_value(row.provider_user_name)
+    provider_id = provider_id ?? string_value(row.provider_id)
+  }
+
+  const first_provider =
+    string_value(sorted.find((r) => string_value(r.provider))?.provider ?? null)
+
+  return {
+    user_uuid,
+    provider: first_provider,
+    display_name,
+    provider_user_name,
+    provider_id,
+  }
 }
 
-function resolve_concierge_list_customer_title(input: {
+function build_merged_identities_map(rows: identity_row[]): Map<string, identity_row> {
+  const grouped = new Map<string, identity_row[]>()
+
+  for (const row of rows) {
+    const u = string_value(row.user_uuid)
+
+    if (!u) {
+      continue
+    }
+
+    const list = grouped.get(u) ?? []
+    list.push(row)
+    grouped.set(u, list)
+  }
+
+  const out = new Map<string, identity_row>()
+
+  for (const [u, list] of grouped) {
+    const merged = merge_identity_rows_for_display(list)
+
+    if (merged) {
+      out.set(u, merged)
+    }
+  }
+
+  return out
+}
+
+function resolve_customer_list_card_title(input: {
   user: user_profile_row | null | undefined
   identity: identity_row | null | undefined
   customer: participant_row | null
-}): string {
-  const from_user = string_value(input.user?.display_name)
+}): { title: string; source: resolved_display_name_source } {
+  const from_user_display = string_value(input.user?.display_name)
 
-  if (from_user) {
-    return from_user
+  if (from_user_display) {
+    return { title: from_user_display, source: 'users.display_name' }
   }
 
-  const from_identity =
-    string_value(input.identity?.display_name) ??
-    string_value(input.identity?.provider_user_name) ??
-    string_value(input.identity?.provider_id)
+  const from_user_name = string_value(input.user?.name)
 
-  if (from_identity) {
-    return from_identity
+  if (from_user_name) {
+    return { title: from_user_name, source: 'users.name' }
+  }
+
+  const from_identity_display = string_value(input.identity?.display_name)
+
+  if (from_identity_display) {
+    return { title: from_identity_display, source: 'identities.display_name' }
+  }
+
+  const from_identity_puname = string_value(input.identity?.provider_user_name)
+
+  if (from_identity_puname) {
+    return {
+      title: from_identity_puname,
+      source: 'identities.provider_user_name',
+    }
+  }
+
+  const from_identity_pid = string_value(input.identity?.provider_id)
+
+  if (from_identity_pid) {
+    return { title: from_identity_pid, source: 'identities.provider_id' }
+  }
+
+  const from_participant = string_value(input.customer?.display_name)
+
+  if (from_participant) {
+    return { title: from_participant, source: 'participants.display_name' }
   }
 
   const from_email = email_local_part(input.user?.email)
 
   if (from_email) {
-    return from_email
+    return { title: from_email, source: 'email_local_part' }
   }
 
-  return unset_customer_label
+  return { title: unset_customer_label, source: 'unset' }
+}
+
+async function emit_customer_identity_resolve(input: {
+  event: customer_identity_resolve_debug_event
+  room_uuid: string
+  customer_participant_uuid: string | null
+  customer_user_uuid: string | null
+  user_tier: string | null
+  has_user_uuid: boolean
+  has_display_name: boolean
+  has_identity: boolean
+  resolved_display_name_source: resolved_display_name_source
+  reason: string | null
+}) {
+  await debug_event({
+    category: 'admin_chat',
+    event: input.event,
+    payload: {
+      room_uuid: input.room_uuid,
+      customer_participant_uuid: input.customer_participant_uuid,
+      customer_user_uuid: input.customer_user_uuid,
+      user_tier: input.user_tier,
+      has_user_uuid: input.has_user_uuid,
+      has_display_name: input.has_display_name,
+      has_identity: input.has_identity,
+      resolved_display_name_source: input.resolved_display_name_source,
+      reason: input.reason,
+    },
+  })
+}
+
+async function fetch_user_profile_row_by_uuid(
+  user_uuid: string,
+): Promise<user_profile_row | null> {
+  try {
+    const result = await supabase
+      .from('users')
+      .select('user_uuid, display_name, name, role, tier, image_url, email')
+      .eq('user_uuid', user_uuid)
+      .maybeSingle()
+
+    if (result.error || !result.data) {
+      return null
+    }
+
+    return result.data as user_profile_row
+  } catch {
+    return null
+  }
+}
+
+async function backfill_missing_users(
+  user_uuids: string[],
+  users_by_uuid: Map<string, user_profile_row>,
+) {
+  const missing = user_uuids.filter((u) => !users_by_uuid.has(u))
+
+  await Promise.all(
+    missing.map(async (u) => {
+      const row = await fetch_user_profile_row_by_uuid(u)
+
+      if (row) {
+        users_by_uuid.set(u, row)
+      }
+    }),
+  )
 }
 
 async function emit_admin_chat_trace(input: {
@@ -384,9 +537,7 @@ async function enrich_room_cards(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select(
-        'room_uuid, user_uuid, visitor_uuid, role, is_typing, typing_at',
-      )
+      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
       .in('room_uuid', room_uuids)
 
     if (participant_result.error) {
@@ -412,7 +563,6 @@ async function enrich_room_cards(
   }
 
   const user_uuid_by_room = new Map<string, string>()
-  const participant_by_room = new Map<string, participant_row>()
 
   const participants_by_room = new Map<string, participant_row[]>()
 
@@ -431,7 +581,6 @@ async function enrich_room_cards(
     const customer = choose_customer_user_participant(room_ps)
 
     if (customer) {
-      participant_by_room.set(room_uuid, customer)
       const uid = string_value(customer.user_uuid)
 
       if (uid) {
@@ -449,7 +598,7 @@ async function enrich_room_cards(
     try {
       const user_result = await supabase
         .from('users')
-        .select('user_uuid, display_name, role, tier, image_url, email')
+        .select('user_uuid, display_name, name, role, tier, image_url, email')
         .in('user_uuid', user_uuids)
 
       if (user_result.error) {
@@ -478,7 +627,7 @@ async function enrich_room_cards(
     try {
       const identity_result = await supabase
         .from('identities')
-        .select('user_uuid, provider_id')
+        .select('user_uuid, provider, provider_id, display_name, provider_user_name')
         .in('user_uuid', user_uuids)
 
       if (identity_result.error) {
@@ -490,13 +639,12 @@ async function enrich_room_cards(
           phase: 'identities_query',
         })
       } else {
-        for (const identity of (identity_result.data ?? []) as identity_row[]) {
-          if (
-            identity.user_uuid &&
-            !identities_by_user_uuid.has(identity.user_uuid)
-          ) {
-            identities_by_user_uuid.set(identity.user_uuid, identity)
-          }
+        const merged = build_merged_identities_map(
+          (identity_result.data ?? []) as identity_row[],
+        )
+
+        for (const [user_uuid, row] of merged) {
+          identities_by_user_uuid.set(user_uuid, row)
         }
       }
     } catch (error) {
@@ -508,6 +656,8 @@ async function enrich_room_cards(
         phase: 'identities_query',
       })
     }
+
+    await backfill_missing_users(user_uuids, users_by_uuid)
   }
 
   let preview_by_room = new Map<string, string>()
@@ -524,139 +674,117 @@ async function enrich_room_cards(
     })
   }
 
-  const now = new Date()
-  const staff_user_for_labels = new Set<string>()
-
   for (const row of rows) {
     const room_ps = participants_by_room.get(row.room_uuid) ?? []
-
-    for (const p of room_ps) {
-      const role = p.role?.trim().toLowerCase() ?? ''
-
-      if (
-        (role === 'admin' || role === 'concierge') &&
-        p.user_uuid &&
-        typing_timestamp_is_fresh(p.typing_at, p.is_typing, now)
-      ) {
-        const u = clean_uuid(p.user_uuid)
-
-        if (u) {
-          staff_user_for_labels.add(u)
-        }
-      }
-    }
-  }
-
-  let staff_labels = new Map<string, string>()
-
-  try {
-    staff_labels = await batch_resolve_admin_operator_display(
-      [...staff_user_for_labels],
-      'memo_list',
-    )
-  } catch (error) {
-    await emit_admin_chat_list_debug({
-      event: 'admin_chat_list_query_failed',
-      raw_room_count: rows.length,
-      filtered_room_count: null,
-      error,
-      phase: 'admin_profiles_query',
-    })
-  }
-
-  for (const row of rows) {
-    const user_uuid = user_uuid_by_room.get(row.room_uuid) ?? null
-    const participant = participant_by_room.get(row.room_uuid) ?? null
-    const user = user_uuid ? users_by_uuid.get(user_uuid) : null
-    const room_ps = participants_by_room.get(row.room_uuid) ?? []
-    let typing_user_active = false
-    const staff_lines: string[] = []
-
-    for (const p of room_ps) {
-      const role = p.role?.trim().toLowerCase() ?? ''
-
-      if (!typing_timestamp_is_fresh(p.typing_at, p.is_typing, now)) {
-        continue
-      }
-
-      if (role === 'user') {
-        typing_user_active = true
-      }
-
-      if (role === 'admin' || role === 'concierge') {
-        const u = clean_uuid(p.user_uuid)
-        const name =
-          u && staff_labels.has(u)
-            ? (staff_labels.get(u) as string)
-            : 'Staff'
-
-        staff_lines.push(`${name} が入力中...`)
-      } else if (role === 'bot') {
-        staff_lines.push('Bot が入力中...')
-      }
-    }
+    const customer = choose_customer_user_participant(room_ps)
+    const customer_user_uuid = string_value(customer?.user_uuid ?? null)
+    const customer_user = customer_user_uuid
+      ? users_by_uuid.get(customer_user_uuid)
+      : null
+    const identity = customer_user_uuid
+      ? identities_by_user_uuid.get(customer_user_uuid) ?? null
+      : null
 
     const base_preview = preview_by_room.get(row.room_uuid) ?? null
     const preview_resolved = resolve_chat_room_list_preview_text({
       audience: 'admin_inbox',
       latest_message_text: base_preview,
-      typing_user_active,
-      typing_staff_lines: staff_lines,
+      typing_user_active: false,
+      typing_staff_lines: [],
       typing_placeholder_ja: '入力中...',
       fallback_when_empty: '対応が必要です',
     })
 
-    if (list_mode === 'concierge') {
-      const customer = choose_customer_user_participant(room_ps)
-      const customer_user_uuid = string_value(customer?.user_uuid ?? null)
-      const customer_user = customer_user_uuid
-        ? users_by_uuid.get(customer_user_uuid)
-        : null
-      const identity =
-        customer_user_uuid && identities_by_user_uuid.has(customer_user_uuid)
-          ? identities_by_user_uuid.get(customer_user_uuid) ?? null
-          : null
+    const has_user_uuid = Boolean(customer_user_uuid)
+    const has_display_name = Boolean(string_value(customer_user?.display_name))
+    const has_identity = Boolean(
+      identity &&
+        (string_value(identity.display_name) ||
+          string_value(identity.provider_user_name) ||
+          string_value(identity.provider_id)),
+    )
 
-      const resolved_title = resolve_concierge_list_customer_title({
-        user: customer_user ?? null,
-        identity: identity ?? null,
-        customer,
+    if (has_user_uuid) {
+      await emit_customer_identity_resolve({
+        event: 'admin_chat_customer_identity_resolve_started',
+        room_uuid: row.room_uuid,
+        customer_participant_uuid: string_value(
+          customer?.participant_uuid ?? null,
+        ),
+        customer_user_uuid,
+        user_tier: string_value(customer_user?.tier) ?? null,
+        has_user_uuid: true,
+        has_display_name,
+        has_identity,
+        resolved_display_name_source: 'unset',
+        reason: 'resolve_started',
       })
+    }
 
-      if (resolved_title === unset_customer_label) {
-        await emit_admin_chat_trace({
-          event: 'concierge_room_display_name_missing',
+    const resolved = resolve_customer_list_card_title({
+      user: customer_user ?? null,
+      identity: identity ?? null,
+      customer,
+    })
+
+    if (has_user_uuid) {
+      if (resolved.source === 'unset') {
+        await emit_customer_identity_resolve({
+          event: 'admin_chat_customer_identity_resolve_failed',
           room_uuid: row.room_uuid,
-          reason: 'used_unset_customer_label',
-          user_uuid: customer_user_uuid,
-          user_tier: string_value(customer_user?.tier),
-          participant_role: string_value(customer?.role),
-          room_type: row.room_type,
+          customer_participant_uuid: string_value(
+            customer?.participant_uuid ?? null,
+          ),
+          customer_user_uuid,
+          user_tier: string_value(customer_user?.tier) ?? null,
+          has_user_uuid: true,
+          has_display_name,
+          has_identity,
+          resolved_display_name_source: resolved.source,
+          reason: !customer_user
+            ? 'user_row_not_found_after_batch_and_backfill'
+            : 'no_display_source_after_resolve',
+        })
+      } else {
+        await emit_customer_identity_resolve({
+          event: 'admin_chat_customer_identity_resolve_succeeded',
+          room_uuid: row.room_uuid,
+          customer_participant_uuid: string_value(
+            customer?.participant_uuid ?? null,
+          ),
+          customer_user_uuid,
+          user_tier: string_value(customer_user?.tier) ?? null,
+          has_user_uuid: true,
+          has_display_name,
+          has_identity,
+          resolved_display_name_source: resolved.source,
+          reason: null,
         })
       }
+    }
 
-      enrichments.set(row.room_uuid, {
-        display_name: resolved_title,
-        role:
-          string_value(customer_user?.role) ??
-          string_value(customer?.role),
-        tier: string_value(customer_user?.tier),
-        avatar_url: string_value(customer_user?.image_url),
-        preview: preview_resolved,
+    if (
+      list_mode === 'concierge' &&
+      resolved.title === unset_customer_label &&
+      !has_user_uuid
+    ) {
+      await emit_admin_chat_trace({
+        event: 'concierge_room_display_name_missing',
+        room_uuid: row.room_uuid,
+        reason: 'used_unset_customer_label_guest',
+        user_uuid: null,
+        user_tier: null,
+        participant_role: string_value(customer?.role),
+        room_type: row.room_type,
       })
-      continue
     }
 
     enrichments.set(row.room_uuid, {
-      display_name: resolve_display_name({
-        room_uuid: row.room_uuid,
-        user_uuid,
-        users_by_uuid,
-        identities_by_user_uuid,
-      }),
-      role: string_value(user?.role) ?? string_value(participant?.role),
-      tier: string_value(user?.tier),
-      avatar_url: string_value(user?.image_url),
+      display_name: resolved.title,
+      role:
+        string_value(customer_user?.role) ?? string_value(customer?.role),
+      tier: string_value(customer_user?.tier),
+      avatar_url: string_value(customer_user?.image_url),
       preview: preview_resolved,
     })
   }
@@ -688,7 +816,7 @@ export async function resolve_room_subject(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select('room_uuid, user_uuid, visitor_uuid, role')
+      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
       .eq('room_uuid', room_uuid)
 
     if (participant_result.error) {
@@ -725,7 +853,7 @@ export async function resolve_room_subject(
   try {
     const user_result = await supabase
       .from('users')
-      .select('user_uuid, display_name, role, tier')
+      .select('user_uuid, display_name, name, role, tier, email')
       .eq('user_uuid', user_uuid)
       .maybeSingle()
 
@@ -736,25 +864,40 @@ export async function resolve_room_subject(
     user = null
   }
 
+  if (!user) {
+    user = await fetch_user_profile_row_by_uuid(user_uuid)
+  }
+
+  let identity_rows: identity_row[] = []
+
   try {
     const identity_result = await supabase
       .from('identities')
-      .select('user_uuid, provider_id')
+      .select(
+        'user_uuid, provider, provider_id, display_name, provider_user_name',
+      )
       .eq('user_uuid', user_uuid)
-      .limit(1)
 
     if (!identity_result.error) {
-      identity = ((identity_result.data ?? []) as identity_row[])[0] ?? null
+      identity_rows = (identity_result.data ?? []) as identity_row[]
     }
   } catch {
-    identity = null
+    identity_rows = []
   }
 
+  identity = merge_identity_rows_for_display(identity_rows)
+
+  const resolved = resolve_customer_list_card_title({
+    user,
+    identity,
+    customer: subject_participant,
+  })
+
+  const display_name =
+    resolved.source === 'unset' ? 'ゲスト' : resolved.title
+
   return {
-    display_name:
-      string_value(user?.display_name) ??
-      string_value(identity?.provider_id) ??
-      'ゲスト',
+    display_name,
     role:
       string_value(user?.role) ??
       string_value(subject_participant.role) ??
