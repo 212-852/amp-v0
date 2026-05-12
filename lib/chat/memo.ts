@@ -223,8 +223,14 @@ export async function list_handoff_memos(input: {
 
     return rows.map((row) => {
       const uuid = clean_uuid(row.saved_by_user_uuid)
+      const stored = row.saved_by_name?.trim() ?? ''
+      const stored_is_placeholder =
+        stored.length === 0 || stored.toLowerCase() === 'admin'
+
       const display_saved_by =
-        uuid !== null && label_map.has(uuid)
+        uuid !== null &&
+        stored_is_placeholder &&
+        label_map.has(uuid)
           ? (label_map.get(uuid) as string)
           : row.saved_by_name
 
