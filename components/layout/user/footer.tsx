@@ -237,13 +237,13 @@ export default function UserFooter() {
         return
       }
 
-      typing_active_ref.current = action === 'typing_start'
-
       const channel = chat.room_realtime_channel_ref.current
 
       if (!channel) {
         return
       }
+
+      typing_active_ref.current = action === 'typing_start'
 
       publish_chat_typing({
         channel,

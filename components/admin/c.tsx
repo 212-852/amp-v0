@@ -51,12 +51,19 @@ function compare_timeline_asc(
 function merge_timeline_rows(
   previous: reception_room_message[],
   addition: reception_room_message[],
-): reception_room_message[] {
+): {
+  rows: reception_room_message[]
+  prev_message_count: number
+  next_message_count: number
+  dedupe_hit: boolean
+} {
   const seen = new Set(previous.map((row) => row.message_uuid))
   const merged = [...previous]
+  let dedupe_hit = false
 
   for (const row of addition) {
     if (seen.has(row.message_uuid)) {
+      dedupe_hit = true
       continue
     }
 
@@ -64,7 +71,14 @@ function merge_timeline_rows(
     merged.push(row)
   }
 
-  return merged.sort(compare_timeline_asc)
+  const rows = merged.sort(compare_timeline_asc)
+
+  return {
+    rows,
+    prev_message_count: previous.length,
+    next_message_count: rows.length,
+    dedupe_hit,
+  }
 }
 
 function is_outgoing_message(message: reception_room_message): boolean {
@@ -192,28 +206,6 @@ export default function AdminChatTimeline({
   const publish_typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
 
-  const staff_participant_uuid_ref = useRef(staff_participant_uuid)
-  staff_participant_uuid_ref.current = staff_participant_uuid
-
-  const latest_room_uuid_ref = useRef(room_uuid)
-  latest_room_uuid_ref.current = room_uuid
-
-  const admin_rt_ctx_ref = useRef({
-    staff_participant_uuid,
-    staff_user_uuid,
-    staff_tier,
-  })
-  admin_rt_ctx_ref.current = {
-    staff_participant_uuid,
-    staff_user_uuid,
-    staff_tier,
-  }
-
-  const set_rows_ref = useRef(set_rows)
-  set_rows_ref.current = set_rows
-
-  const subscribed_room_uuid_ref = useRef<string | null>(null)
-
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       bottom_ref.current?.scrollIntoView({ block: 'end' })
@@ -240,17 +232,16 @@ export default function AdminChatTimeline({
   const refresh_typing_lines = useCallback(() => {
     const now = new Date()
     const lines: string[] = []
-    const staff = staff_participant_uuid_ref.current
 
     for (const typing of typing_rows_ref.current.values()) {
-      if (typing.participant_uuid === staff) {
+      if (typing.participant_uuid === staff_participant_uuid) {
         continue
       }
 
       if (
         !chat_typing_is_fresh({
           is_typing: typing.is_typing,
-          typed_at: typing.typed_at,
+          sent_at: typing.sent_at,
           now,
         })
       ) {
@@ -258,7 +249,7 @@ export default function AdminChatTimeline({
       }
 
       if (typing.role === 'user') {
-        lines.push('user が入力中...')
+        lines.push('ユーザーが入力中...')
       } else if (typing.role === 'admin' || typing.role === 'concierge') {
         const name = typing.display_name?.trim() || 'Admin'
         lines.push(`${name} が入力中...`)
@@ -266,7 +257,7 @@ export default function AdminChatTimeline({
     }
 
     set_typing_lines(Array.from(new Set(lines)))
-  }, [])
+  }, [staff_participant_uuid])
 
   const schedule_typing_refresh = useCallback(() => {
     if (typing_timer_ref.current !== null) {
@@ -290,40 +281,16 @@ export default function AdminChatTimeline({
       return
     }
 
-    if (
-      subscribed_room_uuid_ref.current === room_uuid &&
-      realtime_channel_ref.current
-    ) {
-      const ctx = admin_rt_ctx_ref.current
-
-      send_chat_realtime_debug({
-        event: 'chat_realtime_subscribe_skipped',
-        room_uuid,
-        active_room_uuid: room_uuid,
-        participant_uuid: ctx.staff_participant_uuid,
-        user_uuid: ctx.staff_user_uuid,
-        role: 'admin',
-        tier: ctx.staff_tier,
-        source_channel: 'admin',
-        channel_name: chat_room_realtime_channel_name(room_uuid),
-        cleanup_reason: 'duplicate_subscribe',
-        phase: 'admin_chat_realtime_guard',
-      })
-
-      return
-    }
-
-    const ctx = admin_rt_ctx_ref.current
     const locked_room = room_uuid
 
     send_chat_realtime_debug({
       event: 'chat_realtime_client_created',
       room_uuid: locked_room,
       active_room_uuid: locked_room,
-      participant_uuid: ctx.staff_participant_uuid,
-      user_uuid: ctx.staff_user_uuid,
+      participant_uuid: staff_participant_uuid,
+      user_uuid: staff_user_uuid,
       role: 'admin',
-      tier: ctx.staff_tier,
+      tier: staff_tier,
       source_channel: 'admin',
       channel_name: chat_room_realtime_channel_name(locked_room),
       phase: 'admin_chat_create_browser_supabase',
@@ -333,10 +300,10 @@ export default function AdminChatTimeline({
       supabase,
       room_uuid: locked_room,
       active_room_uuid: locked_room,
-      participant_uuid: ctx.staff_participant_uuid,
-      user_uuid: ctx.staff_user_uuid,
+      participant_uuid: staff_participant_uuid,
+      user_uuid: staff_user_uuid,
       role: 'admin',
-      tier: ctx.staff_tier,
+      tier: staff_tier,
       source_channel: 'admin',
       on_message: (archived) => {
         if (!archived) {
@@ -351,47 +318,104 @@ export default function AdminChatTimeline({
           bundle: archived.bundle as message_bundle_payload,
         })
 
-        set_rows_ref.current((previous) => merge_timeline_rows(previous, [mapped]))
+        let update_result = {
+          prev_message_count: 0,
+          next_message_count: 0,
+          dedupe_hit: false,
+        }
+
+        set_rows((previous) => {
+          const result = merge_timeline_rows(previous, [mapped])
+          update_result = {
+            prev_message_count: result.prev_message_count,
+            next_message_count: result.next_message_count,
+            dedupe_hit: result.dedupe_hit,
+          }
+
+          return result.rows
+        })
+
+        send_chat_realtime_debug({
+          event: 'chat_realtime_message_state_updated',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: staff_participant_uuid,
+          user_uuid: staff_user_uuid,
+          role: 'admin',
+          tier: staff_tier,
+          source_channel: 'admin',
+          channel_name: chat_room_realtime_channel_name(locked_room),
+          event_name: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `room_uuid=eq.${locked_room}`,
+          payload_room_uuid: archived.room_uuid,
+          payload_message_uuid: archived.archive_uuid,
+          prev_message_count: update_result.prev_message_count,
+          next_message_count: update_result.next_message_count,
+          dedupe_hit: update_result.dedupe_hit,
+          ignored_reason: update_result.dedupe_hit
+            ? 'message_uuid_dedupe'
+            : null,
+          phase: 'admin_chat_realtime_state_update',
+        })
       },
       on_typing: (typing) => {
         typing_rows_ref.current.set(typing.participant_uuid, typing)
         refresh_typing_lines()
         schedule_typing_refresh()
+
+        send_chat_realtime_debug({
+          event: 'chat_typing_state_updated',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: staff_participant_uuid,
+          user_uuid: staff_user_uuid,
+          role: 'admin',
+          tier: staff_tier,
+          source_channel: 'admin',
+          channel_name: chat_room_realtime_channel_name(locked_room),
+          event_name: 'typing',
+          payload_room_uuid: typing.room_uuid,
+          sender_user_uuid: typing.user_uuid ?? null,
+          sender_participant_uuid: typing.participant_uuid,
+          active_participant_uuid: staff_participant_uuid,
+          sender_role: typing.role,
+          display_name: typing.display_name ?? null,
+          is_typing: typing.is_typing,
+          phase: 'admin_chat_typing_state_update',
+        })
       },
     })
 
-    subscribed_room_uuid_ref.current = locked_room
     realtime_channel_ref.current = channel
 
     return () => {
-      const cleanup_reason =
-        latest_room_uuid_ref.current !== locked_room
-          ? 'room_uuid_changed'
-          : 'unmount'
-      const cleanup_ctx = admin_rt_ctx_ref.current
-
       cleanup_chat_room_realtime({
         supabase,
         channel,
         room_uuid: locked_room,
         active_room_uuid: locked_room,
-        participant_uuid: cleanup_ctx.staff_participant_uuid,
-        user_uuid: cleanup_ctx.staff_user_uuid,
+        participant_uuid: staff_participant_uuid,
+        user_uuid: staff_user_uuid,
         role: 'admin',
-        tier: cleanup_ctx.staff_tier,
+        tier: staff_tier,
         source_channel: 'admin',
-        cleanup_reason,
+        cleanup_reason: 'effect_cleanup',
       })
-
-      if (subscribed_room_uuid_ref.current === locked_room) {
-        subscribed_room_uuid_ref.current = null
-      }
 
       if (realtime_channel_ref.current === channel) {
         realtime_channel_ref.current = null
       }
     }
-  }, [room_uuid])
+  }, [
+    refresh_typing_lines,
+    room_uuid,
+    schedule_typing_refresh,
+    staff_participant_uuid,
+    staff_tier,
+    staff_user_uuid,
+  ])
 
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {
@@ -403,13 +427,13 @@ export default function AdminChatTimeline({
         return
       }
 
-      typing_active_ref.current = action === 'typing_start'
-
       const channel = realtime_channel_ref.current
 
       if (!channel) {
         return
       }
+
+      typing_active_ref.current = action === 'typing_start'
 
       publish_chat_typing({
         channel,
@@ -504,7 +528,7 @@ export default function AdminChatTimeline({
 
       const mapped = returned.map(archived_payload_to_reception_message)
 
-      set_rows((previous) => merge_timeline_rows(previous, mapped))
+      set_rows((previous) => merge_timeline_rows(previous, mapped).rows)
       set_reply_text('')
     } catch (error) {
       console.error('[admin_reception] submit_reply_failed', error)

@@ -117,6 +117,7 @@ export function resolve_debug_rule(input: {
     'chat_realtime_action_callback_ignored',
     'chat_realtime_cleanup_started',
     'chat_realtime_cleanup_completed',
+    'chat_typing_broadcast_ignored',
     'chat_typing_broadcast_failed',
     'chat_realtime_postgres_changes_callback_fired',
   ])
@@ -128,9 +129,12 @@ export function resolve_debug_rule(input: {
     'chat_realtime_subscribe_skipped',
     'chat_realtime_channel_subscribe_status',
     'chat_realtime_message_callback_received',
+    'chat_realtime_message_state_updated',
     'chat_realtime_typing_callback_received',
     'chat_realtime_action_callback_received',
     'chat_typing_broadcast_sent',
+    'chat_typing_broadcast_received',
+    'chat_typing_state_updated',
     'chat_support_started_insert_started',
     'chat_support_started_insert_succeeded',
   ])

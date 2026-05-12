@@ -47,6 +47,11 @@ type chat_context_value = chat_room_client_state & {
   close_chat: () => void
   set_scroll_container: (node: HTMLDivElement | null) => void
   scroll_to_bottom: (behavior?: ScrollBehavior) => void
+  append_realtime_message: (message: archived_message) => {
+    prev_message_count: number
+    next_message_count: number
+    dedupe_hit: boolean
+  }
   /** Same channel as `WebChat` postgres_changes + typing broadcast (do not subscribe again). */
   room_realtime_channel_ref: React.MutableRefObject<RealtimeChannel | null>
 }
@@ -168,6 +173,38 @@ export function UserChatProvider({
     window.setTimeout(() => scroll_to_bottom('smooth'), 0)
   }, [scroll_to_bottom])
 
+  const append_realtime_message = useCallback(
+    (message: archived_message) => {
+      let result = {
+        prev_message_count: 0,
+        next_message_count: 0,
+        dedupe_hit: false,
+      }
+
+      set_messages((current) => {
+        const dedupe_hit = current.some(
+          (item) => item.archive_uuid === message.archive_uuid,
+        )
+        const next = dedupe_hit
+          ? current
+          : [...current, message].sort((a, b) => a.sequence - b.sequence)
+
+        result = {
+          prev_message_count: current.length,
+          next_message_count: next.length,
+          dedupe_hit,
+        }
+
+        return next
+      })
+
+      window.setTimeout(() => scroll_to_bottom('smooth'), 0)
+
+      return result
+    },
+    [scroll_to_bottom],
+  )
+
   const append_messages = useCallback(
     (next_messages: archived_message[]) => {
       set_messages((current) => append_unique(current, next_messages))
@@ -227,15 +264,21 @@ export function UserChatProvider({
       return
     }
 
-    set_is_chat_open(true)
-
     if (typeof window === 'undefined') {
       return
     }
 
+    const open_timer = window.setTimeout(() => {
+      set_is_chat_open(true)
+    }, 0)
+
     window.requestAnimationFrame(() => {
       scroll_to_bottom('smooth')
     })
+
+    return () => {
+      window.clearTimeout(open_timer)
+    }
   }, [room_state.mode, scroll_to_bottom])
 
   const value = useMemo(
@@ -246,6 +289,7 @@ export function UserChatProvider({
       hydrate_chat,
       append_message,
       append_messages,
+      append_realtime_message,
       replace_message,
       remove_message,
       set_mode,
@@ -263,6 +307,7 @@ export function UserChatProvider({
       hydrate_chat,
       append_message,
       append_messages,
+      append_realtime_message,
       replace_message,
       remove_message,
       set_mode,

@@ -23,7 +23,10 @@ type chat_debug_body = {
   payload_action_uuid?: unknown
   payload_room_uuid?: unknown
   sender_user_uuid?: unknown
+  sender_participant_uuid?: unknown
+  active_participant_uuid?: unknown
   sender_role?: unknown
+  display_name?: unknown
   is_typing?: unknown
   ignored_reason?: unknown
   phase?: unknown
@@ -31,11 +34,18 @@ type chat_debug_body = {
   error_message?: unknown
   error_details?: unknown
   error_hint?: unknown
+  prev_message_count?: unknown
+  next_message_count?: unknown
+  dedupe_hit?: unknown
   cleanup_reason?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function number_or_null(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 export async function POST(request: Request) {
@@ -72,7 +82,10 @@ export async function POST(request: Request) {
       payload_action_uuid: string_or_null(body?.payload_action_uuid),
       payload_room_uuid: string_or_null(body?.payload_room_uuid),
       sender_user_uuid: string_or_null(body?.sender_user_uuid),
+      sender_participant_uuid: string_or_null(body?.sender_participant_uuid),
+      active_participant_uuid: string_or_null(body?.active_participant_uuid),
       sender_role: string_or_null(body?.sender_role),
+      display_name: string_or_null(body?.display_name),
       is_typing:
         typeof body?.is_typing === 'boolean' ? body.is_typing : null,
       ignored_reason: string_or_null(body?.ignored_reason),
@@ -81,6 +94,10 @@ export async function POST(request: Request) {
       error_message: string_or_null(body?.error_message),
       error_details: string_or_null(body?.error_details),
       error_hint: string_or_null(body?.error_hint),
+      prev_message_count: number_or_null(body?.prev_message_count),
+      next_message_count: number_or_null(body?.next_message_count),
+      dedupe_hit:
+        typeof body?.dedupe_hit === 'boolean' ? body.dedupe_hit : null,
       cleanup_reason: string_or_null(body?.cleanup_reason),
     },
   })

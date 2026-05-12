@@ -16,7 +16,8 @@ export type chat_typing_payload = {
   role: chat_realtime_role
   display_name?: string | null
   is_typing: boolean
-  typed_at: string
+  sent_at: string
+  typed_at?: string
 }
 
 /** User and admin must use the same topic string for broadcast + postgres_changes. */
@@ -28,20 +29,20 @@ export const chat_typing_expire_ms = 3_000
 
 export function chat_typing_is_fresh(input: {
   is_typing: boolean
-  typed_at: string
+  sent_at: string
   now?: Date
 }) {
   if (!input.is_typing) {
     return false
   }
 
-  const typed_at = new Date(input.typed_at).getTime()
+  const sent_at = new Date(input.sent_at).getTime()
 
-  if (Number.isNaN(typed_at)) {
+  if (Number.isNaN(sent_at)) {
     return false
   }
 
-  return (input.now ?? new Date()).getTime() - typed_at <= chat_typing_expire_ms
+  return (input.now ?? new Date()).getTime() - sent_at <= chat_typing_expire_ms
 }
 
 type chat_realtime_debug_payload = {
@@ -65,13 +66,19 @@ type chat_realtime_debug_payload = {
   payload_action_uuid?: string | null
   payload_room_uuid?: string | null
   sender_user_uuid?: string | null
+  sender_participant_uuid?: string | null
+  active_participant_uuid?: string | null
   sender_role?: string | null
+  display_name?: string | null
   is_typing?: boolean | null
   ignored_reason?: string | null
   error_code?: string | null
   error_message?: string | null
   error_details?: string | null
   error_hint?: string | null
+  prev_message_count?: number | null
+  next_message_count?: number | null
+  dedupe_hit?: boolean | null
   phase: string
   cleanup_reason?: string | null
 }
@@ -105,8 +112,17 @@ function is_chat_typing_payload(value: unknown): value is chat_typing_payload {
     typeof row.participant_uuid === 'string' &&
     typeof row.role === 'string' &&
     typeof row.is_typing === 'boolean' &&
-    typeof row.typed_at === 'string'
+    (typeof row.sent_at === 'string' || typeof row.typed_at === 'string')
   )
+}
+
+function normalize_chat_typing_payload(
+  value: chat_typing_payload,
+): chat_typing_payload {
+  return {
+    ...value,
+    sent_at: value.sent_at ?? value.typed_at ?? new Date().toISOString(),
+  }
 }
 
 export function subscribe_chat_room_realtime(input: {
@@ -327,11 +343,12 @@ export function subscribe_chat_room_realtime(input: {
 
       if (!is_chat_typing_payload(raw)) {
         send_chat_realtime_debug({
-          event: 'chat_realtime_typing_callback_ignored',
+          event: 'chat_typing_broadcast_ignored',
           ...base_debug,
           event_name: 'typing',
           table: null,
           filter: null,
+          active_participant_uuid: input.participant_uuid,
           ignored_reason: 'invalid_typing_payload_shape',
           phase: 'broadcast_typing',
         })
@@ -341,49 +358,84 @@ export function subscribe_chat_room_realtime(input: {
         return
       }
 
-      if (raw.room_uuid !== input.room_uuid) {
+      const typing = normalize_chat_typing_payload(raw)
+
+      if (typing.room_uuid !== input.room_uuid) {
         send_chat_realtime_debug({
-          event: 'chat_realtime_typing_callback_ignored',
+          event: 'chat_typing_broadcast_ignored',
           ...base_debug,
           event_name: 'typing',
           table: null,
           filter: null,
-          payload_room_uuid: raw.room_uuid,
-          sender_user_uuid: raw.user_uuid ?? null,
-          sender_role: raw.role,
-          is_typing: raw.is_typing,
+          payload_room_uuid: typing.room_uuid,
+          sender_user_uuid: typing.user_uuid ?? null,
+          sender_participant_uuid: typing.participant_uuid,
+          active_participant_uuid: input.participant_uuid,
+          sender_role: typing.role,
+          display_name: typing.display_name ?? null,
+          is_typing: typing.is_typing,
           ignored_reason: 'typing_room_uuid_mismatch',
           phase: 'broadcast_typing',
         })
 
         console_chat_realtime('typing_ignored_room_mismatch', {
           expected: input.room_uuid,
-          payload_room_uuid: raw.room_uuid,
+          payload_room_uuid: typing.room_uuid,
+        })
+
+        return
+      }
+
+      if (typing.participant_uuid === input.participant_uuid) {
+        send_chat_realtime_debug({
+          event: 'chat_typing_broadcast_ignored',
+          ...base_debug,
+          event_name: 'typing',
+          table: null,
+          filter: null,
+          payload_room_uuid: typing.room_uuid,
+          sender_user_uuid: typing.user_uuid ?? null,
+          sender_participant_uuid: typing.participant_uuid,
+          active_participant_uuid: input.participant_uuid,
+          sender_role: typing.role,
+          display_name: typing.display_name ?? null,
+          is_typing: typing.is_typing,
+          ignored_reason: 'self_typing',
+          phase: 'broadcast_typing',
+        })
+
+        console_chat_realtime('typing_ignored_self', {
+          participant_uuid: typing.participant_uuid,
+          role: typing.role,
+          is_typing: typing.is_typing,
         })
 
         return
       }
 
       send_chat_realtime_debug({
-        event: 'chat_realtime_typing_callback_received',
+        event: 'chat_typing_broadcast_received',
         ...base_debug,
         event_name: 'typing',
         table: null,
         filter: null,
-        payload_room_uuid: raw.room_uuid,
-        sender_user_uuid: raw.user_uuid ?? null,
-        sender_role: raw.role,
-        is_typing: raw.is_typing,
+        payload_room_uuid: typing.room_uuid,
+        sender_user_uuid: typing.user_uuid ?? null,
+        sender_participant_uuid: typing.participant_uuid,
+        active_participant_uuid: input.participant_uuid,
+        sender_role: typing.role,
+        display_name: typing.display_name ?? null,
+        is_typing: typing.is_typing,
         phase: 'broadcast_typing',
       })
 
       console_chat_realtime('typing_callback_received', {
-        from_participant_uuid: raw.participant_uuid,
-        role: raw.role,
-        is_typing: raw.is_typing,
+        from_participant_uuid: typing.participant_uuid,
+        role: typing.role,
+        is_typing: typing.is_typing,
       })
 
-      input.on_typing(raw)
+      input.on_typing(typing)
     })
     .subscribe((status, err) => {
       console_chat_realtime('subscribe_status', {
@@ -496,7 +548,7 @@ export function publish_chat_typing(input: {
     role: input.role,
     display_name: input.display_name ?? null,
     is_typing: input.is_typing,
-    typed_at: new Date().toISOString(),
+    sent_at: new Date().toISOString(),
   }
 
   console_chat_realtime('typing_publish_requested', {
@@ -532,7 +584,10 @@ export function publish_chat_typing(input: {
           event_name: 'typing',
           payload_room_uuid: input.room_uuid,
           sender_user_uuid: input.user_uuid ?? null,
+          sender_participant_uuid: input.participant_uuid,
+          active_participant_uuid: input.participant_uuid,
           sender_role: input.role,
+          display_name: input.display_name ?? null,
           is_typing: input.is_typing,
           phase: 'typing_broadcast_send',
         })
@@ -563,7 +618,10 @@ export function publish_chat_typing(input: {
       event_name: 'typing',
       payload_room_uuid: input.room_uuid,
       sender_user_uuid: input.user_uuid ?? null,
+      sender_participant_uuid: input.participant_uuid,
+      active_participant_uuid: input.participant_uuid,
       sender_role: input.role,
+      display_name: input.display_name ?? null,
       is_typing: input.is_typing,
       ignored_reason: 'typing_broadcast_send_exhausted_retries',
       error_code: last_result,
@@ -589,7 +647,10 @@ export function publish_chat_typing(input: {
       event_name: 'typing',
       payload_room_uuid: input.room_uuid,
       sender_user_uuid: input.user_uuid ?? null,
+      sender_participant_uuid: input.participant_uuid,
+      active_participant_uuid: input.participant_uuid,
       sender_role: input.role,
+      display_name: input.display_name ?? null,
       is_typing: input.is_typing,
       ignored_reason: 'typing_broadcast_send_exception',
       error_message: error instanceof Error ? error.message : String(error),
