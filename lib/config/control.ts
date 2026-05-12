@@ -40,5 +40,6 @@ export const control = {
     concierge_room_request: true,
     /** Required for `debug_event` -> notify path. */
     debug_trace: true,
+    support_started: true,
   },
 } as const

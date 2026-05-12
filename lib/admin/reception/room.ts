@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
+import { debug_control } from '@/lib/debug/control'
 import { debug_event } from '@/lib/debug/index'
 import { load_archived_messages } from '@/lib/chat/archive'
 import {
@@ -23,6 +24,7 @@ type room_row = {
   action_id: string | null
   created_at: string | null
   updated_at: string | null
+  concierge_enabled: boolean | null
 }
 
 export type reception_room = {
@@ -70,6 +72,7 @@ type user_profile_row = {
   role?: string | null
   tier?: string | null
   image_url?: string | null
+  email?: string | null
 }
 
 type identity_row = {
@@ -103,9 +106,25 @@ export type reception_room_memo = {
 }
 
 const room_select =
-  'room_uuid, room_type, status, mode, action_id, created_at, updated_at'
+  'room_uuid, room_type, status, mode, action_id, created_at, updated_at, concierge_enabled'
 
-const concierge_inbox_customer_tiers = new Set(['member', 'vip'])
+const unset_customer_label = 'Unset user'
+
+function email_local_part(email: string | null | undefined): string | null {
+  if (!email || typeof email !== 'string') {
+    return null
+  }
+
+  const trimmed = email.trim()
+
+  if (!trimmed) {
+    return null
+  }
+
+  const at = trimmed.indexOf('@')
+
+  return at > 0 ? trimmed.slice(0, at) : null
+}
 
 function short_room_label(room_uuid: string): string {
   return room_uuid.trim().length > 0
@@ -183,26 +202,41 @@ function resolve_display_name(input: {
     string_value(identity?.display_name) ??
     string_value(identity?.provider_user_name) ??
     string_value(identity?.provider_id) ??
-    short_room_label(input.room_uuid) ??
-    'Guest'
+    unset_customer_label
   )
 }
 
-function resolve_customer_list_display_name(input: {
+function resolve_concierge_list_customer_title(input: {
   user: user_profile_row | null | undefined
   identity: identity_row | null | undefined
-}): string | null {
-  return (
-    string_value(input.user?.display_name) ??
+  customer: participant_row | null
+}): string {
+  const from_user = string_value(input.user?.display_name)
+
+  if (from_user) {
+    return from_user
+  }
+
+  const from_identity =
     string_value(input.identity?.display_name) ??
     string_value(input.identity?.provider_user_name) ??
-    string_value(input.identity?.provider_id) ??
-    null
-  )
+    string_value(input.identity?.provider_id)
+
+  if (from_identity) {
+    return from_identity
+  }
+
+  const from_email = email_local_part(input.user?.email)
+
+  if (from_email) {
+    return from_email
+  }
+
+  return unset_customer_label
 }
 
-async function emit_admin_chat_room_list_trace(input: {
-  event: 'admin_chat_room_profile_missing' | 'admin_chat_room_filtered_out'
+async function emit_admin_chat_trace(input: {
+  event: 'concierge_room_filtered' | 'concierge_room_display_name_missing'
   room_uuid: string
   reason: string
   user_uuid: string | null
@@ -211,19 +245,21 @@ async function emit_admin_chat_room_list_trace(input: {
   room_type: string | null
   concierge_enabled: boolean | null
 }) {
-  await debug_event({
-    category: 'admin_chat',
-    event: input.event,
-    payload: {
-      room_uuid: input.room_uuid,
-      reason: input.reason,
-      user_uuid: input.user_uuid,
-      user_tier: input.user_tier,
-      participant_role: input.participant_role,
-      room_type: input.room_type,
-      concierge_enabled: input.concierge_enabled,
-    },
-  })
+  if (debug_control.admin_chat_room_list_debug_enabled) {
+    await debug_event({
+      category: 'admin_chat',
+      event: input.event,
+      payload: {
+        room_uuid: input.room_uuid,
+        reason: input.reason,
+        user_uuid: input.user_uuid,
+        user_tier: input.user_tier,
+        participant_role: input.participant_role,
+        room_type: input.room_type,
+        concierge_enabled: input.concierge_enabled,
+      },
+    })
+  }
 }
 
 function message_text(body: Record<string, unknown> | null): string {
@@ -341,7 +377,7 @@ async function enrich_room_cards(
     try {
       const user_result = await supabase
         .from('users')
-        .select('user_uuid, display_name, role, tier, image_url')
+        .select('user_uuid, display_name, role, tier, image_url, email')
         .in('user_uuid', user_uuids)
 
       if (!user_result.error) {
@@ -447,90 +483,83 @@ async function enrich_room_cards(
     })
 
     if (list_mode === 'concierge') {
+      const status_raw = string_value(row.status)?.toLowerCase() ?? ''
+
+      if (status_raw === 'inactive') {
+        await emit_admin_chat_trace({
+          event: 'concierge_room_filtered',
+          room_uuid: row.room_uuid,
+          reason: 'room_status_inactive',
+          user_uuid: null,
+          user_tier: null,
+          participant_role: null,
+          room_type: row.room_type,
+          concierge_enabled: row.concierge_enabled,
+        })
+        continue
+      }
+
+      if (row.concierge_enabled === false) {
+        await emit_admin_chat_trace({
+          event: 'concierge_room_filtered',
+          room_uuid: row.room_uuid,
+          reason: 'concierge_disabled',
+          user_uuid: null,
+          user_tier: null,
+          participant_role: null,
+          room_type: row.room_type,
+          concierge_enabled: row.concierge_enabled,
+        })
+        continue
+      }
+
       const room_type_raw = string_value(row.room_type)
 
       if (room_type_raw && room_type_raw !== 'direct') {
-        await emit_admin_chat_room_list_trace({
-          event: 'admin_chat_room_filtered_out',
+        await emit_admin_chat_trace({
+          event: 'concierge_room_filtered',
           room_uuid: row.room_uuid,
           reason: 'room_type_not_direct',
           user_uuid: null,
           user_tier: null,
           participant_role: null,
           room_type: row.room_type,
-          concierge_enabled: null,
+          concierge_enabled: row.concierge_enabled,
         })
         continue
       }
 
       const customer = choose_customer_user_participant(room_ps)
       const customer_user_uuid = string_value(customer?.user_uuid ?? null)
-
-      if (!customer || !customer_user_uuid) {
-        await emit_admin_chat_room_list_trace({
-          event: 'admin_chat_room_filtered_out',
-          room_uuid: row.room_uuid,
-          reason: 'no_user_participant_or_user_uuid_null',
-          user_uuid: customer_user_uuid,
-          user_tier: null,
-          participant_role: string_value(customer?.role),
-          room_type: row.room_type,
-          concierge_enabled: null,
-        })
-        continue
-      }
-
-      const customer_user = users_by_uuid.get(customer_user_uuid)
-      const tier_raw =
-        string_value(customer_user?.tier)?.trim().toLowerCase() ?? null
-
-      if (!tier_raw || !concierge_inbox_customer_tiers.has(tier_raw)) {
-        await emit_admin_chat_room_list_trace({
-          event: 'admin_chat_room_filtered_out',
-          room_uuid: row.room_uuid,
-          reason: 'tier_not_member_or_vip',
-          user_uuid: customer_user_uuid,
-          user_tier: tier_raw,
-          participant_role: string_value(customer?.role),
-          room_type: row.room_type,
-          concierge_enabled: null,
-        })
-        continue
-      }
-
+      const customer_user = customer_user_uuid
+        ? users_by_uuid.get(customer_user_uuid)
+        : null
       const identity =
-        identities_by_user_uuid.get(customer_user_uuid) ?? null
-      const resolved_display = resolve_customer_list_display_name({
-        user: customer_user,
-        identity,
+        customer_user_uuid && identities_by_user_uuid.has(customer_user_uuid)
+          ? identities_by_user_uuid.get(customer_user_uuid) ?? null
+          : null
+
+      const resolved_title = resolve_concierge_list_customer_title({
+        user: customer_user ?? null,
+        identity: identity ?? null,
+        customer,
       })
 
-      if (!resolved_display) {
-        await emit_admin_chat_room_list_trace({
-          event: 'admin_chat_room_profile_missing',
+      if (resolved_title === unset_customer_label) {
+        await emit_admin_chat_trace({
+          event: 'concierge_room_display_name_missing',
           room_uuid: row.room_uuid,
-          reason: 'unresolved_customer_display_name',
+          reason: 'used_unset_customer_label',
           user_uuid: customer_user_uuid,
-          user_tier: tier_raw,
+          user_tier: string_value(customer_user?.tier),
           participant_role: string_value(customer?.role),
           room_type: row.room_type,
-          concierge_enabled: null,
+          concierge_enabled: row.concierge_enabled,
         })
-        await emit_admin_chat_room_list_trace({
-          event: 'admin_chat_room_filtered_out',
-          room_uuid: row.room_uuid,
-          reason: 'customer_profile_unresolved',
-          user_uuid: customer_user_uuid,
-          user_tier: tier_raw,
-          participant_role: string_value(customer?.role),
-          room_type: row.room_type,
-          concierge_enabled: null,
-        })
-        continue
       }
 
       enrichments.set(row.room_uuid, {
-        display_name: resolved_display,
+        display_name: resolved_title,
         role:
           string_value(customer_user?.role) ??
           string_value(customer?.role),
@@ -684,7 +713,10 @@ export async function list_reception_rooms({
     .limit(fetch_limit)
 
   if (mode === 'concierge') {
-    query = query.or('room_type.eq.direct,room_type.is.null')
+    query = query
+      .or('room_type.eq.direct,room_type.is.null')
+      .or('concierge_enabled.is.null,concierge_enabled.eq.true')
+      .or('status.is.null,status.neq.inactive')
   }
 
   const result = await query

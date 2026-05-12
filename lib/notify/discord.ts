@@ -1,6 +1,9 @@
 import 'server-only'
 
-import type { notify_event } from './rules'
+import {
+  format_support_started_notify_content,
+  type notify_event,
+} from './rules'
 
 const discord_api_base = 'https://discord.com/api/v10'
 
@@ -454,6 +457,10 @@ function build_discord_content(event: notify_event) {
       `updated_at: ${event.updated_at}`,
       `source_channel: ${event.source_channel}`,
     ].join('\n')
+  }
+
+  if (event.event === 'support_started') {
+    return format_support_started_notify_content(event)
   }
 
   return null

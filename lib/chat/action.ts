@@ -59,6 +59,7 @@ import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 import { get_session_user } from '@/lib/auth/route'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
+import { resolve_room_subject } from '@/lib/admin/reception/room'
 import {
   create_handoff_memo as create_handoff_memo_core,
   type handoff_memo_debug_context,
@@ -1972,6 +1973,108 @@ export async function handle_admin_reception_room_opened(
     payload_action_uuid: bundle.bundle_uuid,
     phase: 'archive_support_started_action',
   })
+
+  const room_pick = await supabase
+    .from('rooms')
+    .select('action_id')
+    .eq('room_uuid', room_uuid)
+    .maybeSingle()
+
+  if (room_pick.error) {
+    console.error('[admin_reception_open] room_action_load_failed', {
+      room_uuid,
+      error: room_pick.error,
+    })
+  }
+
+  const discord_thread_action_id =
+    typeof room_pick.data?.action_id === 'string' &&
+    room_pick.data.action_id.trim().length > 0
+      ? room_pick.data.action_id.trim()
+      : null
+
+  const subject = await resolve_room_subject(room_uuid)
+  const customer_display_name = subject.display_name
+
+  const profile_pick = await supabase
+    .from('admin_profiles')
+    .select('internal_name')
+    .eq('user_uuid', admin_uuid)
+    .maybeSingle()
+
+  const admin_internal_name_raw =
+    typeof profile_pick.data?.internal_name === 'string'
+      ? profile_pick.data.internal_name.trim()
+      : ''
+  const admin_internal_name =
+    admin_internal_name_raw.length > 0 ? admin_internal_name_raw : null
+
+  const insert_row = {
+    room_uuid,
+    kind: 'support_started',
+    admin_user_uuid: admin_uuid,
+    discord_id: discord_thread_action_id,
+    customer_display_name: customer_display_name.slice(0, 500),
+    admin_internal_name: admin_internal_name
+      ? admin_internal_name.slice(0, 200)
+      : null,
+  }
+
+  const inserted = await supabase
+    .from('support_actions')
+    .insert(insert_row)
+    .select('action_uuid, created_at')
+    .single()
+
+  if (inserted.error) {
+    console.error('[admin_reception_open] support_actions_insert_failed', {
+      room_uuid,
+      error: inserted.error,
+    })
+  } else {
+    const action_uuid = String(
+      (inserted.data as { action_uuid?: string }).action_uuid ?? '',
+    )
+    const created_at = String(
+      (inserted.data as { created_at?: string }).created_at ?? '',
+    )
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'support_started_action_created',
+      payload: {
+        room_uuid,
+        action_uuid,
+      },
+    })
+
+    void notify({
+      event: 'support_started',
+      room_uuid,
+      action_uuid,
+      created_at,
+      admin_display_label: display_name,
+      customer_display_name,
+      admin_internal_name,
+      discord_thread_action_id,
+    }).catch(async (error) => {
+      console.error('[admin_reception_open] support_started_notify_rejected', {
+        room_uuid,
+        error: error instanceof Error ? error.message : String(error),
+      })
+
+      await debug_event({
+        category: 'admin_chat',
+        event: 'support_started_notify_failed',
+        payload: {
+          room_uuid,
+          action_uuid,
+          error_message:
+            error instanceof Error ? error.message : String(error),
+        },
+      })
+    })
+  }
 
   return {
     status: 200,

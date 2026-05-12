@@ -14,6 +14,7 @@ import {
   type notify_recipient,
 } from './recipients'
 import {
+  format_support_started_notify_content,
   resolve_concierge_targets,
   resolve_notify_rule,
   type notify_event,
@@ -36,6 +37,10 @@ export async function notify(
 ): Promise<notify_delivery_result[]> {
   if (event.event === 'concierge_requested') {
     return deliver_concierge_requested(event)
+  }
+
+  if (event.event === 'support_started') {
+    return deliver_support_started(event)
   }
 
   const rule = resolve_notify_rule(event)
@@ -64,6 +69,89 @@ export async function notify(
 
     return [result.value as notify_delivery_result]
   })
+}
+
+async function admin_support_notify_trace(
+  debug_event: string,
+  payload: Record<string, unknown>,
+) {
+  await notify({
+    event: 'debug_trace',
+    category: 'admin_chat',
+    debug_event,
+    payload,
+  })
+}
+
+async function deliver_support_started(
+  event: Extract<notify_event, { event: 'support_started' }>,
+): Promise<notify_delivery_result[]> {
+  await admin_support_notify_trace('support_started_notify_started', {
+    room_uuid: event.room_uuid,
+    action_uuid: event.action_uuid,
+  })
+
+  const content = format_support_started_notify_content(event)
+
+  try {
+    if (event.discord_thread_action_id) {
+      const result = await sync_discord_action_context({
+        title: 'Support started',
+        content,
+        action_id: event.discord_thread_action_id,
+      })
+
+      await admin_support_notify_trace('support_started_notify_succeeded', {
+        room_uuid: event.room_uuid,
+        action_uuid: event.action_uuid,
+        route: 'discord_action_thread',
+      })
+
+      return [
+        {
+          channel: 'discord',
+          action_id: result?.action_id ?? event.discord_thread_action_id,
+        },
+      ]
+    }
+
+    const rule = resolve_notify_rule(event)
+
+    if (!rule.channels.includes('discord')) {
+      await admin_support_notify_trace('support_started_notify_failed', {
+        room_uuid: event.room_uuid,
+        reason: 'notify_rule_skipped_discord',
+      })
+      return []
+    }
+
+    const sent = await send_discord_notify(event)
+
+    if (sent?.ok === false) {
+      await admin_support_notify_trace('support_started_notify_failed', {
+        room_uuid: event.room_uuid,
+        action_uuid: event.action_uuid,
+        http_status: sent.http_status ?? null,
+        error_text: sent.error_text ?? null,
+      })
+    } else {
+      await admin_support_notify_trace('support_started_notify_succeeded', {
+        room_uuid: event.room_uuid,
+        action_uuid: event.action_uuid,
+        route: 'notify_wolf_webhook',
+      })
+    }
+
+    return [{ channel: 'discord' }]
+  } catch (error) {
+    await admin_support_notify_trace('support_started_notify_failed', {
+      room_uuid: event.room_uuid,
+      action_uuid: event.action_uuid,
+      error_message:
+        error instanceof Error ? error.message : String(error),
+    })
+    return []
+  }
 }
 
 export async function sync_room_action_context(input: {

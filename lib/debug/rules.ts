@@ -94,32 +94,54 @@ export function resolve_debug_rule(input: {
     'chat_message_send_succeeded',
   ])
 
-  const admin_chat_room_list_events = new Set([
-    'admin_chat_room_profile_missing',
-    'admin_chat_room_filtered_out',
+  const concierge_list_debug_events = new Set([
+    'concierge_room_filtered',
+    'concierge_room_display_name_missing',
   ])
 
   if (
     input.category === 'admin_chat' &&
-    input.event === 'admin_chat_room_profile_missing'
+    concierge_list_debug_events.has(input.event)
   ) {
     return {
       category: 'admin_chat',
-      level: 'warn',
-      channels: ['discord'],
+      level:
+        input.event === 'concierge_room_display_name_missing'
+          ? 'warn'
+          : 'info',
+      channels: debug_control.admin_chat_room_list_debug_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
+  const support_started_ok_debug = new Set([
+    'support_started_action_created',
+    'support_started_notify_started',
+    'support_started_notify_succeeded',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    support_started_ok_debug.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.support_started_debug_enabled
+        ? ['discord']
+        : [],
     }
   }
 
   if (
     input.category === 'admin_chat' &&
-    admin_chat_room_list_events.has(input.event)
+    input.event === 'support_started_notify_failed'
   ) {
     return {
       category: 'admin_chat',
-      level: 'info',
-      channels: debug_control.admin_chat_room_list_debug_enabled
-        ? ['discord']
-        : [],
+      level: 'error',
+      channels: ['discord'],
     }
   }
 

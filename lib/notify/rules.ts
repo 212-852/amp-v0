@@ -56,6 +56,16 @@ export type notify_event =
       debug_event: string
       payload: Record<string, unknown>
     }
+  | {
+      event: 'support_started'
+      room_uuid: string
+      action_uuid: string
+      created_at: string
+      admin_display_label: string
+      customer_display_name: string
+      admin_internal_name: string | null
+      discord_thread_action_id: string | null
+    }
 
 export type notify_channel = 'discord' | 'line' | 'push'
 
@@ -66,6 +76,7 @@ export type notify_rule = {
     | 'concierge_requested'
     | 'concierge_closed'
     | 'admin_internal_name_updated'
+    | 'support_started'
   priority?: 'high' | 'normal'
   targets?: notify_target[]
   channels: notify_channel[]
@@ -114,6 +125,10 @@ export function should_send_notify(event: notify_event) {
 
   if (event.event === 'admin_internal_name_updated') {
     return true
+  }
+
+  if (event.event === 'support_started') {
+    return control.notify.support_started
   }
 
   if (event.event === 'debug_trace') {
@@ -174,6 +189,14 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
     }
   }
 
+  if (event.event === 'support_started') {
+    return {
+      category: 'support_started',
+      priority: 'normal',
+      channels: ['discord'],
+    }
+  }
+
   if (event.event === 'debug_trace') {
     return {
       channels: ['discord'],
@@ -183,4 +206,17 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
   return {
     channels: [],
   }
+}
+
+export function format_support_started_notify_content(
+  event: Extract<notify_event, { event: 'support_started' }>,
+): string {
+  return [
+    `${event.admin_display_label} が対応を始めました`,
+    `room_uuid: ${event.room_uuid}`,
+    `customer_display_name: ${event.customer_display_name}`,
+    `admin_internal_name: ${event.admin_internal_name ?? 'none'}`,
+    `action_uuid: ${event.action_uuid}`,
+    `created_at: ${event.created_at}`,
+  ].join('\n')
 }

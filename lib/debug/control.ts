@@ -3,8 +3,10 @@ import 'server-only'
 export const debug_control = {
   handoff_memo_debug_enabled: false,
   admin_management_debug_enabled: false,
-  /** Emits admin_chat_room_profile_missing / admin_chat_room_filtered_out to Discord. */
+  /** Emits concierge_room_* list traces to Discord (debug webhook). */
   admin_chat_room_list_debug_enabled: false,
+  /** Emits support_started_action_created / notify lifecycle to Discord (debug webhook). */
+  support_started_debug_enabled: false,
   chat_message_debug_enabled: false,
   /** Success-path Discord traces for chat realtime (subscribe ok, message received, typing ok). */
   chat_realtime_debug_enabled: false,
