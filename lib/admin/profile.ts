@@ -16,7 +16,6 @@ export type admin_operator_display_policy =
 type users_embed_row = {
   user_uuid: string
   display_name: string | null
-  email: string | null
 }
 
 type admin_profile_row = {
@@ -69,7 +68,6 @@ function compose_handoff_saved_by_label(input: {
 function compose_admin_display_label(input: {
   internal_name: string | null
   display_name: string | null
-  email: string | null
 }): string | null {
   if (input.internal_name) {
     return input.internal_name
@@ -79,13 +77,7 @@ function compose_admin_display_label(input: {
     return input.display_name
   }
 
-  const local = email_local_part(input.email)
-
-  if (local) {
-    return local
-  }
-
-  return string_value(input.email)
+  return null
 }
 
 /**
@@ -119,7 +111,7 @@ export async function resolve_handoff_memo_saved_by_name(
 
   const user_result = await supabase
     .from('users')
-    .select('display_name, email')
+    .select('display_name')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -127,12 +119,12 @@ export async function resolve_handoff_memo_saved_by_name(
     return 'Admin'
   }
 
-  const row = user_result.data as { display_name?: unknown; email?: unknown }
+  const row = user_result.data as { display_name?: unknown }
 
   return compose_handoff_saved_by_label({
     internal_name: null,
     display_name: string_value(row.display_name),
-    email: string_value(row.email),
+    email: null,
   })
 }
 
@@ -180,7 +172,7 @@ export async function batch_resolve_admin_operator_display(
 
   const users_result = await supabase
     .from('users')
-    .select('user_uuid, display_name, email')
+    .select('user_uuid, display_name')
     .in('user_uuid', cleaned)
 
   if (users_result.error) {
@@ -203,13 +195,12 @@ export async function batch_resolve_admin_operator_display(
         compose_admin_display_label({
           internal_name: internal,
           display_name: string_value(raw.display_name),
-          email: string_value(raw.email),
         }) ?? null
     } else {
       label = compose_handoff_saved_by_label({
         internal_name: internal,
         display_name: string_value(raw.display_name),
-        email: string_value(raw.email),
+        email: null,
       })
     }
 

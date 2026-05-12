@@ -10,8 +10,13 @@ import {
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
 import {
+  admin_chat_unset_customer_label,
   build_identity_display_bundles,
+  load_admin_chat_schema_snapshot,
+  pick_users_select_list,
+  resolve_admin_chat_customer_card_label,
   type identity_display_bundle,
+  type resolved_admin_chat_customer_source,
 } from '@/lib/auth/customer_display'
 import { supabase } from '@/lib/db/supabase'
 
@@ -64,22 +69,6 @@ type participant_row = {
   display_name?: string | null
 }
 
-type user_profile_row = {
-  user_uuid: string
-  display_name?: string | null
-  role?: string | null
-  tier?: string | null
-  image_url?: string | null
-  email?: string | null
-}
-
-type resolved_display_name_source =
-  | 'users.display_name'
-  | 'identities.line_profile'
-  | 'participants.display_name'
-  | 'email_local_part'
-  | 'unset'
-
 type customer_identity_resolve_debug_event =
   | 'admin_chat_customer_identity_resolve_started'
   | 'admin_chat_customer_identity_resolve_succeeded'
@@ -117,8 +106,6 @@ export type reception_room_memo = {
 
 const room_select =
   'room_uuid, room_type, status, mode, action_id, created_at, updated_at'
-
-const unset_customer_label = '未設定ユーザー'
 
 function error_field(error: unknown, key: string): string | null {
   if (!error || typeof error !== 'object') {
@@ -173,22 +160,6 @@ function increment_reason(
   counts[reason] = (counts[reason] ?? 0) + 1
 }
 
-function email_local_part(email: string | null | undefined): string | null {
-  if (!email || typeof email !== 'string') {
-    return null
-  }
-
-  const trimmed = email.trim()
-
-  if (!trimmed) {
-    return null
-  }
-
-  const at = trimmed.indexOf('@')
-
-  return at > 0 ? trimmed.slice(0, at) : null
-}
-
 function short_room_label(room_uuid: string): string {
   return room_uuid.trim().length > 0
     ? `Room ${room_uuid.slice(0, 8)}`
@@ -220,7 +191,7 @@ function normalize_room(
   const concierge_name_fallback =
     mode === 'concierge' && options?.room_uuid_label_fallback
       ? short_room_label(row.room_uuid)
-      : unset_customer_label
+      : admin_chat_unset_customer_label
   const display_name =
     enrichment?.display_name ??
     (mode === 'concierge' ? concierge_name_fallback : 'Bot room')
@@ -247,40 +218,6 @@ function string_value(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function resolve_customer_list_card_title(input: {
-  user: user_profile_row | null | undefined
-  identity: identity_display_bundle | null | undefined
-  customer: participant_row | null
-}): { title: string; source: resolved_display_name_source } {
-  const from_user_display = string_value(input.user?.display_name)
-
-  if (from_user_display) {
-    return { title: from_user_display, source: 'users.display_name' }
-  }
-
-  const from_line_profile = string_value(
-    input.identity?.line_profile_display_name,
-  )
-
-  if (from_line_profile) {
-    return { title: from_line_profile, source: 'identities.line_profile' }
-  }
-
-  const from_email = email_local_part(input.user?.email)
-
-  if (from_email) {
-    return { title: from_email, source: 'email_local_part' }
-  }
-
-  const from_participant = string_value(input.customer?.display_name)
-
-  if (from_participant) {
-    return { title: from_participant, source: 'participants.display_name' }
-  }
-
-  return { title: unset_customer_label, source: 'unset' }
-}
-
 async function emit_customer_identity_resolve(input: {
   event: customer_identity_resolve_debug_event
   room_uuid: string
@@ -290,33 +227,49 @@ async function emit_customer_identity_resolve(input: {
   has_user_uuid: boolean
   has_display_name: boolean
   has_identity: boolean
-  resolved_display_name_source: resolved_display_name_source
+  resolved_display_name_source: resolved_admin_chat_customer_source
   reason: string | null
 }) {
+  const payload =
+    input.event === 'admin_chat_customer_identity_resolve_succeeded'
+      ? {
+          resolved_display_name_source: input.resolved_display_name_source,
+          room_uuid: input.room_uuid,
+          customer_participant_uuid: input.customer_participant_uuid,
+          customer_user_uuid: input.customer_user_uuid,
+          user_tier: input.user_tier,
+          has_user_uuid: input.has_user_uuid,
+          has_display_name: input.has_display_name,
+          has_identity: input.has_identity,
+          reason: input.reason,
+        }
+      : {
+          room_uuid: input.room_uuid,
+          customer_participant_uuid: input.customer_participant_uuid,
+          customer_user_uuid: input.customer_user_uuid,
+          user_tier: input.user_tier,
+          has_user_uuid: input.has_user_uuid,
+          has_display_name: input.has_display_name,
+          has_identity: input.has_identity,
+          resolved_display_name_source: input.resolved_display_name_source,
+          reason: input.reason,
+        }
+
   await debug_event({
     category: 'admin_chat',
     event: input.event,
-    payload: {
-      room_uuid: input.room_uuid,
-      customer_participant_uuid: input.customer_participant_uuid,
-      customer_user_uuid: input.customer_user_uuid,
-      user_tier: input.user_tier,
-      has_user_uuid: input.has_user_uuid,
-      has_display_name: input.has_display_name,
-      has_identity: input.has_identity,
-      resolved_display_name_source: input.resolved_display_name_source,
-      reason: input.reason,
-    },
+    payload,
   })
 }
 
 async function fetch_user_profile_row_by_uuid(
   user_uuid: string,
-): Promise<user_profile_row | null> {
+  users_select: string,
+): Promise<Record<string, unknown> | null> {
   try {
     const result = await supabase
       .from('users')
-      .select('user_uuid, display_name, role, tier, image_url, email')
+      .select(users_select)
       .eq('user_uuid', user_uuid)
       .maybeSingle()
 
@@ -324,7 +277,7 @@ async function fetch_user_profile_row_by_uuid(
       return null
     }
 
-    return result.data as user_profile_row
+    return result.data as unknown as Record<string, unknown>
   } catch {
     return null
   }
@@ -332,13 +285,14 @@ async function fetch_user_profile_row_by_uuid(
 
 async function backfill_missing_users(
   user_uuids: string[],
-  users_by_uuid: Map<string, user_profile_row>,
+  users_by_uuid: Map<string, Record<string, unknown>>,
+  users_select: string,
 ) {
   const missing = user_uuids.filter((u) => !users_by_uuid.has(u))
 
   await Promise.all(
     missing.map(async (u) => {
-      const row = await fetch_user_profile_row_by_uuid(u)
+      const row = await fetch_user_profile_row_by_uuid(u, users_select)
 
       if (row) {
         users_by_uuid.set(u, row)
@@ -421,6 +375,8 @@ function choose_customer_user_participant(
   )
 }
 
+let admin_chat_schema_columns_debug_emitted = false
+
 async function enrich_room_cards(
   rows: room_row[],
   list_mode: reception_room_mode,
@@ -491,14 +447,29 @@ async function enrich_room_cards(
 
   const user_uuids = Array.from(new Set(user_uuid_by_room.values()))
 
-  const users_by_uuid = new Map<string, user_profile_row>()
+  const users_by_uuid = new Map<string, Record<string, unknown>>()
   const identities_by_user_uuid = new Map<string, identity_display_bundle>()
 
   if (user_uuids.length > 0) {
+    const schema_snapshot = await load_admin_chat_schema_snapshot(supabase)
+    const users_select_list = pick_users_select_list(schema_snapshot)
+
+    if (!admin_chat_schema_columns_debug_emitted) {
+      admin_chat_schema_columns_debug_emitted = true
+      await debug_event({
+        category: 'admin_chat',
+        event: 'admin_chat_schema_columns_loaded',
+        payload: {
+          users_columns: schema_snapshot?.users_columns ?? [],
+          identities_columns: schema_snapshot?.identities_columns ?? [],
+        },
+      })
+    }
+
     try {
       const user_result = await supabase
         .from('users')
-        .select('user_uuid, display_name, role, tier, image_url, email')
+        .select(users_select_list)
         .in('user_uuid', user_uuids)
 
       if (user_result.error) {
@@ -510,8 +481,15 @@ async function enrich_room_cards(
           phase: 'users_query',
         })
       } else {
-        for (const user of (user_result.data ?? []) as user_profile_row[]) {
-          users_by_uuid.set(user.user_uuid, user)
+        for (const user of (user_result.data ?? []) as unknown as Record<
+          string,
+          unknown
+        >[]) {
+          const uid = pick_string(user['user_uuid'])
+
+          if (uid) {
+            users_by_uuid.set(uid, user)
+          }
         }
       }
     } catch (error) {
@@ -557,7 +535,7 @@ async function enrich_room_cards(
       })
     }
 
-    await backfill_missing_users(user_uuids, users_by_uuid)
+    await backfill_missing_users(user_uuids, users_by_uuid, users_select_list)
   }
 
   let preview_by_room = new Map<string, string>()
@@ -596,7 +574,9 @@ async function enrich_room_cards(
     })
 
     const has_user_uuid = Boolean(customer_user_uuid)
-    const has_display_name = Boolean(string_value(customer_user?.display_name))
+    const has_display_name = Boolean(
+      customer_user && pick_string(customer_user['display_name']),
+    )
     const has_identity = Boolean(
       identity &&
         (string_value(identity.line_profile_display_name) ||
@@ -612,7 +592,7 @@ async function enrich_room_cards(
           customer?.participant_uuid ?? null,
         ),
         customer_user_uuid,
-        user_tier: string_value(customer_user?.tier) ?? null,
+        user_tier: pick_string(customer_user?.['tier']),
         has_user_uuid: true,
         has_display_name,
         has_identity,
@@ -621,7 +601,7 @@ async function enrich_room_cards(
       })
     }
 
-    const resolved = resolve_customer_list_card_title({
+    const resolved = resolve_admin_chat_customer_card_label({
       user: customer_user ?? null,
       identity: identity ?? null,
       customer,
@@ -636,7 +616,7 @@ async function enrich_room_cards(
             customer?.participant_uuid ?? null,
           ),
           customer_user_uuid,
-          user_tier: string_value(customer_user?.tier) ?? null,
+          user_tier: pick_string(customer_user?.['tier']),
           has_user_uuid: true,
           has_display_name,
           has_identity,
@@ -653,7 +633,7 @@ async function enrich_room_cards(
             customer?.participant_uuid ?? null,
           ),
           customer_user_uuid,
-          user_tier: string_value(customer_user?.tier) ?? null,
+          user_tier: pick_string(customer_user?.['tier']),
           has_user_uuid: true,
           has_display_name,
           has_identity,
@@ -665,7 +645,7 @@ async function enrich_room_cards(
 
     if (
       list_mode === 'concierge' &&
-      resolved.title === unset_customer_label &&
+      resolved.title === admin_chat_unset_customer_label &&
       !has_user_uuid
     ) {
       await emit_admin_chat_trace({
@@ -682,9 +662,10 @@ async function enrich_room_cards(
     enrichments.set(row.room_uuid, {
       display_name: resolved.title,
       role:
-        string_value(customer_user?.role) ?? string_value(customer?.role),
-      tier: string_value(customer_user?.tier),
-      avatar_url: string_value(customer_user?.image_url),
+        pick_string(customer_user?.['role']) ??
+        string_value(customer?.role),
+      tier: pick_string(customer_user?.['tier']),
+      avatar_url: pick_string(customer_user?.['image_url']),
       preview: preview_resolved,
     })
   }
@@ -747,25 +728,28 @@ export async function resolve_room_subject(
     }
   }
 
-  let user: user_profile_row | null = null
+  const schema_snapshot = await load_admin_chat_schema_snapshot(supabase)
+  const users_select_list = pick_users_select_list(schema_snapshot)
+
+  let user: Record<string, unknown> | null = null
   let identity: identity_display_bundle | null = null
 
   try {
     const user_result = await supabase
       .from('users')
-      .select('user_uuid, display_name, role, tier, email')
+      .select(users_select_list)
       .eq('user_uuid', user_uuid)
       .maybeSingle()
 
     if (!user_result.error) {
-      user = user_result.data as user_profile_row | null
+      user = user_result.data as Record<string, unknown> | null
     }
   } catch {
     user = null
   }
 
   if (!user) {
-    user = await fetch_user_profile_row_by_uuid(user_uuid)
+    user = await fetch_user_profile_row_by_uuid(user_uuid, users_select_list)
   }
 
   let identity_rows: Record<string, unknown>[] = []
@@ -786,7 +770,7 @@ export async function resolve_room_subject(
   const bundles = build_identity_display_bundles(identity_rows)
   identity = bundles.get(user_uuid) ?? null
 
-  const resolved = resolve_customer_list_card_title({
+  const resolved = resolve_admin_chat_customer_card_label({
     user,
     identity,
     customer: subject_participant,
@@ -798,10 +782,10 @@ export async function resolve_room_subject(
   return {
     display_name,
     role:
-      string_value(user?.role) ??
+      pick_string(user?.['role']) ??
       string_value(subject_participant.role) ??
       'user',
-    tier: string_value(user?.tier) ?? 'guest',
+    tier: pick_string(user?.['tier']) ?? 'guest',
     user_uuid,
     visitor_uuid,
   }
