@@ -11,6 +11,7 @@ import {
   type reception_room_subject,
 } from '@/lib/admin/reception/room'
 import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
+import { get_session_user } from '@/lib/auth/route'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,8 +86,18 @@ async function load_subject(
 }
 
 async function load_memos(room_uuid: string): Promise<handoff_memo[]> {
+  const session = await get_session_user()
+
   try {
-    return await list_handoff_memos({ room_uuid })
+    return await list_handoff_memos({
+      room_uuid,
+      debug: {
+        user_uuid: session.user_uuid,
+        role: session.role,
+        tier: session.tier,
+        source_channel: 'web',
+      },
+    })
   } catch (error) {
     console.error('[admin_reception_room_page] list_memos_failed', {
       room_uuid,

@@ -2,6 +2,7 @@ import 'server-only'
 
 import { control } from '@/lib/config/control'
 import { notify } from '@/lib/notify'
+import { resolve_debug_rule } from './rules'
 
 type debug_payload = {
   category: string
@@ -76,16 +77,27 @@ export async function debug_event(input: {
   event: string
   payload?: Record<string, unknown>
 }) {
-  if (!allow_discord_debug_category(input.category)) {
+  const rule = resolve_debug_rule({
+    category: input.category,
+    event: input.event,
+  })
+
+  if (
+    !rule.channels.includes('discord') ||
+    !allow_discord_debug_category(rule.category)
+  ) {
     return
   }
 
   try {
     await notify({
       event: 'debug_trace',
-      category: input.category,
+      category: rule.category,
       debug_event: input.event,
-      payload: input.payload ?? {},
+      payload: {
+        level: rule.level,
+        ...(input.payload ?? {}),
+      },
     })
   } catch {
     // never block callers

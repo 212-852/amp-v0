@@ -57,12 +57,16 @@ import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 import { get_session_user } from '@/lib/auth/route'
 import {
   create_handoff_memo as create_handoff_memo_core,
+  type handoff_memo_debug_context,
   list_handoff_memos as list_handoff_memos_core,
   type create_handoff_memo_input,
 } from './memo'
 export type { handoff_memo } from './handoff'
 
-export async function list_handoff_memos(input: { room_uuid: string }) {
+export async function list_handoff_memos(input: {
+  room_uuid: string
+  debug?: handoff_memo_debug_context
+}) {
   return list_handoff_memos_core(input)
 }
 

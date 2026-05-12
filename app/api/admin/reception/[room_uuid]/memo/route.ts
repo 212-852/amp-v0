@@ -30,7 +30,15 @@ export async function GET(_request: Request, context: route_context) {
 
   try {
     const { room_uuid } = await context.params
-    const memos = await list_handoff_memos({ room_uuid })
+    const memos = await list_handoff_memos({
+      room_uuid,
+      debug: {
+        user_uuid: admin_context.admin_user_uuid,
+        role: admin_context.role,
+        tier: admin_context.tier,
+        source_channel: 'web',
+      },
+    })
 
     return NextResponse.json({
       ok: true,
@@ -68,6 +76,7 @@ export async function POST(request: Request, context: route_context) {
       body,
       updated_by: admin_context.admin_user_uuid,
       saved_by_role: admin_context.role,
+      saved_by_tier: admin_context.tier,
     })
 
     if (!memo.ok) {

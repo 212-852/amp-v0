@@ -2,6 +2,7 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
+import { debug_event } from '@/lib/debug'
 
 import { can_create_handoff_memo } from './rules'
 import type { handoff_memo } from './handoff'
@@ -13,6 +14,15 @@ export type create_handoff_memo_input = {
   saved_by_user_uuid?: string | null
   saved_by_name?: string | null
   saved_by_role?: string | null
+  saved_by_tier?: string | null
+  source_channel?: chat_channel | null
+}
+
+export type handoff_memo_debug_context = {
+  participant_uuid?: string | null
+  user_uuid?: string | null
+  role?: string | null
+  tier?: string | null
   source_channel?: chat_channel | null
 }
 
@@ -61,6 +71,80 @@ function normalize_source_channel(value: chat_channel | null | undefined) {
   return 'web'
 }
 
+function error_fields(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return {
+      error_code: null,
+      error_message: error ? String(error) : null,
+      error_details: null,
+      error_hint: null,
+    }
+  }
+
+  const source = error as {
+    code?: unknown
+    message?: unknown
+    details?: unknown
+    hint?: unknown
+  }
+
+  return {
+    error_code:
+      typeof source.code === 'string' ? source.code : null,
+    error_message:
+      typeof source.message === 'string' ? source.message : String(error),
+    error_details:
+      typeof source.details === 'string' ? source.details : null,
+    error_hint:
+      typeof source.hint === 'string' ? source.hint : null,
+  }
+}
+
+async function emit_handoff_memo_debug(input: {
+  event:
+    | 'handoff_memo_save_started'
+    | 'handoff_memo_save_blocked'
+    | 'handoff_memo_save_failed'
+    | 'handoff_memo_save_succeeded'
+    | 'handoff_memo_list_failed'
+  room_uuid: string | null
+  participant_uuid?: string | null
+  user_uuid?: string | null
+  role?: string | null
+  tier?: string | null
+  source_channel?: chat_channel | null
+  body_length?: number | null
+  phase: string
+  error?: unknown
+  error_code?: string | null
+  error_message?: string | null
+  error_details?: string | null
+  error_hint?: string | null
+}) {
+  const from_error = input.error ? error_fields(input.error) : null
+
+  await debug_event({
+    category: 'handoff_memo',
+    event: input.event,
+    payload: {
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid ?? null,
+      user_uuid: input.user_uuid ?? null,
+      role: input.role ?? null,
+      tier: input.tier ?? null,
+      source_channel: normalize_source_channel(input.source_channel),
+      body_length: input.body_length ?? null,
+      error_code: input.error_code ?? from_error?.error_code ?? null,
+      error_message:
+        input.error_message ?? from_error?.error_message ?? null,
+      error_details:
+        input.error_details ?? from_error?.error_details ?? null,
+      error_hint: input.error_hint ?? from_error?.error_hint ?? null,
+      phase: input.phase,
+    },
+  })
+}
+
 function row_to_handoff_memo(row: handoff_memo_row): handoff_memo {
   return {
     memo_uuid: row.memo_uuid,
@@ -103,6 +187,7 @@ async function find_handoff_memo_participant(input: {
 
 export async function list_handoff_memos(input: {
   room_uuid: string
+  debug?: handoff_memo_debug_context
 }): Promise<handoff_memo[]> {
   const room_uuid = clean_uuid(input.room_uuid)
 
@@ -110,19 +195,38 @@ export async function list_handoff_memos(input: {
     return []
   }
 
-  const result = await supabase
-    .from('chat_handoff_memos')
-    .select(handoff_memo_select)
-    .eq('room_uuid', room_uuid)
-    .order('created_at', { ascending: true })
+  const phase = 'select_handoff_memos'
 
-  if (result.error) {
-    throw result.error
+  try {
+    const result = await supabase
+      .from('chat_handoff_memos')
+      .select(handoff_memo_select)
+      .eq('room_uuid', room_uuid)
+      .order('created_at', { ascending: true })
+
+    if (result.error) {
+      throw result.error
+    }
+
+    return ((result.data ?? []) as unknown as handoff_memo_row[]).map(
+      row_to_handoff_memo,
+    )
+  } catch (error) {
+    await emit_handoff_memo_debug({
+      event: 'handoff_memo_list_failed',
+      room_uuid,
+      participant_uuid: input.debug?.participant_uuid,
+      user_uuid: input.debug?.user_uuid,
+      role: input.debug?.role,
+      tier: input.debug?.tier,
+      source_channel: input.debug?.source_channel,
+      body_length: null,
+      phase,
+      error,
+    })
+
+    throw error
   }
-
-  return ((result.data ?? []) as unknown as handoff_memo_row[]).map(
-    row_to_handoff_memo,
-  )
 }
 
 export async function create_handoff_memo(
@@ -132,47 +236,155 @@ export async function create_handoff_memo(
   | { ok: false; error: 'invalid_room' | 'empty_body' | 'not_allowed' }
 > {
   const room_uuid = clean_uuid(input.room_uuid)
+  const source_channel = normalize_source_channel(input.source_channel)
+  const normalized_input_body = normalize_handoff_memo_body(input.body)
+  const body_length = normalized_input_body.length
+
+  await emit_handoff_memo_debug({
+    event: 'handoff_memo_save_started',
+    room_uuid,
+    user_uuid: input.saved_by_user_uuid,
+    role: input.saved_by_role,
+    tier: input.saved_by_tier,
+    source_channel,
+    body_length,
+    phase: 'create_handoff_memo_started',
+  })
 
   if (!room_uuid) {
+    await emit_handoff_memo_debug({
+      event: 'handoff_memo_save_blocked',
+      room_uuid,
+      user_uuid: input.saved_by_user_uuid,
+      role: input.saved_by_role,
+      tier: input.saved_by_tier,
+      source_channel,
+      body_length,
+      phase: 'validate_room',
+      error_code: 'invalid_room',
+      error_message: 'invalid_room',
+    })
+
     return { ok: false, error: 'invalid_room' }
   }
 
   if (!can_create_handoff_memo({ role: input.saved_by_role })) {
+    await emit_handoff_memo_debug({
+      event: 'handoff_memo_save_blocked',
+      room_uuid,
+      user_uuid: input.saved_by_user_uuid,
+      role: input.saved_by_role,
+      tier: input.saved_by_tier,
+      source_channel,
+      body_length,
+      phase: 'authorize_create_handoff_memo',
+      error_code: 'not_allowed',
+      error_message: 'not_allowed',
+    })
+
     return { ok: false, error: 'not_allowed' }
   }
 
-  const body = normalize_handoff_memo_body(input.body)
+  const body = normalized_input_body
 
   if (!body) {
+    await emit_handoff_memo_debug({
+      event: 'handoff_memo_save_blocked',
+      room_uuid,
+      user_uuid: input.saved_by_user_uuid,
+      role: input.saved_by_role,
+      tier: input.saved_by_tier,
+      source_channel,
+      body_length,
+      phase: 'validate_body',
+      error_code: 'empty_body',
+      error_message: 'empty_body',
+    })
+
     return { ok: false, error: 'empty_body' }
   }
 
   const saved_by_user_uuid = clean_uuid(input.saved_by_user_uuid)
-  const saved_by_participant_uuid = await find_handoff_memo_participant({
-    room_uuid,
-    user_uuid: saved_by_user_uuid,
-  })
 
-  const result = await supabase
-    .from('chat_handoff_memos')
-    .insert({
+  let saved_by_participant_uuid: string | null = null
+  let phase = 'find_saved_by_participant'
+
+  try {
+    saved_by_participant_uuid = await find_handoff_memo_participant({
       room_uuid,
-      body,
-      saved_by_participant_uuid,
-      saved_by_user_uuid,
-      saved_by_name: input.saved_by_name?.trim() || null,
-      saved_by_role: input.saved_by_role?.trim() || null,
-      source_channel: normalize_source_channel(input.source_channel),
+      user_uuid: saved_by_user_uuid,
     })
-    .select(handoff_memo_select)
-    .single()
+  } catch (error) {
+    await emit_handoff_memo_debug({
+      event: 'handoff_memo_save_failed',
+      room_uuid,
+      user_uuid: saved_by_user_uuid,
+      role: input.saved_by_role,
+      tier: input.saved_by_tier,
+      source_channel,
+      body_length,
+      phase: 'find_saved_by_participant',
+      error,
+    })
 
-  if (result.error) {
-    throw result.error
+    throw error
   }
 
-  return {
-    ok: true,
-    memo: row_to_handoff_memo(result.data as unknown as handoff_memo_row),
+  phase = 'insert_handoff_memo'
+
+  try {
+    const result = await supabase
+      .from('chat_handoff_memos')
+      .insert({
+        room_uuid,
+        body,
+        saved_by_participant_uuid,
+        saved_by_user_uuid,
+        saved_by_name: input.saved_by_name?.trim() || null,
+        saved_by_role: input.saved_by_role?.trim() || null,
+        source_channel,
+      })
+      .select(handoff_memo_select)
+      .single()
+
+    if (result.error) {
+      throw result.error
+    }
+
+    const memo = row_to_handoff_memo(
+      result.data as unknown as handoff_memo_row,
+    )
+
+    await emit_handoff_memo_debug({
+      event: 'handoff_memo_save_succeeded',
+      room_uuid,
+      participant_uuid: saved_by_participant_uuid,
+      user_uuid: saved_by_user_uuid,
+      role: input.saved_by_role,
+      tier: input.saved_by_tier,
+      source_channel,
+      body_length,
+      phase: 'insert_handoff_memo',
+    })
+
+    return {
+      ok: true,
+      memo,
+    }
+  } catch (error) {
+    await emit_handoff_memo_debug({
+      event: 'handoff_memo_save_failed',
+      room_uuid,
+      participant_uuid: saved_by_participant_uuid,
+      user_uuid: saved_by_user_uuid,
+      role: input.saved_by_role,
+      tier: input.saved_by_tier,
+      source_channel,
+      body_length,
+      phase,
+      error,
+    })
+
+    throw error
   }
 }

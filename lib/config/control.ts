@@ -25,6 +25,7 @@ export const control = {
     discord_category_allowlist: [
       'liff',
       'line_webhook',
+      'handoff_memo',
     ],
   },
 
