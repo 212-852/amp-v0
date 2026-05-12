@@ -18,32 +18,17 @@ type users_embed_row = {
   display_name: string | null
   name: string | null
   email: string | null
-  admin_profiles:
-    | { internal_name: string | null }
-    | { internal_name: string | null }[]
-    | null
+}
+
+type admin_profile_row = {
+  user_uuid: string
+  internal_name: string | null
 }
 
 function string_value(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : null
-}
-
-function pick_internal_name_from_profile(raw: unknown): string | null {
-  if (!raw) {
-    return null
-  }
-
-  if (Array.isArray(raw)) {
-    return string_value(raw[0]?.internal_name)
-  }
-
-  if (typeof raw === 'object' && raw !== null && 'internal_name' in raw) {
-    return string_value((raw as { internal_name?: unknown }).internal_name)
-  }
-
-  return null
 }
 
 function email_local_part(email: string | null): string | null {
@@ -58,12 +43,11 @@ function email_local_part(email: string | null): string | null {
 
 function build_operator_label(
   row: users_embed_row,
+  internal_name: string | null,
   policy: admin_operator_display_policy,
 ): string | null {
-  const internal = pick_internal_name_from_profile(row.admin_profiles)
-
-  if (internal) {
-    return internal
+  if (internal_name) {
+    return internal_name
   }
 
   const display = string_value(row.display_name)
@@ -80,7 +64,7 @@ function build_operator_label(
     }
   }
 
-  if (policy === 'memo_list') {
+  if (policy === 'memo_snapshot' || policy === 'memo_list') {
     const local = email_local_part(string_value(row.email))
 
     if (local) {
@@ -106,7 +90,7 @@ function build_operator_label(
 }
 
 /**
- * One query: `users` with embedded `admin_profiles(internal_name)`.
+ * Single core: resolve labels from `admin_profiles.internal_name` + `users`.
  * Deduplicates UUIDs. On read error returns an empty map (callers fall back).
  */
 export async function batch_resolve_admin_operator_display(
@@ -130,23 +114,44 @@ export async function batch_resolve_admin_operator_display(
     return map
   }
 
-  const result = await supabase
+  const users_result = await supabase
     .from('users')
-    .select('user_uuid, display_name, name, email, admin_profiles(internal_name)')
+    .select('user_uuid, display_name, name, email')
     .in('user_uuid', cleaned)
 
-  if (result.error) {
+  if (users_result.error) {
     return map
   }
 
-  for (const raw of (result.data ?? []) as unknown as users_embed_row[]) {
+  const profile_result = await supabase
+    .from('admin_profiles')
+    .select('user_uuid, internal_name')
+    .in('user_uuid', cleaned)
+
+  const internal_by_user = new Map<string, string | null>()
+
+  if (!profile_result.error) {
+    for (const raw of (profile_result.data ?? []) as admin_profile_row[]) {
+      const uuid = string_value(raw.user_uuid)
+
+      if (uuid) {
+        internal_by_user.set(uuid, string_value(raw.internal_name))
+      }
+    }
+  }
+
+  for (const raw of (users_result.data ?? []) as unknown as users_embed_row[]) {
     const uuid = string_value(raw.user_uuid)
 
     if (!uuid) {
       continue
     }
 
-    const label = build_operator_label(raw, policy)
+    const label = build_operator_label(
+      raw,
+      internal_by_user.get(uuid) ?? null,
+      policy,
+    )
 
     if (label) {
       map.set(uuid, label)

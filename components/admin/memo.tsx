@@ -30,6 +30,14 @@ function format_time(iso: string | null): string {
   })
 }
 
+function memo_actor_name(memo: handoff_memo | null): string {
+  return memo?.saved_by_name || 'Admin'
+}
+
+function memo_actor_line(memo: handoff_memo | null): string {
+  return `${memo_actor_name(memo)} が追加`
+}
+
 export default function AdminHandoffMemo({
   room_uuid,
   initial_memos,
@@ -44,7 +52,7 @@ export default function AdminHandoffMemo({
   const latest_memo = memos[memos.length - 1] ?? null
   const status_text = is_saving ? '保存中...' : is_dirty ? '未保存' : '保存済み'
   const updated_time = format_time(latest_memo?.created_at ?? null)
-  const saved_by = latest_memo?.saved_by_name || latest_memo?.saved_by_role
+  const saved_by = latest_memo ? memo_actor_line(latest_memo) : null
 
   const toggle_open = () => {
     set_is_open((current) => !current)
@@ -122,10 +130,7 @@ export default function AdminHandoffMemo({
             {memos.length > 0 ? (
               <ol className="flex flex-col gap-2">
                 {memos.map((memo_item) => {
-                  const item_saved_by =
-                    memo_item.saved_by_name ||
-                    memo_item.saved_by_role ||
-                    'admin'
+                  const item_saved_by = memo_actor_line(memo_item)
                   const item_time = format_time(memo_item.created_at)
 
                   return (
