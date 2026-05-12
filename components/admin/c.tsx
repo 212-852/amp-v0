@@ -11,12 +11,12 @@ type AdminChatTimelineProps = {
   room_uuid: string
 }
 
-function compare_timeline_desc(
+function compare_timeline_asc(
   a: reception_room_message,
   b: reception_room_message,
 ): number {
   if (a.sequence !== null && b.sequence !== null) {
-    return b.sequence - a.sequence
+    return a.sequence - b.sequence
   }
 
   if (a.sequence !== null) {
@@ -28,8 +28,8 @@ function compare_timeline_desc(
   }
 
   return (
-    new Date(b.created_at ?? 0).getTime() -
-    new Date(a.created_at ?? 0).getTime()
+    new Date(a.created_at ?? 0).getTime() -
+    new Date(b.created_at ?? 0).getTime()
   )
 }
 
@@ -112,22 +112,17 @@ export default function AdminChatTimeline({
   load_failed,
   room_uuid,
 }: AdminChatTimelineProps) {
-  const container_ref = useRef<HTMLDivElement | null>(null)
+  const bottom_ref = useRef<HTMLDivElement | null>(null)
   const input_ref = useRef<HTMLInputElement | null>(null)
-  const [rows, set_rows] = useState(initial_messages)
+  const [rows, set_rows] = useState(() =>
+    [...initial_messages].sort(compare_timeline_asc),
+  )
+  const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
 
   useEffect(() => {
-    set_rows(initial_messages)
-  }, [initial_messages])
-
-  useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      const container = container_ref.current
-
-      if (container) {
-        container.scrollTop = 0
-      }
+      bottom_ref.current?.scrollIntoView({ block: 'end' })
     })
 
     return () => {
@@ -187,12 +182,14 @@ export default function AdminChatTimeline({
       const mapped = returned.map(archived_payload_to_reception_message)
 
       set_rows((previous) =>
-        [...mapped, ...previous].sort(compare_timeline_desc),
+        [...previous, ...mapped].sort(compare_timeline_asc),
       )
 
       if (input_ref.current) {
         input_ref.current.value = ''
       }
+
+      set_reply_text('')
     } catch (error) {
       console.error('[admin_reception] submit_reply_failed', error)
     } finally {
@@ -202,14 +199,13 @@ export default function AdminChatTimeline({
 
   function handle_submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    void submit_reply(input_ref.current?.value ?? '')
+    void submit_reply(reply_text)
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
-        ref={container_ref}
-        className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-6 py-3"
+        className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-6 pb-24 pt-3"
       >
         {load_failed ? (
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
@@ -252,6 +248,9 @@ export default function AdminChatTimeline({
                 </li>
               )
             })}
+            <li aria-hidden className="h-1">
+              <div ref={bottom_ref} />
+            </li>
           </ol>
         )}
       </div>
@@ -265,6 +264,10 @@ export default function AdminChatTimeline({
             ref={input_ref}
             type="text"
             name="admin_reception_reply"
+            value={reply_text}
+            onChange={(event) => {
+              set_reply_text(event.target.value)
+            }}
             autoComplete="off"
             enterKeyHint="send"
             placeholder="返信を入力"
@@ -274,7 +277,7 @@ export default function AdminChatTimeline({
           <button
             type="submit"
             aria-label="send"
-            disabled={is_sending}
+            disabled={is_sending || reply_text.trim().length === 0}
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#f3ebe2] shadow-[0_2px_8px_rgba(42,29,24,0.06)] disabled:opacity-60"
           >
             <div className="h-[22px] w-[22px]">

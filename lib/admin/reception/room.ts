@@ -596,7 +596,7 @@ export async function list_reception_room_messages({
   const archived = await load_archived_messages(room_uuid)
 
   return archived_messages_to_reception_timeline(archived).sort(
-    (a, b) => -compare_chat_room_timeline_messages(a, b),
+    compare_chat_room_timeline_messages,
   )
 }
 

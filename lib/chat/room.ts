@@ -1286,6 +1286,83 @@ export type admin_reception_send_resolve_ok = {
   staff_sender_role: 'admin' | 'concierge'
 }
 
+async function ensure_staff_participant(input: {
+  room_uuid: string
+  staff_user_uuid: string
+  staff_sender_role: 'admin' | 'concierge'
+}) {
+  const existing = await supabase
+    .from('participants')
+    .select('participant_uuid')
+    .eq('room_uuid', input.room_uuid)
+    .eq('role', input.staff_sender_role)
+    .eq('user_uuid', input.staff_user_uuid)
+    .maybeSingle()
+
+  if (existing.error) {
+    throw existing.error
+  }
+
+  const existing_uuid = clean_uuid(
+    (existing.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+
+  if (existing_uuid) {
+    return existing_uuid
+  }
+
+  const inserted = await supabase
+    .from('participants')
+    .insert({
+      room_uuid: input.room_uuid,
+      user_uuid: input.staff_user_uuid,
+      role: input.staff_sender_role,
+      status: participant_idle_status,
+      last_channel: 'web',
+    })
+    .select('participant_uuid')
+    .maybeSingle()
+
+  if (inserted.error) {
+    if (!is_unique_violation(inserted.error)) {
+      throw inserted.error
+    }
+
+    const after_conflict = await supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', input.room_uuid)
+      .eq('role', input.staff_sender_role)
+      .eq('user_uuid', input.staff_user_uuid)
+      .maybeSingle()
+
+    if (after_conflict.error) {
+      throw after_conflict.error
+    }
+
+    const conflict_uuid = clean_uuid(
+      (after_conflict.data as { participant_uuid?: string } | null)
+        ?.participant_uuid ?? null,
+    )
+
+    if (conflict_uuid) {
+      return conflict_uuid
+    }
+  }
+
+  const inserted_uuid = clean_uuid(
+    (inserted.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+
+  if (!inserted_uuid) {
+    throw new Error('ensure_staff_participant: insert returned no row')
+  }
+
+  return inserted_uuid
+}
+
 export async function resolve_admin_reception_send_context(input: {
   room_uuid: string
   staff_user_uuid: string
@@ -1378,9 +1455,13 @@ export async function resolve_admin_reception_send_context(input: {
     return { ok: false, error: 'bot_missing' }
   }
 
-  if (!staff_participant_uuid) {
-    return { ok: false, error: 'staff_missing' }
-  }
+  const ensured_staff_participant_uuid =
+    staff_participant_uuid ||
+    (await ensure_staff_participant({
+      room_uuid,
+      staff_user_uuid,
+      staff_sender_role,
+    }))
 
   return {
     ok: true,
@@ -1388,7 +1469,7 @@ export async function resolve_admin_reception_send_context(input: {
       room_uuid,
       user_participant_uuid,
       bot_participant_uuid,
-      staff_participant_uuid,
+      staff_participant_uuid: ensured_staff_participant_uuid,
       staff_sender_role,
     },
   }

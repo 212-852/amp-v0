@@ -1656,6 +1656,79 @@ export type chat_message_request_result =
       reason?: string
     }
 
+type chat_message_send_debug_event =
+  | 'chat_message_send_started'
+  | 'chat_message_send_blocked'
+  | 'chat_message_send_failed'
+  | 'chat_message_send_succeeded'
+
+function chat_message_error_fields(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return {
+      error_code: null,
+      error_message: error ? String(error) : null,
+      error_details: null,
+      error_hint: null,
+    }
+  }
+
+  const source = error as {
+    code?: unknown
+    message?: unknown
+    details?: unknown
+    hint?: unknown
+  }
+
+  return {
+    error_code: typeof source.code === 'string' ? source.code : null,
+    error_message:
+      typeof source.message === 'string' ? source.message : String(error),
+    error_details:
+      typeof source.details === 'string' ? source.details : null,
+    error_hint: typeof source.hint === 'string' ? source.hint : null,
+  }
+}
+
+async function emit_chat_message_send_debug(input: {
+  event: chat_message_send_debug_event
+  room_uuid: string | null
+  sender_user_uuid?: string | null
+  sender_participant_uuid?: string | null
+  sender_role?: string | null
+  source_channel?: chat_channel | null
+  body_length?: number | null
+  phase: string
+  error?: unknown
+  error_code?: string | null
+  error_message?: string | null
+  error_details?: string | null
+  error_hint?: string | null
+  extra?: Record<string, unknown>
+}) {
+  const from_error = input.error ? chat_message_error_fields(input.error) : null
+
+  await debug_event({
+    category: 'chat_message',
+    event: input.event,
+    payload: {
+      room_uuid: input.room_uuid,
+      sender_user_uuid: input.sender_user_uuid ?? null,
+      sender_participant_uuid: input.sender_participant_uuid ?? null,
+      sender_role: input.sender_role ?? null,
+      source_channel: input.source_channel ?? 'web',
+      body_length: input.body_length ?? null,
+      error_code: input.error_code ?? from_error?.error_code ?? null,
+      error_message:
+        input.error_message ?? from_error?.error_message ?? null,
+      error_details:
+        input.error_details ?? from_error?.error_details ?? null,
+      error_hint: input.error_hint ?? from_error?.error_hint ?? null,
+      phase: input.phase,
+      ...(input.extra ?? {}),
+    },
+  })
+}
+
 export async function handle_chat_message_request(
   request: Request,
 ): Promise<{ status: number; body: chat_message_request_result }> {
@@ -1670,7 +1743,29 @@ export async function handle_chat_message_request(
   const text_value = typeof body?.text === 'string' ? body.text.trim() : ''
 
   if (body?.source === 'admin_reception') {
+    const room_uuid = clean_uuid(body.room_uuid)
+    const body_length = text_value.length
+
+    await emit_chat_message_send_debug({
+      event: 'chat_message_send_started',
+      room_uuid,
+      source_channel: 'web',
+      body_length,
+      phase: 'admin_reception_request_received',
+    })
+
     if (typeof body.room_uuid !== 'string' || text_value.length === 0) {
+      await emit_chat_message_send_debug({
+        event: 'chat_message_send_blocked',
+        room_uuid,
+        source_channel: 'web',
+        body_length,
+        phase: 'validate_admin_reception_message',
+        error_code: !room_uuid ? 'missing_room_uuid' : 'empty_body',
+        error_message: 'invalid_message',
+        error_hint: 'check_room_uuid_and_non_empty_text',
+      })
+
       return {
         status: 400,
         body: { ok: false, error: 'invalid_message' },
@@ -1678,8 +1773,24 @@ export async function handle_chat_message_request(
     }
 
     const session = await get_session_user()
+    const base_debug = {
+      room_uuid,
+      sender_user_uuid: session.user_uuid,
+      source_channel: 'web' as const,
+      body_length,
+    }
 
     if (session.role !== 'admin') {
+      await emit_chat_message_send_debug({
+        event: 'chat_message_send_blocked',
+        ...base_debug,
+        sender_role: session.role,
+        phase: 'authorize_admin_reception_message',
+        error_code: 'forbidden',
+        error_message: 'admin role required',
+        error_hint: 'check_admin_session_role',
+      })
+
       return {
         status: 403,
         body: { ok: false, error: 'forbidden' },
@@ -1687,18 +1798,65 @@ export async function handle_chat_message_request(
     }
 
     if (!session.user_uuid) {
+      await emit_chat_message_send_debug({
+        event: 'chat_message_send_blocked',
+        ...base_debug,
+        sender_role: session.role,
+        phase: 'resolve_admin_session_user',
+        error_code: 'session_required',
+        error_message: 'sender_user_uuid missing',
+        error_hint: 'check_admin_session',
+      })
+
       return {
         status: 401,
         body: { ok: false, error: 'session_required' },
       }
     }
 
-    const resolved = await resolve_admin_reception_send_context({
-      room_uuid: body.room_uuid,
-      staff_user_uuid: session.user_uuid,
-    })
+    let resolved: Awaited<
+      ReturnType<typeof resolve_admin_reception_send_context>
+    >
+
+    try {
+      resolved = await resolve_admin_reception_send_context({
+        room_uuid: body.room_uuid,
+        staff_user_uuid: session.user_uuid,
+      })
+    } catch (error) {
+      await emit_chat_message_send_debug({
+        event: 'chat_message_send_failed',
+        ...base_debug,
+        sender_role: session.role,
+        phase: 'resolve_admin_reception_send_context',
+        error,
+        error_hint: 'check_room_participants_and_rls',
+      })
+
+      return {
+        status: 500,
+        body: {
+          ok: false,
+          error: 'message_send_failed',
+          reason: 'resolve_send_context_failed',
+        },
+      }
+    }
 
     if (!resolved.ok) {
+      await emit_chat_message_send_debug({
+        event: 'chat_message_send_blocked',
+        ...base_debug,
+        sender_role: session.role,
+        phase: 'resolve_admin_reception_send_context',
+        error_code: resolved.error,
+        error_message: resolved.error,
+        error_hint: 'check_room_uuid_and_required_participants',
+        extra: {
+          participant_found: false,
+        },
+      })
+
       if (resolved.error === 'room_not_found') {
         return {
           status: 404,
@@ -1733,13 +1891,53 @@ export async function handle_chat_message_request(
       sender: resolved.data.staff_sender_role,
       sender_display_name,
     })
-    const archived_messages = await archive_message_bundles({
-      room_uuid: resolved.data.room_uuid,
-      participant_uuid: resolved.data.user_participant_uuid,
-      bot_participant_uuid: resolved.data.bot_participant_uuid,
-      staff_participant_uuid: resolved.data.staff_participant_uuid,
-      channel: 'web',
-      bundles: [incoming_bundle],
+    let archived_messages: archived_message[]
+
+    try {
+      archived_messages = await archive_message_bundles({
+        room_uuid: resolved.data.room_uuid,
+        participant_uuid: resolved.data.user_participant_uuid,
+        bot_participant_uuid: resolved.data.bot_participant_uuid,
+        staff_participant_uuid: resolved.data.staff_participant_uuid,
+        channel: 'web',
+        bundles: [incoming_bundle],
+      })
+    } catch (error) {
+      await emit_chat_message_send_debug({
+        event: 'chat_message_send_failed',
+        ...base_debug,
+        sender_participant_uuid: resolved.data.staff_participant_uuid,
+        sender_role: resolved.data.staff_sender_role,
+        phase: 'archive_admin_reception_message',
+        error,
+        error_hint: 'check_messages_insert_payload_rls_and_constraints',
+        extra: {
+          user_participant_uuid: resolved.data.user_participant_uuid,
+          bot_participant_uuid: resolved.data.bot_participant_uuid,
+          participant_found: Boolean(resolved.data.staff_participant_uuid),
+        },
+      })
+
+      return {
+        status: 500,
+        body: {
+          ok: false,
+          error: 'message_send_failed',
+          reason: 'archive_insert_failed',
+        },
+      }
+    }
+
+    await emit_chat_message_send_debug({
+      event: 'chat_message_send_succeeded',
+      ...base_debug,
+      sender_participant_uuid: resolved.data.staff_participant_uuid,
+      sender_role: resolved.data.staff_sender_role,
+      phase: 'archive_admin_reception_message',
+      extra: {
+        message_count: archived_messages.length,
+        participant_found: Boolean(resolved.data.staff_participant_uuid),
+      },
     })
 
     return {

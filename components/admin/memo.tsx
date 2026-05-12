@@ -75,7 +75,7 @@ export default function AdminHandoffMemo({
       })
 
       if (result.ok) {
-        set_memos((current) => [...current, result.memo])
+        set_memos((current) => [result.memo, ...current])
         set_draft('')
       } else {
         set_error_message('保存できませんでした')

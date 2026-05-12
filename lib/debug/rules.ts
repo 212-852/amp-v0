@@ -73,6 +73,31 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const chat_message_events = new Set([
+    'chat_message_send_started',
+    'chat_message_send_blocked',
+    'chat_message_send_failed',
+    'chat_message_send_succeeded',
+  ])
+
+  if (
+    input.category === 'chat_message' &&
+    chat_message_events.has(input.event)
+  ) {
+    const is_failed =
+      input.event === 'chat_message_send_blocked' ||
+      input.event === 'chat_message_send_failed'
+
+    return {
+      category: 'chat_message',
+      level: is_failed ? 'error' : 'info',
+      channels:
+        is_failed || debug_control.chat_message_debug_enabled
+          ? ['discord']
+          : [],
+    }
+  }
+
   return {
     category: input.category,
     level: 'info',
