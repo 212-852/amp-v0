@@ -34,6 +34,7 @@ export type admin_user_summary = {
 export type admin_profile = {
   real_name: string | null
   birth_date: string | null
+  /** UI-facing internal display name. Stored as admin_profiles.internal_name. */
   work_name: string | null
   updated_at: string | null
 }
@@ -140,7 +141,7 @@ async function fetch_admin_profiles_by_user(
 
   const result = await supabase
     .from('admin_profiles')
-    .select('user_uuid, real_name, birth_date, work_name, updated_at')
+    .select('user_uuid, real_name, birth_date, internal_name, updated_at')
     .in('user_uuid', user_uuids)
 
   if (result.error) {
@@ -157,7 +158,7 @@ async function fetch_admin_profiles_by_user(
     map.set(user_uuid, {
       real_name: string_value(row['real_name']),
       birth_date: string_value(row['birth_date']),
-      work_name: string_value(row['work_name']),
+      work_name: string_value(row['internal_name']),
       updated_at: string_value(row['updated_at']),
     })
   }
@@ -312,9 +313,8 @@ export type update_admin_profile_result =
     }
 
 /**
- * admin_profiles (see migration 20260510130000_admin_profiles): real_name,
- * birth_date, work_name (internal display name). users has no internal_name
- * column. Writes use the service-role client (RLS not applied).
+ * admin_profiles stores real_name, birth_date, and internal_name.
+ * users has no internal_name column. Writes use the service-role client.
  */
 type admin_profile_debug_row = {
   target_user_uuid: string
@@ -342,13 +342,20 @@ function compute_changed_field_names(input: {
     work_name: string | null
   }
 }): string[] {
-  const keys: ('real_name' | 'birth_date' | 'work_name')[] = [
-    'real_name',
-    'birth_date',
-    'work_name',
-  ]
+  const changed_fields: string[] = []
 
-  return keys.filter((key) => input.before[key] !== input.after[key])
+  if (input.before.work_name !== input.after.work_name) {
+    changed_fields.push('internal_name')
+  }
+
+  if (
+    input.before.real_name !== input.after.real_name ||
+    input.before.birth_date !== input.after.birth_date
+  ) {
+    changed_fields.push('private_profile_fields')
+  }
+
+  return changed_fields
 }
 
 function serialize_service_error(error: unknown): {
@@ -395,6 +402,10 @@ function serialize_service_error(error: unknown): {
 function hint_for_postgrest_code(code: string): string | null {
   if (code === 'PGRST204') {
     return 'column_missing_or_rpc_schema_mismatch'
+  }
+
+  if (code === 'PGRST205') {
+    return 'table_missing_or_schema_cache_stale'
   }
 
   if (code === '23503') {
@@ -582,7 +593,7 @@ export async function update_admin_profile(input: {
 
   const current_profile_result = await supabase
     .from('admin_profiles')
-    .select('real_name, birth_date, work_name')
+    .select('real_name, birth_date, internal_name')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -608,7 +619,7 @@ export async function update_admin_profile(input: {
   const before = {
     real_name: string_value(current_row?.['real_name']),
     birth_date: string_value(current_row?.['birth_date']),
-    work_name: string_value(current_row?.['work_name']),
+    work_name: string_value(current_row?.['internal_name']),
   }
 
   const changed_fields = compute_changed_field_names({
@@ -633,10 +644,11 @@ export async function update_admin_profile(input: {
       user_uuid,
       real_name: validation.value.real_name,
       birth_date: validation.value.birth_date,
-      work_name: validation.value.work_name,
+      internal_name: validation.value.work_name,
       updated_at,
+      updated_by_user_uuid,
     })
-    .select('real_name, birth_date, work_name, updated_at')
+    .select('real_name, birth_date, internal_name, updated_at')
     .maybeSingle()
 
   if (result.error) {
@@ -657,7 +669,7 @@ export async function update_admin_profile(input: {
   }
 
   const row = (result.data ?? {}) as admin_profiles_row
-  const next_work_name = string_value(row['work_name'])
+  const next_work_name = string_value(row['internal_name'])
   const profile: admin_profile = {
     real_name: string_value(row['real_name']),
     birth_date: string_value(row['birth_date']),
@@ -692,7 +704,7 @@ export async function update_admin_profile(input: {
         event: 'admin_internal_name_notify_succeeded',
         base: base_debug({
           phase: notify_outcome.skipped ? 'notify_skipped' : 'notify_delivered',
-          changed_fields: ['work_name'],
+          changed_fields: ['internal_name'],
         }),
         extra: {
           old_internal_name: old_work_name,
@@ -706,7 +718,7 @@ export async function update_admin_profile(input: {
         base: {
           ...base_debug({
             phase: 'notify',
-            changed_fields: ['work_name'],
+            changed_fields: ['internal_name'],
           }),
           error_code: 'notify_delivery_failed',
           error_message: notify_outcome.error_message,
@@ -738,17 +750,17 @@ export async function read_admin_display_name(
 
   const profile_result = await supabase
     .from('admin_profiles')
-    .select('work_name')
+    .select('internal_name')
     .eq('user_uuid', sanitized)
     .maybeSingle()
 
   if (!profile_result.error) {
-    const work_name = string_value(
-      (profile_result.data as admin_profiles_row | null)?.['work_name'],
+    const internal_name = string_value(
+      (profile_result.data as admin_profiles_row | null)?.['internal_name'],
     )
 
-    if (work_name) {
-      return work_name
+    if (internal_name) {
+      return internal_name
     }
   }
 
