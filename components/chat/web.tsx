@@ -397,6 +397,17 @@ export function WebChat({
     source_channel: session?.source_channel ?? 'web',
   }
 
+  const active_typing_identity_ref = useRef({
+    user_uuid: null as string | null,
+    participant_uuid: null as string | null,
+    role: null as string | null,
+  })
+  active_typing_identity_ref.current = {
+    user_uuid: session?.user_uuid ?? null,
+    participant_uuid,
+    role: 'user',
+  }
+
   const subscribed_room_uuid_ref = useRef<string | null>(null)
 
   const did_initial_scroll_ref = useRef(false)
@@ -535,6 +546,7 @@ export function WebChat({
       role: 'user',
       tier: ctx.tier,
       source_channel: ctx.source_channel,
+      active_typing_identity_ref,
       on_message: (message) => {
         if (!message) {
           return

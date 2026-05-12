@@ -223,6 +223,17 @@ export default function AdminChatTimeline({
     staff_tier,
   }
 
+  const active_typing_identity_ref = useRef({
+    user_uuid: null as string | null,
+    participant_uuid: null as string | null,
+    role: null as string | null,
+  })
+  active_typing_identity_ref.current = {
+    user_uuid: staff_user_uuid,
+    participant_uuid: staff_participant_uuid,
+    role: 'admin',
+  }
+
   const set_rows_ref = useRef(set_rows)
   set_rows_ref.current = set_rows
 
@@ -352,6 +363,7 @@ export default function AdminChatTimeline({
       role: 'admin',
       tier: ctx.staff_tier,
       source_channel: 'admin',
+      active_typing_identity_ref,
       on_message: (archived) => {
         if (!archived) {
           return

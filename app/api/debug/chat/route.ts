@@ -25,7 +25,9 @@ type chat_debug_body = {
   sender_user_uuid?: unknown
   sender_participant_uuid?: unknown
   active_participant_uuid?: unknown
+  active_user_uuid?: unknown
   sender_role?: unknown
+  active_role?: unknown
   display_name?: unknown
   is_typing?: unknown
   ignored_reason?: unknown
@@ -38,6 +40,8 @@ type chat_debug_body = {
   next_message_count?: unknown
   dedupe_hit?: unknown
   cleanup_reason?: unknown
+  is_self_sender?: unknown
+  comparison_strategy?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -84,7 +88,9 @@ export async function POST(request: Request) {
       sender_user_uuid: string_or_null(body?.sender_user_uuid),
       sender_participant_uuid: string_or_null(body?.sender_participant_uuid),
       active_participant_uuid: string_or_null(body?.active_participant_uuid),
+      active_user_uuid: string_or_null(body?.active_user_uuid),
       sender_role: string_or_null(body?.sender_role),
+      active_role: string_or_null(body?.active_role),
       display_name: string_or_null(body?.display_name),
       is_typing:
         typeof body?.is_typing === 'boolean' ? body.is_typing : null,
@@ -99,6 +105,9 @@ export async function POST(request: Request) {
       dedupe_hit:
         typeof body?.dedupe_hit === 'boolean' ? body.dedupe_hit : null,
       cleanup_reason: string_or_null(body?.cleanup_reason),
+      is_self_sender:
+        typeof body?.is_self_sender === 'boolean' ? body.is_self_sender : null,
+      comparison_strategy: string_or_null(body?.comparison_strategy),
     },
   })
 

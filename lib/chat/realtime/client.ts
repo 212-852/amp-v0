@@ -1,11 +1,13 @@
 'use client'
 
+import type { MutableRefObject } from 'react'
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 
 import {
   archived_message_from_message_row,
   type message_insert_row,
 } from './row'
+import { is_self_typing_broadcast } from './typing_identity'
 
 export type chat_realtime_role = 'user' | 'admin' | 'concierge' | 'bot'
 
@@ -68,6 +70,8 @@ type chat_realtime_debug_payload = {
   sender_user_uuid?: string | null
   sender_participant_uuid?: string | null
   active_participant_uuid?: string | null
+  active_user_uuid?: string | null
+  active_role?: string | null
   sender_role?: string | null
   display_name?: string | null
   is_typing?: boolean | null
@@ -81,6 +85,8 @@ type chat_realtime_debug_payload = {
   dedupe_hit?: boolean | null
   phase: string
   cleanup_reason?: string | null
+  is_self_sender?: boolean | null
+  comparison_strategy?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -134,6 +140,12 @@ export function subscribe_chat_room_realtime(input: {
   role?: string | null
   tier?: string | null
   source_channel?: string | null
+  /** When set, broadcast self filter reads latest identity each callback (avoids stale subscribe closure). */
+  active_typing_identity_ref?: MutableRefObject<{
+    user_uuid: string | null
+    participant_uuid: string | null
+    role: string | null
+  }>
   on_message: (message: ReturnType<typeof archived_message_from_message_row>) => void
   on_typing: (payload: chat_typing_payload) => void
 }): RealtimeChannel {
@@ -340,6 +352,12 @@ export function subscribe_chat_room_realtime(input: {
     )
     .on('broadcast', { event: 'typing' }, (payload) => {
       const raw = payload.payload
+      const active_identity =
+        input.active_typing_identity_ref?.current ?? {
+          user_uuid: input.user_uuid ?? null,
+          participant_uuid: input.participant_uuid ?? null,
+          role: input.role ?? null,
+        }
 
       if (!is_chat_typing_payload(raw)) {
         send_chat_realtime_debug({
@@ -348,7 +366,9 @@ export function subscribe_chat_room_realtime(input: {
           event_name: 'typing',
           table: null,
           filter: null,
-          active_participant_uuid: input.participant_uuid,
+          active_participant_uuid: active_identity.participant_uuid,
+          active_user_uuid: active_identity.user_uuid,
+          active_role: active_identity.role,
           ignored_reason: 'invalid_typing_payload_shape',
           phase: 'broadcast_typing',
         })
@@ -360,6 +380,37 @@ export function subscribe_chat_room_realtime(input: {
 
       const typing = normalize_chat_typing_payload(raw)
 
+      const self_result = is_self_typing_broadcast({
+        active: {
+          user_uuid: active_identity.user_uuid,
+          participant_uuid: active_identity.participant_uuid,
+          role: active_identity.role,
+        },
+        sender: {
+          user_uuid: typing.user_uuid ?? null,
+          participant_uuid: typing.participant_uuid,
+          role: typing.role,
+        },
+      })
+
+      send_chat_realtime_debug({
+        event: 'chat_typing_identity_compare',
+        ...base_debug,
+        event_name: 'typing',
+        table: null,
+        filter: null,
+        payload_room_uuid: typing.room_uuid,
+        sender_user_uuid: typing.user_uuid ?? null,
+        sender_participant_uuid: typing.participant_uuid,
+        active_user_uuid: active_identity.user_uuid,
+        active_participant_uuid: active_identity.participant_uuid,
+        sender_role: typing.role,
+        active_role: active_identity.role,
+        is_self_sender: self_result.is_self,
+        comparison_strategy: self_result.comparison_strategy,
+        phase: 'broadcast_typing_identity',
+      })
+
       if (typing.room_uuid !== input.room_uuid) {
         send_chat_realtime_debug({
           event: 'chat_typing_broadcast_ignored',
@@ -370,7 +421,9 @@ export function subscribe_chat_room_realtime(input: {
           payload_room_uuid: typing.room_uuid,
           sender_user_uuid: typing.user_uuid ?? null,
           sender_participant_uuid: typing.participant_uuid,
-          active_participant_uuid: input.participant_uuid,
+          active_participant_uuid: active_identity.participant_uuid,
+          active_user_uuid: active_identity.user_uuid,
+          active_role: active_identity.role,
           sender_role: typing.role,
           display_name: typing.display_name ?? null,
           is_typing: typing.is_typing,
@@ -386,7 +439,7 @@ export function subscribe_chat_room_realtime(input: {
         return
       }
 
-      if (typing.participant_uuid === input.participant_uuid) {
+      if (self_result.is_self) {
         send_chat_realtime_debug({
           event: 'chat_typing_broadcast_ignored',
           ...base_debug,
@@ -396,11 +449,14 @@ export function subscribe_chat_room_realtime(input: {
           payload_room_uuid: typing.room_uuid,
           sender_user_uuid: typing.user_uuid ?? null,
           sender_participant_uuid: typing.participant_uuid,
-          active_participant_uuid: input.participant_uuid,
+          active_participant_uuid: active_identity.participant_uuid,
+          active_user_uuid: active_identity.user_uuid,
+          active_role: active_identity.role,
           sender_role: typing.role,
           display_name: typing.display_name ?? null,
           is_typing: typing.is_typing,
           ignored_reason: 'self_typing',
+          comparison_strategy: self_result.comparison_strategy,
           phase: 'broadcast_typing',
         })
 
@@ -422,7 +478,9 @@ export function subscribe_chat_room_realtime(input: {
         payload_room_uuid: typing.room_uuid,
         sender_user_uuid: typing.user_uuid ?? null,
         sender_participant_uuid: typing.participant_uuid,
-        active_participant_uuid: input.participant_uuid,
+        active_participant_uuid: active_identity.participant_uuid,
+        active_user_uuid: active_identity.user_uuid,
+        active_role: active_identity.role,
         sender_role: typing.role,
         display_name: typing.display_name ?? null,
         is_typing: typing.is_typing,

@@ -132,6 +132,7 @@ export function resolve_debug_rule(input: {
     'chat_realtime_message_state_updated',
     'chat_realtime_typing_callback_received',
     'chat_realtime_action_callback_received',
+    'chat_typing_identity_compare',
     'chat_typing_broadcast_send_succeeded',
     'chat_typing_broadcast_received',
     'chat_typing_state_updated',
