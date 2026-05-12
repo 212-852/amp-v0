@@ -24,7 +24,6 @@ type room_row = {
   action_id: string | null
   created_at: string | null
   updated_at: string | null
-  concierge_enabled: boolean | null
 }
 
 export type reception_room = {
@@ -113,7 +112,7 @@ export type reception_room_memo = {
 }
 
 const room_select =
-  'room_uuid, room_type, status, mode, action_id, created_at, updated_at, concierge_enabled'
+  'room_uuid, room_type, status, mode, action_id, created_at, updated_at'
 
 const unset_customer_label = '未設定ユーザー'
 
@@ -303,7 +302,6 @@ async function emit_admin_chat_trace(input: {
   user_tier: string | null
   participant_role: string | null
   room_type: string | null
-  concierge_enabled: boolean | null
 }) {
   if (debug_control.admin_chat_room_list_debug_enabled) {
     await debug_event({
@@ -316,7 +314,6 @@ async function emit_admin_chat_trace(input: {
         user_tier: input.user_tier,
         participant_role: input.participant_role,
         room_type: input.room_type,
-        concierge_enabled: input.concierge_enabled,
       },
     })
   }
@@ -635,7 +632,6 @@ async function enrich_room_cards(
           user_tier: string_value(customer_user?.tier),
           participant_role: string_value(customer?.role),
           room_type: row.room_type,
-          concierge_enabled: row.concierge_enabled,
         })
       }
 
@@ -797,17 +793,6 @@ export async function list_reception_rooms({
     .order('updated_at', { ascending: false })
     .limit(fetch_limit)
 
-  if (mode === 'concierge') {
-    // Keep the initial list read intentionally loose. Optional room flags are
-    // normalized later so one stale field cannot blank the whole inbox.
-    query = supabase
-      .from('rooms')
-      .select(room_select)
-      .eq('mode', mode)
-      .order('updated_at', { ascending: false })
-      .limit(fetch_limit)
-  }
-
   let result: Awaited<typeof query>
 
   try {
@@ -838,14 +823,14 @@ export async function list_reception_rooms({
 
   const rows = (result.data ?? []) as room_row[]
 
-  await emit_admin_chat_list_debug({
-    event: 'admin_chat_list_query_succeeded',
-    raw_room_count: rows.length,
-    filtered_room_count: rows.length,
-    phase: `rooms_query_${mode}`,
-  })
-
   if (rows.length === 0) {
+    await emit_admin_chat_list_debug({
+      event: 'admin_chat_list_query_succeeded',
+      raw_room_count: 0,
+      filtered_room_count: 0,
+      phase: `list_reception_rooms_${mode}`,
+    })
+
     await emit_admin_chat_list_debug({
       event: 'admin_chat_list_filtered_empty',
       raw_room_count: 0,
@@ -910,6 +895,13 @@ export async function list_reception_rooms({
       phase: `normalize_room_${mode}`,
     })
   }
+
+  await emit_admin_chat_list_debug({
+    event: 'admin_chat_list_query_succeeded',
+    raw_room_count: rows.length,
+    filtered_room_count: kept.length,
+    phase: `list_reception_rooms_${mode}`,
+  })
 
   return kept
 }

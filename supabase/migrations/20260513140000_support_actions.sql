@@ -1,7 +1,4 @@
--- Support action log (admin support_started) and concierge inbox flag on rooms.
-
-ALTER TABLE public.rooms
-  ADD COLUMN IF NOT EXISTS concierge_enabled boolean NOT NULL DEFAULT true;
+-- Support action log (admin support_started).
 
 CREATE TABLE IF NOT EXISTS public.support_actions (
   action_uuid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
