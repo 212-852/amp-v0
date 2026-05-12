@@ -7,6 +7,28 @@ import { debug_event } from '@/lib/debug'
 import type { chat_channel } from './room'
 import type { bundle_sender, message_bundle } from './message'
 
+/** DB table used for chat archive rows (must match Realtime `postgres_changes` table). */
+export const chat_archived_messages_table = 'public.messages'
+
+async function emit_chat_message_insert_succeeded(input: {
+  inserted_table: string
+  inserted_message_uuid: string
+  inserted_room_uuid: string
+  channel: chat_channel
+}) {
+  await debug_event({
+    category: 'chat_message',
+    event: 'chat_message_insert_succeeded',
+    payload: {
+      inserted_table: input.inserted_table,
+      inserted_message_uuid: input.inserted_message_uuid,
+      inserted_room_uuid: input.inserted_room_uuid,
+      channel: input.channel,
+      phase: 'messages_insert',
+    },
+  })
+}
+
 export type archived_message = {
   archive_uuid: string
   room_uuid: string
@@ -296,6 +318,13 @@ export async function archive_incoming_line_text(
 
     const row = result.data as archive_row
 
+    await emit_chat_message_insert_succeeded({
+      inserted_table: chat_archived_messages_table,
+      inserted_message_uuid: row.message_uuid,
+      inserted_room_uuid: row.room_uuid,
+      channel: 'line',
+    })
+
     if (control.debug.chat_room) {
       await debug_event({
         category: 'chat_room',
@@ -519,6 +548,15 @@ export async function archive_message_bundles(
   }
 
   const inserted = (result.data ?? []) as archive_row[]
+
+  for (const row of inserted) {
+    await emit_chat_message_insert_succeeded({
+      inserted_table: chat_archived_messages_table,
+      inserted_message_uuid: row.message_uuid,
+      inserted_room_uuid: row.room_uuid,
+      channel: input.channel,
+    })
+  }
 
   if (control.debug.chat_room) {
     for (let i = 0; i < inserted.length; i++) {

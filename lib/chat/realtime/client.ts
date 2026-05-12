@@ -182,6 +182,33 @@ export function subscribe_chat_room_realtime(input: {
         filter: postgres_filter,
       },
       (payload) => {
+        const raw_new = payload.new as Record<string, unknown> | undefined
+        const entry_room_uuid =
+          raw_new && typeof raw_new.room_uuid === 'string'
+            ? raw_new.room_uuid
+            : null
+        const entry_message_uuid =
+          raw_new && typeof raw_new.message_uuid === 'string'
+            ? raw_new.message_uuid
+            : null
+
+        send_chat_realtime_debug({
+          event: 'chat_realtime_postgres_changes_callback_fired',
+          ...base_debug,
+          postgres_event: 'INSERT',
+          payload_message_uuid: entry_message_uuid,
+          payload_room_uuid: entry_room_uuid,
+          phase: 'postgres_changes_insert_entry',
+        })
+
+        console_chat_realtime('postgres_insert_callback_fired', {
+          channel_name,
+          table: 'messages',
+          schema: 'public',
+          payload_room_uuid: entry_room_uuid,
+          message_uuid: entry_message_uuid,
+        })
+
         const row = payload.new as message_insert_row & { room_uuid?: string }
         const payload_room_uuid =
           typeof row?.room_uuid === 'string' ? row.room_uuid : null

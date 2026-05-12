@@ -73,6 +73,17 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  if (
+    input.category === 'chat_message' &&
+    input.event === 'chat_message_insert_succeeded'
+  ) {
+    return {
+      category: 'chat_message',
+      level: 'info',
+      channels: ['discord'],
+    }
+  }
+
   const chat_message_events = new Set([
     'chat_message_send_started',
     'chat_message_send_blocked',
@@ -107,6 +118,7 @@ export function resolve_debug_rule(input: {
     'chat_realtime_cleanup_started',
     'chat_realtime_cleanup_completed',
     'chat_typing_broadcast_failed',
+    'chat_realtime_postgres_changes_callback_fired',
   ])
 
   const chat_realtime_success_gated = new Set([
