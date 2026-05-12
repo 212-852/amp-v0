@@ -113,6 +113,7 @@ export function resolve_debug_rule(input: {
     'chat_realtime_client_created',
     'chat_realtime_channel_created',
     'chat_realtime_subscribe_started',
+    'chat_realtime_subscribe_skipped',
     'chat_realtime_channel_subscribe_status',
     'chat_realtime_message_callback_received',
     'chat_realtime_typing_callback_received',

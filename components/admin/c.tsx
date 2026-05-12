@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import PawIcon from '@/components/icons/paw'
 import type { reception_room_message } from '@/lib/admin/reception/room'
 import {
+  chat_room_realtime_channel_name,
   chat_typing_is_fresh,
   cleanup_chat_room_realtime,
   publish_chat_typing,
@@ -191,6 +192,28 @@ export default function AdminChatTimeline({
   const publish_typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
 
+  const staff_participant_uuid_ref = useRef(staff_participant_uuid)
+  staff_participant_uuid_ref.current = staff_participant_uuid
+
+  const latest_room_uuid_ref = useRef(room_uuid)
+  latest_room_uuid_ref.current = room_uuid
+
+  const admin_rt_ctx_ref = useRef({
+    staff_participant_uuid,
+    staff_user_uuid,
+    staff_tier,
+  })
+  admin_rt_ctx_ref.current = {
+    staff_participant_uuid,
+    staff_user_uuid,
+    staff_tier,
+  }
+
+  const set_rows_ref = useRef(set_rows)
+  set_rows_ref.current = set_rows
+
+  const subscribed_room_uuid_ref = useRef<string | null>(null)
+
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       bottom_ref.current?.scrollIntoView({ block: 'end' })
@@ -217,9 +240,10 @@ export default function AdminChatTimeline({
   const refresh_typing_lines = useCallback(() => {
     const now = new Date()
     const lines: string[] = []
+    const staff = staff_participant_uuid_ref.current
 
     for (const typing of typing_rows_ref.current.values()) {
-      if (typing.participant_uuid === staff_participant_uuid) {
+      if (typing.participant_uuid === staff) {
         continue
       }
 
@@ -242,7 +266,7 @@ export default function AdminChatTimeline({
     }
 
     set_typing_lines(Array.from(new Set(lines)))
-  }, [staff_participant_uuid])
+  }, [])
 
   const schedule_typing_refresh = useCallback(() => {
     if (typing_timer_ref.current !== null) {
@@ -256,7 +280,7 @@ export default function AdminChatTimeline({
   }, [refresh_typing_lines])
 
   useEffect(() => {
-    if (!room_uuid || !staff_participant_uuid) {
+    if (!room_uuid) {
       return
     }
 
@@ -266,27 +290,54 @@ export default function AdminChatTimeline({
       return
     }
 
+    if (
+      subscribed_room_uuid_ref.current === room_uuid &&
+      realtime_channel_ref.current
+    ) {
+      const ctx = admin_rt_ctx_ref.current
+
+      send_chat_realtime_debug({
+        event: 'chat_realtime_subscribe_skipped',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        participant_uuid: ctx.staff_participant_uuid,
+        user_uuid: ctx.staff_user_uuid,
+        role: 'admin',
+        tier: ctx.staff_tier,
+        source_channel: 'admin',
+        channel_name: chat_room_realtime_channel_name(room_uuid),
+        cleanup_reason: 'duplicate_subscribe',
+        phase: 'admin_chat_realtime_guard',
+      })
+
+      return
+    }
+
+    const ctx = admin_rt_ctx_ref.current
+    const locked_room = room_uuid
+
     send_chat_realtime_debug({
       event: 'chat_realtime_client_created',
-      room_uuid,
-      active_room_uuid: room_uuid,
-      participant_uuid: staff_participant_uuid,
-      user_uuid: staff_user_uuid,
+      room_uuid: locked_room,
+      active_room_uuid: locked_room,
+      participant_uuid: ctx.staff_participant_uuid,
+      user_uuid: ctx.staff_user_uuid,
       role: 'admin',
-      tier: staff_tier,
-      source_channel: 'web',
+      tier: ctx.staff_tier,
+      source_channel: 'admin',
+      channel_name: chat_room_realtime_channel_name(locked_room),
       phase: 'admin_chat_create_browser_supabase',
     })
 
     const channel = subscribe_chat_room_realtime({
       supabase,
-      room_uuid,
-      active_room_uuid: room_uuid,
-      participant_uuid: staff_participant_uuid,
-      user_uuid: staff_user_uuid,
+      room_uuid: locked_room,
+      active_room_uuid: locked_room,
+      participant_uuid: ctx.staff_participant_uuid,
+      user_uuid: ctx.staff_user_uuid,
       role: 'admin',
-      tier: staff_tier,
-      source_channel: 'web',
+      tier: ctx.staff_tier,
+      source_channel: 'admin',
       on_message: (archived) => {
         if (!archived) {
           return
@@ -300,7 +351,7 @@ export default function AdminChatTimeline({
           bundle: archived.bundle as message_bundle_payload,
         })
 
-        set_rows((previous) => merge_timeline_rows(previous, [mapped]))
+        set_rows_ref.current((previous) => merge_timeline_rows(previous, [mapped]))
       },
       on_typing: (typing) => {
         typing_rows_ref.current.set(typing.participant_uuid, typing)
@@ -309,30 +360,38 @@ export default function AdminChatTimeline({
       },
     })
 
+    subscribed_room_uuid_ref.current = locked_room
     realtime_channel_ref.current = channel
 
     return () => {
-      realtime_channel_ref.current = null
+      const cleanup_reason =
+        latest_room_uuid_ref.current !== locked_room
+          ? 'room_uuid_changed'
+          : 'unmount'
+      const cleanup_ctx = admin_rt_ctx_ref.current
+
       cleanup_chat_room_realtime({
         supabase,
         channel,
-        room_uuid,
-        active_room_uuid: room_uuid,
-        participant_uuid: staff_participant_uuid,
-        user_uuid: staff_user_uuid,
+        room_uuid: locked_room,
+        active_room_uuid: locked_room,
+        participant_uuid: cleanup_ctx.staff_participant_uuid,
+        user_uuid: cleanup_ctx.staff_user_uuid,
         role: 'admin',
-        tier: staff_tier,
-        source_channel: 'web',
+        tier: cleanup_ctx.staff_tier,
+        source_channel: 'admin',
+        cleanup_reason,
       })
+
+      if (subscribed_room_uuid_ref.current === locked_room) {
+        subscribed_room_uuid_ref.current = null
+      }
+
+      if (realtime_channel_ref.current === channel) {
+        realtime_channel_ref.current = null
+      }
     }
-  }, [
-    refresh_typing_lines,
-    room_uuid,
-    schedule_typing_refresh,
-    staff_participant_uuid,
-    staff_tier,
-    staff_user_uuid,
-  ])
+  }, [room_uuid])
 
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {
@@ -362,7 +421,7 @@ export default function AdminChatTimeline({
         tier: staff_tier,
         display_name: staff_display_name,
         is_typing: action === 'typing_start',
-        source_channel: 'web',
+        source_channel: 'admin',
       })
     },
     [room_uuid, staff_display_name, staff_participant_uuid, staff_tier, staff_user_uuid],

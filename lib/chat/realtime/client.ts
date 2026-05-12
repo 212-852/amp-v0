@@ -73,6 +73,7 @@ type chat_realtime_debug_payload = {
   error_details?: string | null
   error_hint?: string | null
   phase: string
+  cleanup_reason?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -398,6 +399,7 @@ export function cleanup_chat_room_realtime(input: {
   role?: string | null
   tier?: string | null
   source_channel?: string | null
+  cleanup_reason: string
 }) {
   const channel_name = chat_room_realtime_channel_name(input.room_uuid)
 
@@ -411,12 +413,14 @@ export function cleanup_chat_room_realtime(input: {
     tier: input.tier,
     source_channel: input.source_channel ?? 'web',
     channel_name,
+    cleanup_reason: input.cleanup_reason,
     phase: 'cleanup_chat_room_realtime',
   })
 
   console_chat_realtime('cleanup_started', {
     channel_name,
     room_uuid: input.room_uuid,
+    cleanup_reason: input.cleanup_reason,
   })
 
   void input.supabase.removeChannel(input.channel).then((status) => {
@@ -431,12 +435,14 @@ export function cleanup_chat_room_realtime(input: {
       source_channel: input.source_channel ?? 'web',
       subscribe_status: status,
       channel_name,
+      cleanup_reason: input.cleanup_reason,
       phase: 'cleanup_chat_room_realtime',
     })
 
     console_chat_realtime('cleanup_completed', {
       channel_name,
       room_uuid: input.room_uuid,
+      cleanup_reason: input.cleanup_reason,
       status,
     })
   })

@@ -31,6 +31,7 @@ type chat_debug_body = {
   error_message?: unknown
   error_details?: unknown
   error_hint?: unknown
+  cleanup_reason?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
       error_message: string_or_null(body?.error_message),
       error_details: string_or_null(body?.error_details),
       error_hint: string_or_null(body?.error_hint),
+      cleanup_reason: string_or_null(body?.cleanup_reason),
     },
   })
 
