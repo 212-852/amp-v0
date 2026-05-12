@@ -697,17 +697,20 @@ export function WebChat({
     scroll_to_bottom('smooth')
   }, [render_messages.length, scroll_to_bottom])
 
+  useEffect(() => {
+    if (!typing_banner) {
+      return
+    }
+
+    scroll_to_bottom('smooth')
+  }, [scroll_to_bottom, typing_banner])
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={set_scroll_container}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4"
       >
-        {typing_banner ? (
-          <div className="px-5 pb-2 text-center text-[12px] font-medium text-[#8a7568]">
-            {typing_banner}
-          </div>
-        ) : null}
         <div className="flex flex-col gap-5">
           {visible_messages.map((message) => (
             <WebChatMessageRow
@@ -716,6 +719,11 @@ export function WebChat({
             />
           ))}
         </div>
+        {typing_banner ? (
+          <div className="px-5 pb-2 pt-4 text-center text-[12px] font-medium text-[#8a7568]">
+            {typing_banner}
+          </div>
+        ) : null}
         <div className="h-[260px] shrink-0" aria-hidden="true" />
       </div>
     </div>

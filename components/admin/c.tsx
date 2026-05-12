@@ -11,6 +11,7 @@ import {
   publish_chat_typing,
   send_chat_realtime_debug,
   subscribe_chat_room_realtime,
+  sync_chat_typing_presence,
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
 import { create_browser_supabase } from '@/lib/db/browser'
@@ -250,7 +251,7 @@ export default function AdminChatTimeline({
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [rows.length])
+  }, [rows.length, typing_lines.length])
 
   useEffect(() => {
     if (!room_uuid) {
@@ -505,6 +506,12 @@ export default function AdminChatTimeline({
 
       typing_active_ref.current = action === 'typing_start'
 
+      sync_chat_typing_presence({
+        room_uuid,
+        participant_uuid: staff_participant_uuid,
+        is_typing: action === 'typing_start',
+      })
+
       publish_chat_typing({
         channel,
         room_uuid,
@@ -615,11 +622,6 @@ export default function AdminChatTimeline({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-6 pb-24 pt-3">
-        {typing_lines.length > 0 ? (
-          <div className="mb-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-center text-[12px] font-medium text-neutral-600">
-            {typing_lines.join(' / ')}
-          </div>
-        ) : null}
         {load_failed ? (
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
             メッセージを読み込めませんでした
@@ -674,11 +676,14 @@ export default function AdminChatTimeline({
                 </li>
               )
             })}
-            <li aria-hidden className="h-1">
-              <div ref={bottom_ref} />
-            </li>
           </ol>
         )}
+        {typing_lines.length > 0 ? (
+          <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-center text-[12px] font-medium text-neutral-600">
+            {typing_lines.join(' / ')}
+          </div>
+        ) : null}
+        <div ref={bottom_ref} className="h-1" aria-hidden="true" />
       </div>
 
       <footer className="shrink-0 border-t border-neutral-200 bg-white pb-[max(8px,env(safe-area-inset-bottom,0px))] pt-2">

@@ -935,3 +935,21 @@ export function publish_chat_typing(input: {
     })
   })
 }
+
+export function sync_chat_typing_presence(input: {
+  room_uuid: string
+  participant_uuid: string
+  is_typing: boolean
+}) {
+  void fetch('/api/chat/presence', {
+    method: 'POST',
+    credentials: 'include',
+    keepalive: !input.is_typing,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      action: input.is_typing ? 'typing_start' : 'typing_stop',
+    }),
+  }).catch(() => {})
+}

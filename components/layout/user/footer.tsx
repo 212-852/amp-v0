@@ -26,6 +26,7 @@ import type { room_mode } from '@/lib/chat/room'
 import { can_switch_to_concierge } from '@/lib/chat/rules'
 import {
   publish_chat_typing,
+  sync_chat_typing_presence,
 } from '@/lib/chat/realtime/client'
 import {
   get_locale,
@@ -244,6 +245,12 @@ export default function UserFooter() {
       }
 
       typing_active_ref.current = action === 'typing_start'
+
+      sync_chat_typing_presence({
+        room_uuid: chat.room_uuid,
+        participant_uuid: chat.participant_uuid,
+        is_typing: action === 'typing_start',
+      })
 
       publish_chat_typing({
         channel,
