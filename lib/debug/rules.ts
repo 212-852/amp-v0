@@ -98,6 +98,34 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const chat_realtime_events = new Set([
+    'chat_realtime_subscribe_started',
+    'chat_realtime_subscribe_failed',
+    'chat_realtime_message_received',
+    'chat_realtime_typing_received',
+    'chat_typing_publish_started',
+    'chat_typing_publish_failed',
+    'chat_typing_publish_succeeded',
+  ])
+
+  if (
+    input.category === 'chat_realtime' &&
+    chat_realtime_events.has(input.event)
+  ) {
+    const is_failed =
+      input.event === 'chat_realtime_subscribe_failed' ||
+      input.event === 'chat_typing_publish_failed'
+
+    return {
+      category: 'chat_realtime',
+      level: is_failed ? 'error' : 'info',
+      channels:
+        is_failed || debug_control.chat_message_debug_enabled
+          ? ['discord']
+          : [],
+    }
+  }
+
   return {
     category: input.category,
     level: 'info',

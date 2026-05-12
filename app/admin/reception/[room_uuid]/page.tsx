@@ -13,6 +13,7 @@ import {
 } from '@/lib/admin/reception/room'
 import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
 import { resolve_admin_reception_send_context } from '@/lib/chat/room'
+import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
 
 export const dynamic = 'force-dynamic'
 
@@ -121,6 +122,9 @@ export default async function AdminReceptionRoomPage({
   const staff_participant_uuid = send_context.ok
     ? send_context.data.staff_participant_uuid
     : ''
+  const staff_display_name = await resolve_handoff_memo_saved_by_name(
+    access.user_uuid,
+  )
   const room_result = await load_room(room_uuid)
   const subject = await load_subject(room_uuid)
   const memos = await load_memos(room_uuid)
@@ -184,6 +188,7 @@ export default async function AdminReceptionRoomPage({
           load_failed={!message_result.ok}
           room_uuid={room_uuid}
           staff_participant_uuid={staff_participant_uuid}
+          staff_display_name={staff_display_name}
         />
       </section>
     </div>

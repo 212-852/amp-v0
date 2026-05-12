@@ -1,4 +1,4 @@
-export const typing_timeout_ms = 5_000
+export const typing_timeout_ms = 3_000
 
 export type participant_role =
   | 'user'

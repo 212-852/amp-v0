@@ -28,6 +28,7 @@ export const control = {
       'handoff_memo',
       'admin_management',
       'chat_message',
+      'chat_realtime',
     ],
   },
 

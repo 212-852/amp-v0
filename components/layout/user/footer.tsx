@@ -25,10 +25,16 @@ import type { archived_message } from '@/lib/chat/archive'
 import type { room_mode } from '@/lib/chat/room'
 import { can_switch_to_concierge } from '@/lib/chat/rules'
 import {
+  chat_room_realtime_channel_name,
+  publish_chat_typing,
+} from '@/lib/chat/realtime/client'
+import {
   get_locale,
   subscribe_locale,
 } from '@/lib/locale/state'
 import { use_session_profile } from '@/components/session/profile'
+import { create_browser_supabase } from '@/lib/db/browser'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 const content = {
   mypage: {
@@ -205,6 +211,7 @@ export default function UserFooter() {
   const input_ref = useRef<HTMLInputElement | null>(null)
   const typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
+  const typing_channel_ref = useRef<RealtimeChannel | null>(null)
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [pending_switch_mode, set_pending_switch_mode] =
@@ -236,22 +243,50 @@ export default function UserFooter() {
 
       typing_active_ref.current = action === 'typing_start'
 
-      void fetch('/api/chat/presence', {
-        method: 'POST',
-        credentials: 'include',
-        keepalive: action === 'typing_stop',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          room_uuid: chat.room_uuid,
-          participant_uuid: chat.participant_uuid,
-          action,
-        }),
-      }).catch(() => {})
+      const channel = typing_channel_ref.current
+
+      if (!channel) {
+        return
+      }
+
+      publish_chat_typing({
+        channel,
+        room_uuid: chat.room_uuid,
+        participant_uuid: chat.participant_uuid,
+        role: 'user',
+        display_name: 'user',
+        is_typing: action === 'typing_start',
+      })
     },
     [chat.participant_uuid, chat.room_uuid],
   )
+
+  useEffect(() => {
+    if (!chat.room_uuid) {
+      typing_channel_ref.current = null
+
+      return
+    }
+
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      typing_channel_ref.current = null
+
+      return
+    }
+
+    const channel = supabase
+      .channel(chat_room_realtime_channel_name(chat.room_uuid))
+      .subscribe()
+
+    typing_channel_ref.current = channel
+
+    return () => {
+      typing_channel_ref.current = null
+      void supabase.removeChannel(channel)
+    }
+  }, [chat.room_uuid])
 
   useEffect(() => {
     const mounted_timer = window.setTimeout(() => {
@@ -310,7 +345,7 @@ export default function UserFooter() {
     typing_timer_ref.current = window.setTimeout(() => {
       typing_timer_ref.current = null
       post_typing_presence('typing_stop')
-    }, 5_000)
+    }, 3_000)
   }
 
   function handle_message_input_change() {

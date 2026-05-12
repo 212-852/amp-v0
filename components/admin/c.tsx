@@ -4,15 +4,21 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import PawIcon from '@/components/icons/paw'
 import type { reception_room_message } from '@/lib/admin/reception/room'
-import { archived_message_from_message_row } from '@/lib/chat/realtime/row'
-import type { message_insert_row } from '@/lib/chat/realtime/row'
+import {
+  chat_typing_is_fresh,
+  publish_chat_typing,
+  subscribe_chat_room_realtime,
+  type chat_typing_payload,
+} from '@/lib/chat/realtime/client'
 import { create_browser_supabase } from '@/lib/db/browser'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 type AdminChatTimelineProps = {
   messages: reception_room_message[]
   load_failed: boolean
   room_uuid: string
   staff_participant_uuid: string
+  staff_display_name: string
 }
 
 function compare_timeline_asc(
@@ -164,8 +170,11 @@ export default function AdminChatTimeline({
   load_failed,
   room_uuid,
   staff_participant_uuid,
+  staff_display_name,
 }: AdminChatTimelineProps) {
   const bottom_ref = useRef<HTMLDivElement | null>(null)
+  const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
+  const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
     [...initial_messages].sort(compare_timeline_asc),
   )
@@ -173,11 +182,8 @@ export default function AdminChatTimeline({
   const [is_sending, set_is_sending] = useState(false)
   const [typing_lines, set_typing_lines] = useState<string[]>([])
   const typing_timer_ref = useRef<number | null>(null)
+  const publish_typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
-
-  useEffect(() => {
-    set_rows([...initial_messages].sort(compare_timeline_asc))
-  }, [initial_messages])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -202,35 +208,35 @@ export default function AdminChatTimeline({
     }).catch(() => {})
   }, [room_uuid])
 
-  const refresh_typing_lines = useCallback(async () => {
-    if (!room_uuid || !staff_participant_uuid) {
-      set_typing_lines([])
+  const refresh_typing_lines = useCallback(() => {
+    const now = new Date()
+    const lines: string[] = []
 
-      return
-    }
-
-    try {
-      const query = new URLSearchParams({
-        room_uuid,
-        viewer_participant_uuid: staff_participant_uuid,
-      })
-      const response = await fetch(`/api/chat/room/typing?${query.toString()}`, {
-        credentials: 'include',
-      })
-      const payload = (await response.json().catch(() => null)) as
-        | { ok: true; lines?: string[] }
-        | { ok: false }
-        | null
-
-      if (!response.ok || !payload || payload.ok !== true) {
-        return
+    for (const typing of typing_rows_ref.current.values()) {
+      if (typing.participant_uuid === staff_participant_uuid) {
+        continue
       }
 
-      set_typing_lines(payload.lines ?? [])
-    } catch {
-      set_typing_lines([])
+      if (
+        !chat_typing_is_fresh({
+          is_typing: typing.is_typing,
+          typed_at: typing.typed_at,
+          now,
+        })
+      ) {
+        continue
+      }
+
+      if (typing.role === 'user') {
+        lines.push('user が入力中...')
+      } else if (typing.role === 'admin' || typing.role === 'concierge') {
+        const name = typing.display_name?.trim() || 'Admin'
+        lines.push(`${name} が入力中...`)
+      }
     }
-  }, [room_uuid, staff_participant_uuid])
+
+    set_typing_lines(Array.from(new Set(lines)))
+  }, [staff_participant_uuid])
 
   const schedule_typing_refresh = useCallback(() => {
     if (typing_timer_ref.current !== null) {
@@ -239,8 +245,8 @@ export default function AdminChatTimeline({
 
     typing_timer_ref.current = window.setTimeout(() => {
       typing_timer_ref.current = null
-      void refresh_typing_lines()
-    }, 280)
+      refresh_typing_lines()
+    }, 3_100)
   }, [refresh_typing_lines])
 
   useEffect(() => {
@@ -248,82 +254,51 @@ export default function AdminChatTimeline({
       return
     }
 
-    void refresh_typing_lines()
-
     const supabase = create_browser_supabase()
 
     if (!supabase) {
       return
     }
 
-    const channel = supabase
-      .channel(`admin_room_participants:${room_uuid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'participants',
-          filter: `room_uuid=eq.${room_uuid}`,
-        },
-        () => {
-          schedule_typing_refresh()
-        },
-      )
-      .subscribe()
+    const channel = subscribe_chat_room_realtime({
+      supabase,
+      room_uuid,
+      participant_uuid: staff_participant_uuid,
+      role: 'admin',
+      on_message: (archived) => {
+        if (!archived) {
+          return
+        }
+
+        const mapped = archived_payload_to_reception_message({
+          archive_uuid: archived.archive_uuid,
+          room_uuid: archived.room_uuid,
+          sequence: archived.sequence,
+          created_at: archived.created_at,
+          bundle: archived.bundle as message_bundle_payload,
+        })
+
+        set_rows((previous) => merge_timeline_rows(previous, [mapped]))
+      },
+      on_typing: (typing) => {
+        typing_rows_ref.current.set(typing.participant_uuid, typing)
+        refresh_typing_lines()
+        schedule_typing_refresh()
+      },
+    })
+
+    realtime_channel_ref.current = channel
 
     return () => {
+      realtime_channel_ref.current = null
       void supabase.removeChannel(channel)
     }
-  }, [room_uuid, staff_participant_uuid, refresh_typing_lines, schedule_typing_refresh])
-
-  useEffect(() => {
-    if (!room_uuid) {
-      return
-    }
-
-    const supabase = create_browser_supabase()
-
-    if (!supabase) {
-      return
-    }
-
-    const channel = supabase
-      .channel(`admin_room_messages:${room_uuid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `room_uuid=eq.${room_uuid}`,
-        },
-        (payload) => {
-          const archived = archived_message_from_message_row(
-            payload.new as message_insert_row,
-          )
-
-          if (!archived) {
-            return
-          }
-
-          const mapped = archived_payload_to_reception_message({
-            archive_uuid: archived.archive_uuid,
-            room_uuid: archived.room_uuid,
-            sequence: archived.sequence,
-            created_at: archived.created_at,
-            bundle: archived.bundle as message_bundle_payload,
-          })
-
-          set_rows((previous) => merge_timeline_rows(previous, [mapped]))
-        },
-      )
-      .subscribe()
-
-    return () => {
-      void supabase.removeChannel(channel)
-    }
-  }, [room_uuid])
+  }, [
+    refresh_typing_lines,
+    room_uuid,
+    schedule_typing_refresh,
+    staff_participant_uuid,
+  ])
 
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {
@@ -337,19 +312,22 @@ export default function AdminChatTimeline({
 
       typing_active_ref.current = action === 'typing_start'
 
-      void fetch('/api/chat/presence', {
-        method: 'POST',
-        credentials: 'include',
-        keepalive: action === 'typing_stop',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          room_uuid,
-          participant_uuid: staff_participant_uuid,
-          action,
-        }),
-      }).catch(() => {})
+      const channel = realtime_channel_ref.current
+
+      if (!channel) {
+        return
+      }
+
+      publish_chat_typing({
+        channel,
+        room_uuid,
+        participant_uuid: staff_participant_uuid,
+        role: 'admin',
+        display_name: staff_display_name,
+        is_typing: action === 'typing_start',
+      })
     },
-    [room_uuid, staff_participant_uuid],
+    [room_uuid, staff_display_name, staff_participant_uuid],
   )
 
   useEffect(() => {
@@ -358,9 +336,24 @@ export default function AdminChatTimeline({
         window.clearTimeout(typing_timer_ref.current)
       }
 
+      if (publish_typing_timer_ref.current !== null) {
+        window.clearTimeout(publish_typing_timer_ref.current)
+      }
+
       post_typing_presence('typing_stop')
     }
   }, [post_typing_presence])
+
+  function schedule_publish_typing_stop() {
+    if (publish_typing_timer_ref.current !== null) {
+      window.clearTimeout(publish_typing_timer_ref.current)
+    }
+
+    publish_typing_timer_ref.current = window.setTimeout(() => {
+      publish_typing_timer_ref.current = null
+      post_typing_presence('typing_stop')
+    }, 3_000)
+  }
 
   async function submit_reply(raw_text: string) {
     const text = raw_text.trim()
@@ -512,6 +505,7 @@ export default function AdminChatTimeline({
 
               if (value.trim().length > 0) {
                 post_typing_presence('typing_start')
+                schedule_publish_typing_stop()
               } else {
                 post_typing_presence('typing_stop')
               }

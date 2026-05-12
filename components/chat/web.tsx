@@ -10,8 +10,10 @@ import {
 
 import { useUserChat } from '@/components/chat/context'
 import type { archived_message } from '@/lib/chat/archive'
-import { archived_message_from_message_row } from '@/lib/chat/realtime/row'
-import type { message_insert_row } from '@/lib/chat/realtime/row'
+import {
+  chat_typing_is_fresh,
+  subscribe_chat_room_realtime,
+} from '@/lib/chat/realtime/client'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
   faq_bundle,
@@ -24,7 +26,6 @@ import type {
 } from '@/lib/chat/message'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
-import { typing_timestamp_is_fresh } from '@/lib/chat/presence/rules'
 import { create_browser_supabase } from '@/lib/db/browser'
 
 function post_presence(input: {
@@ -374,7 +375,7 @@ export function WebChat({
         participant_uuid: string
         role: string | null
         is_typing: boolean | null
-        typing_at: string | null
+        typed_at: string | null
       }
     >
   >(new Map())
@@ -395,7 +396,11 @@ export function WebChat({
         (role === 'admin' ||
           role === 'concierge' ||
           role === 'bot') &&
-        typing_timestamp_is_fresh(row.typing_at, row.is_typing, now)
+        chat_typing_is_fresh({
+          is_typing: row.is_typing === true,
+          typed_at: row.typed_at ?? '',
+          now,
+        })
       ) {
         has_other_staff = true
         break
@@ -449,107 +454,42 @@ export function WebChat({
       return
     }
 
-    const channel = supabase
-      .channel(`room_messages:${room_uuid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `room_uuid=eq.${room_uuid}`,
-        },
-        (payload) => {
-          const message = archived_message_from_message_row(
-            payload.new as message_insert_row,
-          )
+    const channel = subscribe_chat_room_realtime({
+      supabase,
+      room_uuid,
+      participant_uuid,
+      role: 'user',
+      on_message: (message) => {
+        if (!message) {
+          return
+        }
 
-          if (!message) {
-            return
-          }
+        if (
+          message.bundle.bundle_type === 'room_action_log' &&
+          !end_user_should_see_room_action_log_bundle()
+        ) {
+          return
+        }
 
-          if (
-            message.bundle.bundle_type === 'room_action_log' &&
-            !end_user_should_see_room_action_log_bundle()
-          ) {
-            return
-          }
+        append_message(message)
+      },
+      on_typing: (typing) => {
+        typing_rows_ref.current.set(typing.participant_uuid, {
+          participant_uuid: typing.participant_uuid,
+          role: typing.role,
+          is_typing: typing.is_typing,
+          typed_at: typing.typed_at,
+        })
+        recompute_staff_typing_banner()
 
-          append_message(message)
-        },
-      )
-      .subscribe()
+        window.setTimeout(recompute_staff_typing_banner, 3_100)
+      },
+    })
 
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [append_message, room_uuid])
-
-  useEffect(() => {
-    if (!room_uuid) {
-      return
-    }
-
-    const supabase = create_browser_supabase()
-
-    if (!supabase) {
-      return
-    }
-
-    const client = supabase
-
-    async function bootstrap_typing_rows() {
-      const { data, error } = await client
-        .from('participants')
-        .select('participant_uuid, role, is_typing, typing_at')
-        .eq('room_uuid', room_uuid)
-
-      if (error || !data) {
-        return
-      }
-
-      for (const row of data as Array<{
-        participant_uuid: string
-        role: string | null
-        is_typing: boolean | null
-        typing_at: string | null
-      }>) {
-        typing_rows_ref.current.set(row.participant_uuid, row)
-      }
-
-      recompute_staff_typing_banner()
-    }
-
-    void bootstrap_typing_rows()
-
-    const typing_channel = client
-      .channel(`room_participants_typing:${room_uuid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'participants',
-          filter: `room_uuid=eq.${room_uuid}`,
-        },
-        (payload) => {
-          const row = payload.new as {
-            participant_uuid: string
-            role: string | null
-            is_typing: boolean | null
-            typing_at: string | null
-          }
-
-          typing_rows_ref.current.set(row.participant_uuid, row)
-          recompute_staff_typing_banner()
-        },
-      )
-      .subscribe()
-
-    return () => {
-      void client.removeChannel(typing_channel)
-    }
-  }, [recompute_staff_typing_banner, room_uuid])
+  }, [append_message, participant_uuid, recompute_staff_typing_banner, room_uuid])
 
   const render_messages = active_room_uuid === room_uuid
     ? active_messages
