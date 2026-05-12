@@ -13,6 +13,8 @@ import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
 import {
   chat_typing_is_fresh,
+  cleanup_chat_room_realtime,
+  send_chat_realtime_debug,
   subscribe_chat_room_realtime,
 } from '@/lib/chat/realtime/client'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
@@ -457,6 +459,18 @@ export function WebChat({
       return
     }
 
+    send_chat_realtime_debug({
+      event: 'chat_realtime_client_created',
+      room_uuid,
+      active_room_uuid,
+      participant_uuid,
+      user_uuid: session?.user_uuid ?? null,
+      role: 'user',
+      tier: session?.tier ?? null,
+      source_channel: session?.source_channel ?? 'web',
+      phase: 'web_chat_create_browser_supabase',
+    })
+
     const channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid,
@@ -464,7 +478,8 @@ export function WebChat({
       participant_uuid,
       user_uuid: session?.user_uuid ?? null,
       role: 'user',
-      source_channel: 'web',
+      tier: session?.tier ?? null,
+      source_channel: session?.source_channel ?? 'web',
       on_message: (message) => {
         if (!message) {
           return
@@ -496,7 +511,17 @@ export function WebChat({
 
     return () => {
       room_realtime_channelRef.current = null
-      void supabase.removeChannel(channel)
+      cleanup_chat_room_realtime({
+        supabase,
+        channel,
+        room_uuid,
+        active_room_uuid,
+        participant_uuid,
+        user_uuid: session?.user_uuid ?? null,
+        role: 'user',
+        tier: session?.tier ?? null,
+        source_channel: session?.source_channel ?? 'web',
+      })
     }
   }, [
     append_message,
@@ -506,6 +531,8 @@ export function WebChat({
     room_uuid,
     active_room_uuid,
     session?.user_uuid,
+    session?.tier,
+    session?.source_channel,
   ])
 
   const render_messages = active_room_uuid === room_uuid

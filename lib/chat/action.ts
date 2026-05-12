@@ -1730,6 +1730,53 @@ async function emit_chat_message_send_debug(input: {
   })
 }
 
+async function emit_chat_realtime_support_debug(input: {
+  event:
+    | 'chat_support_started_insert_started'
+    | 'chat_support_started_insert_succeeded'
+    | 'chat_support_started_insert_failed'
+  room_uuid: string | null
+  participant_uuid?: string | null
+  user_uuid?: string | null
+  role?: string | null
+  tier?: string | null
+  source_channel?: chat_channel | null
+  payload_message_uuid?: string | null
+  payload_action_uuid?: string | null
+  phase: string
+  error?: unknown
+}) {
+  const from_error = input.error ? chat_message_error_fields(input.error) : null
+
+  await debug_event({
+    category: 'chat_realtime',
+    event: input.event,
+    payload: {
+      room_uuid: input.room_uuid,
+      active_room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid ?? null,
+      user_uuid: input.user_uuid ?? null,
+      role: input.role ?? null,
+      tier: input.tier ?? null,
+      source_channel: input.source_channel ?? 'web',
+      event_name: 'support_started',
+      schema: 'public',
+      table: 'messages',
+      filter: input.room_uuid ? `room_uuid=eq.${input.room_uuid}` : null,
+      payload_room_uuid: input.room_uuid,
+      payload_message_uuid: input.payload_message_uuid ?? null,
+      payload_action_uuid: input.payload_action_uuid ?? null,
+      sender_user_uuid: input.user_uuid ?? null,
+      sender_role: 'admin',
+      error_code: from_error?.error_code ?? null,
+      error_message: from_error?.error_message ?? null,
+      error_details: from_error?.error_details ?? null,
+      error_hint: from_error?.error_hint ?? null,
+      phase: input.phase,
+    },
+  })
+}
+
 export type admin_reception_room_open_result =
   | { ok: true; skipped?: boolean }
   | { ok: false; error: string }
@@ -1870,12 +1917,60 @@ export async function handle_admin_reception_room_opened(
     admin_user_uuid: admin_uuid,
   })
 
-  await archive_message_bundles({
+  await emit_chat_realtime_support_debug({
+    event: 'chat_support_started_insert_started',
     room_uuid,
     participant_uuid: user_participant_uuid,
-    bot_participant_uuid,
-    channel: 'web',
-    bundles: [bundle],
+    user_uuid: admin_uuid,
+    role: session.role,
+    tier: session.tier,
+    source_channel: 'web',
+    payload_action_uuid: bundle.bundle_uuid,
+    phase: 'archive_support_started_action',
+  })
+
+  let archived_support_messages: archived_message[]
+
+  try {
+    archived_support_messages = await archive_message_bundles({
+      room_uuid,
+      participant_uuid: user_participant_uuid,
+      bot_participant_uuid,
+      channel: 'web',
+      bundles: [bundle],
+    })
+  } catch (error) {
+    await emit_chat_realtime_support_debug({
+      event: 'chat_support_started_insert_failed',
+      room_uuid,
+      participant_uuid: user_participant_uuid,
+      user_uuid: admin_uuid,
+      role: session.role,
+      tier: session.tier,
+      source_channel: 'web',
+      payload_action_uuid: bundle.bundle_uuid,
+      phase: 'archive_support_started_action',
+      error,
+    })
+
+    return {
+      status: 500,
+      body: { ok: false, error: 'support_started_insert_failed' },
+    }
+  }
+
+  await emit_chat_realtime_support_debug({
+    event: 'chat_support_started_insert_succeeded',
+    room_uuid,
+    participant_uuid: user_participant_uuid,
+    user_uuid: admin_uuid,
+    role: session.role,
+    tier: session.tier,
+    source_channel: 'web',
+    payload_message_uuid:
+      archived_support_messages[0]?.archive_uuid ?? null,
+    payload_action_uuid: bundle.bundle_uuid,
+    phase: 'archive_support_started_action',
   })
 
   return {

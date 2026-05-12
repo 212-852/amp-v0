@@ -252,12 +252,13 @@ export default function UserFooter() {
         participant_uuid: chat.participant_uuid,
         user_uuid: session?.user_uuid ?? null,
         role: 'user',
+        tier: session?.tier ?? null,
         display_name: 'user',
         is_typing: action === 'typing_start',
         source_channel: session?.source_channel ?? 'web',
       })
     },
-    [chat.participant_uuid, chat.room_uuid, chat.room_realtime_channel_ref, session?.user_uuid, session?.source_channel],
+    [chat.participant_uuid, chat.room_uuid, chat.room_realtime_channel_ref, session?.user_uuid, session?.tier, session?.source_channel],
   )
 
   useEffect(() => {

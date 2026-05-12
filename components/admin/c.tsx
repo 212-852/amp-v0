@@ -6,7 +6,9 @@ import PawIcon from '@/components/icons/paw'
 import type { reception_room_message } from '@/lib/admin/reception/room'
 import {
   chat_typing_is_fresh,
+  cleanup_chat_room_realtime,
   publish_chat_typing,
+  send_chat_realtime_debug,
   subscribe_chat_room_realtime,
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
@@ -19,6 +21,8 @@ type AdminChatTimelineProps = {
   room_uuid: string
   staff_participant_uuid: string
   staff_display_name: string
+  staff_user_uuid: string | null
+  staff_tier: string | null
 }
 
 function compare_timeline_asc(
@@ -171,6 +175,8 @@ export default function AdminChatTimeline({
   room_uuid,
   staff_participant_uuid,
   staff_display_name,
+  staff_user_uuid,
+  staff_tier,
 }: AdminChatTimelineProps) {
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
@@ -260,14 +266,27 @@ export default function AdminChatTimeline({
       return
     }
 
+    send_chat_realtime_debug({
+      event: 'chat_realtime_client_created',
+      room_uuid,
+      active_room_uuid: room_uuid,
+      participant_uuid: staff_participant_uuid,
+      user_uuid: staff_user_uuid,
+      role: 'admin',
+      tier: staff_tier,
+      source_channel: 'web',
+      phase: 'admin_chat_create_browser_supabase',
+    })
+
     const channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid,
       active_room_uuid: room_uuid,
       participant_uuid: staff_participant_uuid,
-      user_uuid: null,
+      user_uuid: staff_user_uuid,
       role: 'admin',
-      source_channel: 'admin',
+      tier: staff_tier,
+      source_channel: 'web',
       on_message: (archived) => {
         if (!archived) {
           return
@@ -294,13 +313,25 @@ export default function AdminChatTimeline({
 
     return () => {
       realtime_channel_ref.current = null
-      void supabase.removeChannel(channel)
+      cleanup_chat_room_realtime({
+        supabase,
+        channel,
+        room_uuid,
+        active_room_uuid: room_uuid,
+        participant_uuid: staff_participant_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'admin',
+        tier: staff_tier,
+        source_channel: 'web',
+      })
     }
   }, [
     refresh_typing_lines,
     room_uuid,
     schedule_typing_refresh,
     staff_participant_uuid,
+    staff_tier,
+    staff_user_uuid,
   ])
 
   const post_typing_presence = useCallback(
@@ -326,14 +357,15 @@ export default function AdminChatTimeline({
         room_uuid,
         active_room_uuid: room_uuid,
         participant_uuid: staff_participant_uuid,
-        user_uuid: null,
+        user_uuid: staff_user_uuid,
         role: 'admin',
+        tier: staff_tier,
         display_name: staff_display_name,
         is_typing: action === 'typing_start',
-        source_channel: 'admin',
+        source_channel: 'web',
       })
     },
-    [room_uuid, staff_display_name, staff_participant_uuid],
+    [room_uuid, staff_display_name, staff_participant_uuid, staff_tier, staff_user_uuid],
   )
 
   useEffect(() => {

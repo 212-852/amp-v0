@@ -51,14 +51,22 @@ type chat_realtime_debug_payload = {
   participant_uuid?: string | null
   user_uuid?: string | null
   role?: string | null
+  tier?: string | null
   source_channel?: string | null
   subscribe_status?: string | null
+  channel_name?: string | null
+  event_name?: string | null
+  schema?: string | null
   postgres_event?: string | null
   table?: string | null
   filter?: string | null
   message_uuid?: string | null
+  payload_message_uuid?: string | null
+  payload_action_uuid?: string | null
   payload_room_uuid?: string | null
   sender_user_uuid?: string | null
+  sender_role?: string | null
+  is_typing?: boolean | null
   ignored_reason?: string | null
   error_code?: string | null
   error_message?: string | null
@@ -77,11 +85,11 @@ export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
 }
 
 function console_chat_realtime(message: string, data: Record<string, unknown>) {
-  if (typeof console === 'undefined' || !console.info) {
+  if (typeof console === 'undefined' || !console.log) {
     return
   }
 
-  console.info(`[chat_realtime] ${message}`, data)
+  console.log(`[chat_realtime] ${message}`, data)
 }
 
 function is_chat_typing_payload(value: unknown): value is chat_typing_payload {
@@ -107,31 +115,40 @@ export function subscribe_chat_room_realtime(input: {
   participant_uuid?: string | null
   user_uuid?: string | null
   role?: string | null
+  tier?: string | null
   source_channel?: string | null
   on_message: (message: ReturnType<typeof archived_message_from_message_row>) => void
   on_typing: (payload: chat_typing_payload) => void
 }): RealtimeChannel {
   const channel_name = chat_room_realtime_channel_name(input.room_uuid)
   const postgres_filter = `room_uuid=eq.${input.room_uuid}`
-
-  send_chat_realtime_debug({
-    event: 'chat_realtime_channel_subscribe_status',
+  const base_debug = {
     room_uuid: input.room_uuid,
     active_room_uuid: input.active_room_uuid ?? input.room_uuid,
     participant_uuid: input.participant_uuid,
     user_uuid: input.user_uuid,
     role: input.role,
+    tier: input.tier,
     source_channel: input.source_channel ?? 'web',
-    subscribe_status: 'SUBSCRIBE_REQUESTED',
-    postgres_event: 'INSERT',
+    channel_name,
+    event_name: 'INSERT',
+    schema: 'public',
     table: 'messages',
     filter: postgres_filter,
+  }
+
+  send_chat_realtime_debug({
+    event: 'chat_realtime_subscribe_started',
+    ...base_debug,
+    subscribe_status: 'SUBSCRIBE_REQUESTED',
+    postgres_event: 'INSERT',
     phase: 'subscribe_chat_room_realtime',
   })
 
-  console_chat_realtime('subscribe_requested', {
-    channel: channel_name,
+  console_chat_realtime('subscribe_started', {
+    channel_name,
     room_uuid: input.room_uuid,
+    active_room_uuid: input.active_room_uuid ?? input.room_uuid,
     filter: postgres_filter,
   })
 
@@ -141,6 +158,20 @@ export function subscribe_chat_room_realtime(input: {
         broadcast: { self: true },
       },
     })
+
+  send_chat_realtime_debug({
+    event: 'chat_realtime_channel_created',
+    ...base_debug,
+    phase: 'channel_created',
+  })
+
+  console_chat_realtime('channel_created', {
+    channel_name,
+    room_uuid: input.room_uuid,
+    filter: postgres_filter,
+  })
+
+  channel
     .on(
       'postgres_changes',
       {
@@ -159,24 +190,18 @@ export function subscribe_chat_room_realtime(input: {
         if (payload_room_uuid && payload_room_uuid !== input.room_uuid) {
           send_chat_realtime_debug({
             event: 'chat_realtime_message_callback_ignored',
-            room_uuid: input.room_uuid,
-            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-            participant_uuid: input.participant_uuid,
-            user_uuid: input.user_uuid,
-            role: input.role,
-            source_channel: input.source_channel ?? 'web',
-            table: 'messages',
-            filter: postgres_filter,
-            message_uuid,
+            ...base_debug,
+            payload_message_uuid: message_uuid,
             payload_room_uuid,
             ignored_reason: 'payload_room_uuid_mismatch',
             phase: 'postgres_changes_insert',
           })
 
-          console_chat_realtime('message_ignored_room_mismatch', {
+          console_chat_realtime('message_callback_ignored', {
             expected: input.room_uuid,
             payload_room_uuid,
             message_uuid,
+            ignored_reason: 'payload_room_uuid_mismatch',
           })
 
           return
@@ -187,47 +212,84 @@ export function subscribe_chat_room_realtime(input: {
         if (!message) {
           send_chat_realtime_debug({
             event: 'chat_realtime_message_callback_ignored',
-            room_uuid: input.room_uuid,
-            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-            participant_uuid: input.participant_uuid,
-            user_uuid: input.user_uuid,
-            role: input.role,
-            source_channel: input.source_channel ?? 'web',
-            table: 'messages',
-            filter: postgres_filter,
-            message_uuid,
+            ...base_debug,
+            payload_message_uuid: message_uuid,
             payload_room_uuid,
             ignored_reason: 'unparseable_message_row',
             phase: 'postgres_changes_insert',
           })
 
-          console_chat_realtime('message_ignored_unparseable', {
+          console_chat_realtime('message_callback_ignored', {
             message_uuid,
             payload_room_uuid,
+            ignored_reason: 'unparseable_message_row',
           })
 
           return
         }
 
+        const sender_role =
+          typeof message.bundle.sender === 'string' ? message.bundle.sender : null
+        const sender_user_uuid =
+          message.bundle.bundle_type === 'room_action_log' &&
+          typeof message.bundle.metadata?.admin_user_uuid === 'string'
+            ? message.bundle.metadata.admin_user_uuid
+            : null
+        const action_uuid =
+          message.bundle.bundle_type === 'room_action_log'
+            ? message.bundle.bundle_uuid
+            : null
+
         send_chat_realtime_debug({
           event: 'chat_realtime_message_callback_received',
-          room_uuid: input.room_uuid,
-          active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-          participant_uuid: input.participant_uuid,
-          user_uuid: input.user_uuid,
-          role: input.role,
-          source_channel: input.source_channel ?? 'web',
-          table: 'messages',
-          filter: postgres_filter,
-          message_uuid: message.archive_uuid,
+          ...base_debug,
+          payload_message_uuid: message.archive_uuid,
+          payload_action_uuid: action_uuid,
           payload_room_uuid,
+          sender_user_uuid,
+          sender_role,
           phase: 'postgres_changes_insert',
         })
 
-        console_chat_realtime('message_received', {
+        console_chat_realtime('message_callback_received', {
           message_uuid: message.archive_uuid,
           room_uuid: message.room_uuid,
+          sender_role,
+          action_uuid,
         })
+
+        if (message.bundle.bundle_type === 'room_action_log') {
+          const event =
+            payload_room_uuid === input.room_uuid
+              ? 'chat_realtime_action_callback_received'
+              : 'chat_realtime_action_callback_ignored'
+
+          send_chat_realtime_debug({
+            event,
+            ...base_debug,
+            payload_message_uuid: message.archive_uuid,
+            payload_action_uuid: action_uuid,
+            payload_room_uuid,
+            sender_user_uuid,
+            sender_role,
+            ignored_reason:
+              event === 'chat_realtime_action_callback_ignored'
+                ? 'action_room_uuid_mismatch'
+                : null,
+            phase: 'postgres_changes_action_log',
+          })
+
+          console_chat_realtime(
+            event === 'chat_realtime_action_callback_received'
+              ? 'action_callback_received'
+              : 'action_callback_ignored',
+            {
+              message_uuid: message.archive_uuid,
+              action_uuid,
+              payload_room_uuid,
+            },
+          )
+        }
 
         input.on_message(message)
       },
@@ -237,13 +299,11 @@ export function subscribe_chat_room_realtime(input: {
 
       if (!is_chat_typing_payload(raw)) {
         send_chat_realtime_debug({
-          event: 'chat_typing_broadcast_ignored',
-          room_uuid: input.room_uuid,
-          active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-          participant_uuid: input.participant_uuid,
-          user_uuid: input.user_uuid,
-          role: input.role,
-          source_channel: input.source_channel ?? 'web',
+          event: 'chat_realtime_typing_callback_ignored',
+          ...base_debug,
+          event_name: 'typing',
+          table: null,
+          filter: null,
           ignored_reason: 'invalid_typing_payload_shape',
           phase: 'broadcast_typing',
         })
@@ -255,14 +315,15 @@ export function subscribe_chat_room_realtime(input: {
 
       if (raw.room_uuid !== input.room_uuid) {
         send_chat_realtime_debug({
-          event: 'chat_typing_broadcast_ignored',
-          room_uuid: input.room_uuid,
-          active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-          participant_uuid: input.participant_uuid,
-          user_uuid: input.user_uuid,
-          role: input.role,
-          source_channel: input.source_channel ?? 'web',
+          event: 'chat_realtime_typing_callback_ignored',
+          ...base_debug,
+          event_name: 'typing',
+          table: null,
+          filter: null,
           payload_room_uuid: raw.room_uuid,
+          sender_user_uuid: raw.user_uuid ?? null,
+          sender_role: raw.role,
+          is_typing: raw.is_typing,
           ignored_reason: 'typing_room_uuid_mismatch',
           phase: 'broadcast_typing',
         })
@@ -276,20 +337,22 @@ export function subscribe_chat_room_realtime(input: {
       }
 
       send_chat_realtime_debug({
-        event: 'chat_typing_broadcast_received',
-        room_uuid: input.room_uuid,
-        active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-        participant_uuid: input.participant_uuid,
-        user_uuid: input.user_uuid,
-        role: input.role,
-        source_channel: input.source_channel ?? 'web',
+        event: 'chat_realtime_typing_callback_received',
+        ...base_debug,
+        event_name: 'typing',
+        table: null,
+        filter: null,
         payload_room_uuid: raw.room_uuid,
+        sender_user_uuid: raw.user_uuid ?? null,
+        sender_role: raw.role,
+        is_typing: raw.is_typing,
         phase: 'broadcast_typing',
       })
 
-      console_chat_realtime('typing_received', {
+      console_chat_realtime('typing_callback_received', {
         from_participant_uuid: raw.participant_uuid,
         role: raw.role,
+        is_typing: raw.is_typing,
       })
 
       input.on_typing(raw)
@@ -302,17 +365,10 @@ export function subscribe_chat_room_realtime(input: {
       })
 
       send_chat_realtime_debug({
-        event: 'chat_realtime_channel_subscribe_status',
-        room_uuid: input.room_uuid,
-        active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-        participant_uuid: input.participant_uuid,
-        user_uuid: input.user_uuid,
-        role: input.role,
-        source_channel: input.source_channel ?? 'web',
+        event: 'chat_realtime_subscribe_status',
+        ...base_debug,
         subscribe_status: status,
         postgres_event: 'INSERT',
-        table: 'messages',
-        filter: postgres_filter,
         error_message: err ? String(err) : null,
         phase: 'subscribe_callback',
       })
@@ -320,12 +376,7 @@ export function subscribe_chat_room_realtime(input: {
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         send_chat_realtime_debug({
           event: 'chat_realtime_subscribe_failed',
-          room_uuid: input.room_uuid,
-          active_room_uuid: input.active_room_uuid ?? input.room_uuid,
-          participant_uuid: input.participant_uuid,
-          user_uuid: input.user_uuid,
-          role: input.role,
-          source_channel: input.source_channel ?? 'web',
+          ...base_debug,
           subscribe_status: status,
           error_code: status,
           error_message: 'Realtime subscription failed',
@@ -335,6 +386,60 @@ export function subscribe_chat_room_realtime(input: {
     })
 
   return channel
+}
+
+export function cleanup_chat_room_realtime(input: {
+  supabase: SupabaseClient
+  channel: RealtimeChannel
+  room_uuid: string
+  active_room_uuid?: string | null
+  participant_uuid?: string | null
+  user_uuid?: string | null
+  role?: string | null
+  tier?: string | null
+  source_channel?: string | null
+}) {
+  const channel_name = chat_room_realtime_channel_name(input.room_uuid)
+
+  send_chat_realtime_debug({
+    event: 'chat_realtime_cleanup_started',
+    room_uuid: input.room_uuid,
+    active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    user_uuid: input.user_uuid,
+    role: input.role,
+    tier: input.tier,
+    source_channel: input.source_channel ?? 'web',
+    channel_name,
+    phase: 'cleanup_chat_room_realtime',
+  })
+
+  console_chat_realtime('cleanup_started', {
+    channel_name,
+    room_uuid: input.room_uuid,
+  })
+
+  void input.supabase.removeChannel(input.channel).then((status) => {
+    send_chat_realtime_debug({
+      event: 'chat_realtime_cleanup_completed',
+      room_uuid: input.room_uuid,
+      active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      user_uuid: input.user_uuid,
+      role: input.role,
+      tier: input.tier,
+      source_channel: input.source_channel ?? 'web',
+      subscribe_status: status,
+      channel_name,
+      phase: 'cleanup_chat_room_realtime',
+    })
+
+    console_chat_realtime('cleanup_completed', {
+      channel_name,
+      room_uuid: input.room_uuid,
+      status,
+    })
+  })
 }
 
 export function publish_chat_typing(input: {
@@ -347,8 +452,10 @@ export function publish_chat_typing(input: {
   display_name?: string | null
   is_typing: boolean
   source_channel?: string | null
+  tier?: string | null
 }) {
   const source = input.source_channel ?? 'web'
+  const channel_name = chat_room_realtime_channel_name(input.room_uuid)
   const body: chat_typing_payload = {
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
@@ -385,8 +492,15 @@ export function publish_chat_typing(input: {
           participant_uuid: input.participant_uuid,
           user_uuid: input.user_uuid,
           role: input.role,
+          tier: input.tier,
           source_channel: source,
           subscribe_status: 'broadcast_ok',
+          channel_name,
+          event_name: 'typing',
+          payload_room_uuid: input.room_uuid,
+          sender_user_uuid: input.user_uuid ?? null,
+          sender_role: input.role,
+          is_typing: input.is_typing,
           phase: 'typing_broadcast_send',
         })
 
@@ -404,13 +518,20 @@ export function publish_chat_typing(input: {
     }
 
     send_chat_realtime_debug({
-      event: 'chat_typing_broadcast_ignored',
+      event: 'chat_typing_broadcast_failed',
       room_uuid: input.room_uuid,
       active_room_uuid: input.active_room_uuid ?? input.room_uuid,
       participant_uuid: input.participant_uuid,
       user_uuid: input.user_uuid,
       role: input.role,
+      tier: input.tier,
       source_channel: source,
+      channel_name,
+      event_name: 'typing',
+      payload_room_uuid: input.room_uuid,
+      sender_user_uuid: input.user_uuid ?? null,
+      sender_role: input.role,
+      is_typing: input.is_typing,
       ignored_reason: 'typing_broadcast_send_exhausted_retries',
       error_code: last_result,
       error_message: 'Typing broadcast did not reach ok before retries exhausted',
@@ -423,13 +544,20 @@ export function publish_chat_typing(input: {
     })
   })().catch((error: unknown) => {
     send_chat_realtime_debug({
-      event: 'chat_typing_broadcast_ignored',
+      event: 'chat_typing_broadcast_failed',
       room_uuid: input.room_uuid,
       active_room_uuid: input.active_room_uuid ?? input.room_uuid,
       participant_uuid: input.participant_uuid,
       user_uuid: input.user_uuid,
       role: input.role,
+      tier: input.tier,
       source_channel: source,
+      channel_name,
+      event_name: 'typing',
+      payload_room_uuid: input.room_uuid,
+      sender_user_uuid: input.user_uuid ?? null,
+      sender_role: input.role,
+      is_typing: input.is_typing,
       ignored_reason: 'typing_broadcast_send_exception',
       error_message: error instanceof Error ? error.message : String(error),
       phase: 'typing_broadcast_send',
