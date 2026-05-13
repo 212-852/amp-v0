@@ -69,9 +69,11 @@ export type notify_event =
       customer_user_uuid: string | null
       customer_participant_uuid: string | null
       discord_thread_action_id: string | null
+      source_channel: string
+      started_at: string
     }
 
-export type notify_channel = 'discord' | 'line' | 'push'
+export type notify_channel = 'discord' | 'discord_action' | 'line' | 'push'
 
 export type notify_target = 'admin' | 'concierge' | 'owner' | 'core'
 
@@ -197,7 +199,7 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
     return {
       category: 'support_started',
       priority: 'normal',
-      channels: ['discord'],
+      channels: ['discord_action'],
     }
   }
 
@@ -216,10 +218,14 @@ export function format_support_started_notify_content(
   event: Extract<notify_event, { event: 'support_started' }>,
 ): string {
   return [
+    '[SUPPORT STARTED]',
+    '',
     `${event.admin_display_label} が対応を始めました`,
-    `room_uuid: ${event.room_uuid}`,
     `customer_display_name: ${event.customer_display_name}`,
+    `room_uuid: ${event.room_uuid}`,
     `admin_internal_name: ${event.admin_internal_name ?? 'none'}`,
+    `source_channel: ${event.source_channel}`,
+    `started_at: ${event.started_at}`,
     `action_uuid: ${event.action_uuid}`,
     `created_at: ${event.created_at}`,
   ].join('\n')

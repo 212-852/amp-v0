@@ -475,6 +475,59 @@ function get_debug_discord_mention_user_ids() {
     .filter(Boolean)
 }
 
+function discord_action_webhook_url() {
+  return process.env.DISCORD_ACTION_WEBHOOK_URL?.trim() || null
+}
+
+export function discord_action_webhook_configured(): boolean {
+  return Boolean(discord_action_webhook_url())
+}
+
+/**
+ * Posts a plain message to DISCORD_ACTION_WEBHOOK_URL (action channel).
+ * Does not use the concierge bot token.
+ */
+export async function post_discord_action_webhook_message(input: {
+  content: string
+}): Promise<
+  | { ok: true }
+  | { ok: false; http_status?: number; error_text?: string | null }
+> {
+  const url = discord_action_webhook_url()
+
+  if (!url) {
+    return {
+      ok: false,
+      error_text: 'missing_DISCORD_ACTION_WEBHOOK_URL',
+    }
+  }
+
+  const trimmed =
+    input.content.length > 2000 ? input.content.slice(0, 2000) : input.content
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      content: trimmed,
+    }),
+  })
+
+  const error_text = await response.text()
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      http_status: response.status,
+      error_text: error_text.length > 0 ? error_text.slice(0, 800) : null,
+    }
+  }
+
+  return { ok: true }
+}
+
 function build_discord_content(event: notify_event) {
   if (event.event === 'new_user_created') {
     return [

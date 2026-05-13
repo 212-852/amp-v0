@@ -138,28 +138,13 @@ export type pwa_install_modal_panel_copy = {
 }
 
 /**
- * Prefer AMP session locale; if missing, use client preference (e.g. localStorage).
+ * Prefer the active UI locale prop; if missing, fall back to AMP session locale.
  * Unknown codes normalize to ja with fallback_used true.
  */
 export function resolve_pwa_install_ui_locale(input: {
   session_locale: string | null | undefined
   client_locale_fallback: string | null | undefined
 }): { locale: locale_key; fallback_used: boolean } {
-  const trimmed_session = input.session_locale?.trim()
-
-  if (trimmed_session) {
-    const lower = trimmed_session.toLowerCase()
-    const known =
-      lower.startsWith('ja') ||
-      lower.startsWith('en') ||
-      lower.startsWith('es')
-
-    return {
-      locale: normalize_locale(trimmed_session),
-      fallback_used: !known,
-    }
-  }
-
   const trimmed_client = input.client_locale_fallback?.trim()
 
   if (trimmed_client) {
@@ -171,6 +156,21 @@ export function resolve_pwa_install_ui_locale(input: {
 
     return {
       locale: normalize_locale(trimmed_client),
+      fallback_used: !known,
+    }
+  }
+
+  const trimmed_session = input.session_locale?.trim()
+
+  if (trimmed_session) {
+    const lower = trimmed_session.toLowerCase()
+    const known =
+      lower.startsWith('ja') ||
+      lower.startsWith('en') ||
+      lower.startsWith('es')
+
+    return {
+      locale: normalize_locale(trimmed_session),
       fallback_used: !known,
     }
   }

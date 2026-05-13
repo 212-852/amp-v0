@@ -2173,6 +2173,8 @@ export async function handle_admin_reception_room_opened(
       customer_user_uuid,
       customer_participant_uuid: user_participant_uuid,
       discord_thread_action_id,
+      source_channel: 'web',
+      started_at: created_at,
     }).catch(async (error) => {
       console.error('[admin_reception_open] support_started_notify_rejected', {
         room_uuid,

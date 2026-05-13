@@ -227,6 +227,7 @@ export function resolve_debug_rule(input: {
     'support_started_notify_route_decided',
     'support_started_notify_started',
     'support_started_notify_succeeded',
+    'support_started_notify_skipped',
   ])
 
   if (

@@ -3,6 +3,8 @@ import 'server-only'
 import {
   mask_discord_action_id_for_log,
   normalize_discord_thread_action_id,
+  post_discord_action_webhook_message,
+  discord_action_webhook_configured,
   send_discord_notify,
   short_room_uuid,
   sync_discord_action_context,
@@ -19,8 +21,10 @@ import {
   format_support_started_notify_content,
   resolve_concierge_targets,
   resolve_notify_rule,
+  should_send_notify,
   type notify_event,
 } from './rules'
+import { evaluate_support_started_notify_gate } from './support_started_gate'
 
 export type notify_delivery_result = {
   channel: 'discord' | 'line' | 'push'
@@ -109,6 +113,7 @@ async function deliver_support_started(
     event.discord_thread_action_id,
   )
   const discord_id_exists = Boolean(normalized_thread_action_id)
+  const webhook_exists = discord_action_webhook_configured()
 
   const base_debug_payload = {
     room_uuid: event.room_uuid,
@@ -118,11 +123,15 @@ async function deliver_support_started(
     admin_internal_name: event.admin_internal_name,
     customer_user_uuid: event.customer_user_uuid,
     customer_participant_uuid: event.customer_participant_uuid,
+    customer_display_name: event.customer_display_name,
     discord_id_exists,
     discord_id: mask_discord_action_id_for_log(
       normalized_thread_action_id ?? raw_discord_id,
     ),
-    notification_route: null as string | null,
+    notification_channel: null as string | null,
+    webhook_exists,
+    error_code: null as string | null,
+    error_message: null as string | null,
     phase: 'deliver_support_started',
   }
 
@@ -131,20 +140,102 @@ async function deliver_support_started(
     base_debug_payload,
   )
 
+  const rule = resolve_notify_rule(event)
+
+  if (!should_send_notify(event) || rule.channels.length === 0) {
+    await emit_support_started_admin_chat_debug(
+      'support_started_notify_skipped',
+      {
+        ...base_debug_payload,
+        notification_channel: 'none',
+        error_code: 'notify_rule_disabled',
+        error_message: 'support_started notify disabled or no channels',
+        phase: 'resolve_notify_rule',
+      },
+    )
+
+    return []
+  }
+
+  const gate = await evaluate_support_started_notify_gate({
+    room_uuid: event.room_uuid,
+    action_uuid: event.action_uuid,
+    created_at: event.created_at,
+  })
+
+  if (!gate.allow) {
+    await emit_support_started_admin_chat_debug(
+      'support_started_notify_skipped',
+      {
+        ...base_debug_payload,
+        notification_channel: 'none',
+        error_code: gate.skip_reason,
+        error_message: `gate:${gate.skip_reason}`,
+        phase: 'support_started_notify_gate',
+        room_status: gate.room_status,
+      },
+    )
+
+    return []
+  }
+
   const content = format_support_started_notify_content(event)
 
   try {
+    if (webhook_exists) {
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_route_decided',
+        {
+          ...base_debug_payload,
+          notification_channel: 'discord_action_webhook',
+        },
+      )
+
+      const webhook_result = await post_discord_action_webhook_message({
+        content,
+      })
+
+      if (webhook_result.ok) {
+        await emit_support_started_admin_chat_debug(
+          'support_started_notify_succeeded',
+          {
+            ...base_debug_payload,
+            notification_channel: 'discord_action_webhook',
+          },
+        )
+
+        return [{ channel: 'discord' }]
+      }
+
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_failed',
+        {
+          ...base_debug_payload,
+          notification_channel: 'discord_action_webhook',
+          error_code: 'discord_action_webhook_non_ok',
+          error_message:
+            webhook_result.error_text ??
+            (typeof webhook_result.http_status === 'number'
+              ? `http_${webhook_result.http_status}`
+              : 'webhook_post_failed'),
+          phase: 'discord_action_webhook',
+        },
+      )
+
+      return []
+    }
+
     if (normalized_thread_action_id) {
       await emit_support_started_admin_chat_debug(
         'support_started_notify_route_decided',
         {
           ...base_debug_payload,
-          notification_route: 'discord_action_thread',
+          notification_channel: 'discord_action_thread',
         },
       )
 
       const result = await sync_discord_action_context({
-        title: 'Support started',
+        title: '[SUPPORT STARTED]',
         content,
         action_id: normalized_thread_action_id,
       })
@@ -154,10 +245,11 @@ async function deliver_support_started(
           'support_started_notify_failed',
           {
             ...base_debug_payload,
-            notification_route: 'discord_action_thread',
+            notification_channel: 'discord_action_thread',
             error_code: 'discord_thread_sync_failed',
             error_message:
               'sync_discord_action_context returned null (reopen or post failed)',
+            phase: 'discord_action_thread',
           },
         )
 
@@ -168,7 +260,7 @@ async function deliver_support_started(
         'support_started_notify_succeeded',
         {
           ...base_debug_payload,
-          notification_route: 'discord_action_thread',
+          notification_channel: 'discord_action_thread',
         },
       )
 
@@ -187,85 +279,83 @@ async function deliver_support_started(
           ...base_debug_payload,
           discord_id_exists: false,
           discord_id: mask_discord_action_id_for_log(raw_discord_id),
-          notification_route: 'none',
+          notification_channel: 'none',
           error_code: 'discord_thread_action_id_unusable',
           error_message:
             'rooms.action_id was set but could not be normalized to discord:<snowflake>',
-        },
-      )
-    } else {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_discord_id_missing',
-        {
-          ...base_debug_payload,
-          notification_route: 'notify_wolf_webhook',
-          error_code: null,
-          error_message: null,
+          phase: 'discord_thread_action_id',
         },
       )
     }
 
-    const rule = resolve_notify_rule(event)
+    const notify_wolf_configured = Boolean(
+      process.env.DISCORD_NOTIFY_WEBHOOK_URL?.trim(),
+    )
 
-    if (!rule.channels.includes('discord')) {
+    if (notify_wolf_configured) {
       await emit_support_started_admin_chat_debug(
-        'support_started_notify_failed',
+        'support_started_notify_route_decided',
         {
           ...base_debug_payload,
-          notification_route: 'none',
-          error_code: 'notify_rule_skipped_discord',
-          error_message: 'resolve_notify_rule returned no discord channel',
+          notification_channel: 'notify_wolf_webhook',
         },
       )
+
+      const sent = await send_discord_notify(event)
+
+      if (sent?.ok === true) {
+        await emit_support_started_admin_chat_debug(
+          'support_started_notify_succeeded',
+          {
+            ...base_debug_payload,
+            notification_channel: 'notify_wolf_webhook',
+          },
+        )
+
+        return [{ channel: 'discord' }]
+      }
+
+      if (sent?.ok === false) {
+        await emit_support_started_admin_chat_debug(
+          'support_started_notify_failed',
+          {
+            ...base_debug_payload,
+            notification_channel: 'notify_wolf_webhook',
+            http_status: sent.http_status ?? null,
+            error_text: sent.error_text ?? null,
+            error_code: 'discord_webhook_non_ok',
+            error_message: 'DISCORD_NOTIFY_WEBHOOK_URL returned non-2xx',
+            phase: 'notify_wolf_webhook',
+          },
+        )
+      } else {
+        await emit_support_started_admin_chat_debug(
+          'support_started_notify_failed',
+          {
+            ...base_debug_payload,
+            notification_channel: 'notify_wolf_webhook',
+            error_code: 'discord_webhook_skipped_or_empty',
+            error_message:
+              'send_discord_notify returned null (missing URL, empty content, or transport skip)',
+            phase: 'notify_wolf_webhook',
+          },
+        )
+      }
+
       return []
     }
 
     await emit_support_started_admin_chat_debug(
-      'support_started_notify_route_decided',
+      'support_started_notify_skipped',
       {
         ...base_debug_payload,
-        notification_route: 'notify_wolf_webhook',
+        notification_channel: 'none',
+        error_code: 'no_discord_transport',
+        error_message:
+          'missing DISCORD_ACTION_WEBHOOK_URL, thread action id, and DISCORD_NOTIFY_WEBHOOK_URL',
+        phase: 'deliver_support_started',
       },
     )
-
-    const sent = await send_discord_notify(event)
-
-    if (sent?.ok === true) {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_succeeded',
-        {
-          ...base_debug_payload,
-          notification_route: 'notify_wolf_webhook',
-        },
-      )
-
-      return [{ channel: 'discord' }]
-    }
-
-    if (sent?.ok === false) {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_failed',
-        {
-          ...base_debug_payload,
-          notification_route: 'notify_wolf_webhook',
-          http_status: sent.http_status ?? null,
-          error_text: sent.error_text ?? null,
-          error_code: 'discord_webhook_non_ok',
-          error_message: 'DISCORD_NOTIFY_WEBHOOK_URL returned non-2xx',
-        },
-      )
-    } else {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_failed',
-        {
-          ...base_debug_payload,
-          notification_route: 'notify_wolf_webhook',
-          error_code: 'discord_webhook_skipped_or_empty',
-          error_message:
-            'send_discord_notify returned null (missing URL, empty content, or transport skip)',
-        },
-      )
-    }
 
     return []
   } catch (error) {
@@ -276,6 +366,7 @@ async function deliver_support_started(
         error_code: 'support_started_notify_exception',
         error_message:
           error instanceof Error ? error.message : String(error),
+        phase: 'deliver_support_started',
       },
     )
     return []

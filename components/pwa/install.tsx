@@ -101,6 +101,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       tier: props.tier,
       room_uuid: props.room_uuid,
       source_channel: props.source_channel,
+      locale: pwa_ui_locale.locale,
       has_beforeinstallprompt: prompt_available,
       is_standalone: installed,
       manifest_available:
@@ -111,6 +112,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     }),
     [
       installed,
+      pwa_ui_locale.locale,
       prompt_available,
       props.participant_uuid,
       props.role,
@@ -118,6 +120,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       props.source_channel,
       props.tier,
       props.user_uuid,
+      user_agent,
     ],
   )
 

@@ -40,6 +40,14 @@ function resolve_pwa_debug_channel() {
 export default function Pwa_install_modal_body(
   props: pwa_install_modal_body_props,
 ) {
+  const {
+    client_locale_fallback,
+    on_close,
+    role,
+    session_locale,
+    source_channel,
+    tier,
+  } = props
   const prompt = use_before_install_prompt_state()
   const has_prompt = Boolean(prompt)
   const [is_busy, set_is_busy] = useState(false)
@@ -62,10 +70,10 @@ export default function Pwa_install_modal_body(
   const pwa_ui_locale = useMemo(
     () =>
       resolve_pwa_install_ui_locale({
-        session_locale: props.session_locale,
-        client_locale_fallback: props.client_locale_fallback,
+        session_locale,
+        client_locale_fallback,
       }),
-    [props.session_locale, props.client_locale_fallback],
+    [client_locale_fallback, session_locale],
   )
 
   const panel_copy = useMemo(
@@ -81,9 +89,10 @@ export default function Pwa_install_modal_body(
 
   const debug_base = useMemo(
     () => ({
-      role: props.role,
-      tier: props.tier,
+      role,
+      tier,
       source_channel: resolve_pwa_debug_channel(),
+      locale: pwa_ui_locale.locale,
       has_beforeinstallprompt: has_prompt,
       is_standalone: standalone_now,
       modal_reused: 'overlay_root_center',
@@ -95,7 +104,7 @@ export default function Pwa_install_modal_body(
         typeof document === 'undefined' ? null : manifest_is_available(),
       phase: 'pwa_install_modal',
     }),
-    [has_prompt, props.role, props.tier, standalone_now],
+    [has_prompt, pwa_ui_locale.locale, role, standalone_now, tier],
   )
 
   useEffect(() => {
@@ -104,16 +113,16 @@ export default function Pwa_install_modal_body(
       phase: 'pwa_install_modal',
       locale: pwa_ui_locale.locale,
       fallback_used: pwa_ui_locale.fallback_used,
-      source_channel: props.source_channel ?? resolve_pwa_debug_channel(),
-      role: props.role,
-      tier: props.tier,
+      source_channel: source_channel ?? resolve_pwa_debug_channel(),
+      role,
+      tier,
     })
   }, [
     pwa_ui_locale.fallback_used,
     pwa_ui_locale.locale,
-    props.role,
-    props.source_channel,
-    props.tier,
+    role,
+    source_channel,
+    tier,
   ])
 
   useEffect(() => {
@@ -123,8 +132,8 @@ export default function Pwa_install_modal_body(
     const standalone = is_standalone_pwa()
     const prompt_ok = Boolean(get_retained_before_install_prompt())
     const base = {
-      role: props.role,
-      tier: props.tier,
+      role,
+      tier,
       source_channel: standalone ? 'pwa' : 'web',
       has_beforeinstallprompt: prompt_ok,
       is_standalone: standalone,
@@ -148,7 +157,7 @@ export default function Pwa_install_modal_body(
       ...base,
       install_client_os: os,
     })
-  }, [props.role, props.tier])
+  }, [role, tier])
 
   useEffect(() => {
     post_pwa_debug({
@@ -169,7 +178,7 @@ export default function Pwa_install_modal_body(
         is_standalone: true,
         phase: 'appinstalled',
       })
-      props.on_close()
+      on_close()
     }
 
     window.addEventListener('appinstalled', handle_app_installed)
@@ -177,7 +186,7 @@ export default function Pwa_install_modal_body(
     return () => {
       window.removeEventListener('appinstalled', handle_app_installed)
     }
-  }, [debug_base, props.on_close])
+  }, [debug_base, on_close])
 
   async function handle_install_click() {
     if (!prompt || is_busy) {
@@ -242,7 +251,7 @@ export default function Pwa_install_modal_body(
       close_aria_label={panel_copy.close_aria_label}
       installed_badge_label={panel_copy.installed_badge_label}
       show_installed_badge={show_badge}
-      on_close={props.on_close}
+      on_close={on_close}
       on_primary_press={
         panel_copy.primary_button_label
           ? () => {
