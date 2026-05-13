@@ -11,14 +11,21 @@ import {
   set_pwa_source_channel_cookie,
   use_before_install_prompt_state,
 } from '@/lib/pwa/client'
-import { resolve_pwa_install_modal_panel_copy } from '@/lib/pwa/copy'
+import {
+  resolve_pwa_install_modal_panel_copy,
+  resolve_pwa_install_ui_locale,
+} from '@/lib/pwa/copy'
 import { resolve_pwa_install_client_os } from '@/lib/pwa/rules'
+import type { locale_key } from '@/lib/locale/action'
 
 import Pwa_install_modal_body_view from '@/components/pwa/modal/body'
 
 type pwa_install_modal_body_props = {
   role: string | null
   tier: string | null
+  session_locale: string | null | undefined
+  client_locale_fallback: locale_key
+  source_channel: string | null
   on_close: () => void
 }
 
@@ -52,14 +59,24 @@ export default function Pwa_install_modal_body(
     [user_agent],
   )
 
+  const pwa_ui_locale = useMemo(
+    () =>
+      resolve_pwa_install_ui_locale({
+        session_locale: props.session_locale,
+        client_locale_fallback: props.client_locale_fallback,
+      }),
+    [props.session_locale, props.client_locale_fallback],
+  )
+
   const panel_copy = useMemo(
     () =>
       resolve_pwa_install_modal_panel_copy({
+        locale: pwa_ui_locale.locale,
         client_os,
         standalone: standalone_now,
         has_before_install_prompt: has_prompt,
       }),
-    [client_os, standalone_now, has_prompt],
+    [client_os, has_prompt, pwa_ui_locale.locale, standalone_now],
   )
 
   const debug_base = useMemo(
@@ -80,6 +97,24 @@ export default function Pwa_install_modal_body(
     }),
     [has_prompt, props.role, props.tier, standalone_now],
   )
+
+  useEffect(() => {
+    post_pwa_debug({
+      event: 'pwa_install_locale_resolved',
+      phase: 'pwa_install_modal',
+      locale: pwa_ui_locale.locale,
+      fallback_used: pwa_ui_locale.fallback_used,
+      source_channel: props.source_channel ?? resolve_pwa_debug_channel(),
+      role: props.role,
+      tier: props.tier,
+    })
+  }, [
+    pwa_ui_locale.fallback_used,
+    pwa_ui_locale.locale,
+    props.role,
+    props.source_channel,
+    props.tier,
+  ])
 
   useEffect(() => {
     const ua =
@@ -204,6 +239,8 @@ export default function Pwa_install_modal_body(
       primary_button_label={panel_copy.primary_button_label}
       android_chrome_install_hint={panel_copy.android_chrome_install_hint}
       close_label={panel_copy.close_label}
+      close_aria_label={panel_copy.close_aria_label}
+      installed_badge_label={panel_copy.installed_badge_label}
       show_installed_badge={show_badge}
       on_close={props.on_close}
       on_primary_press={

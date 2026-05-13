@@ -276,6 +276,7 @@ export function resolve_debug_rule(input: {
     'pwa_install_modal_open_started',
     'pwa_install_modal_open_failed',
     'pwa_install_modal_opened',
+    'pwa_install_locale_resolved',
     'pwa_install_os_detected',
     'pwa_install_button_rendered',
     'pwa_install_not_available',

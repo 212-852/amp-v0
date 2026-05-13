@@ -1,16 +1,15 @@
 'use client'
 
-import type { pwa_install_menu_copy_variant } from '@/lib/pwa/install_menu_copy'
-import { pwa_install_menu_row_copy } from '@/lib/pwa/install_menu_copy'
-
-import Pwa_install_app_icon from './install_app_icon'
+import Pwa_install_app_icon from '@/components/pwa/install_app_icon'
 
 export type pwa_install_menu_tone = 'user' | 'admin'
 
 export type pwa_install_menu_item_props = {
   tone: pwa_install_menu_tone
   installed: boolean
-  copy_variant: pwa_install_menu_copy_variant
+  title: string
+  subtitle: string | null
+  badge_label: string
   is_busy?: boolean
   on_press?: () => void
   class_name?: string
@@ -34,15 +33,12 @@ const tone_shell: Record<
   },
 }
 
+/**
+ * Presentational PWA install row: renders resolved copy only.
+ */
 export default function Pwa_install_menu_item(props: pwa_install_menu_item_props) {
   const busy = Boolean(props.is_busy)
   const installed = props.installed
-  const variant = props.copy_variant
-  const text = installed
-    ? pwa_install_menu_row_copy.installed_label
-    : pwa_install_menu_row_copy[variant].title
-  const subtitle = installed ? null : pwa_install_menu_row_copy[variant].subtitle
-
   const can_press = !installed && typeof props.on_press === 'function'
   const shell = can_press
     ? tone_shell[props.tone].interactive
@@ -75,14 +71,16 @@ export default function Pwa_install_menu_item(props: pwa_install_menu_item_props
       />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <div className={title_class}>{text}</div>
+          <div className={title_class}>{props.title}</div>
           {installed ? (
             <span className={badge_class} aria-hidden>
-              PWA
+              {props.badge_label}
             </span>
           ) : null}
         </div>
-        {subtitle ? <p className={subtitle_class}>{subtitle}</p> : null}
+        {props.subtitle ? (
+          <p className={subtitle_class}>{props.subtitle}</p>
+        ) : null}
       </div>
     </>
   )

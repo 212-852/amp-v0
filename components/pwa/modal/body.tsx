@@ -35,7 +35,7 @@ export default function Pwa_install_modal_body_view(props: pwa_install_modal_vie
                   className="inline-flex shrink-0 items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[10px] font-semibold leading-none text-neutral-600"
                   aria-hidden
                 >
-                  PWA
+                  {props.installed_badge_label}
                 </span>
               ) : null}
             </div>
@@ -43,7 +43,7 @@ export default function Pwa_install_modal_body_view(props: pwa_install_modal_vie
         </div>
         <button
           type="button"
-          aria-label="close"
+          aria-label={props.close_aria_label}
           onClick={props.on_close}
           className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.94]"
         >

@@ -16,6 +16,7 @@ type menu_modal_props = {
     tier?: 'guest' | 'member' | 'vip' | null
     pwa_installed?: boolean
     source_channel?: 'web' | 'liff' | 'pwa' | 'line'
+    locale?: locale_key | null
   } | null
   room_uuid: string | null
   participant_uuid: string | null
@@ -74,6 +75,8 @@ export default function MenuModal(props: menu_modal_props) {
             role={props.session?.role ?? null}
             tier={props.session?.tier ?? null}
             source_channel={props.session?.source_channel ?? 'web'}
+            session_locale={props.session?.locale ?? null}
+            client_locale_fallback={props.locale}
             on_open_install_modal={props.on_open_pwa_install_modal}
             on_close_menu={props.on_close}
           />

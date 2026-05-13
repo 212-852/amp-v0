@@ -32,6 +32,8 @@ type pwa_debug_payload = {
   modal_component_name?: string | null
   reason?: string | null
   phase: string
+  locale?: string | null
+  fallback_used?: boolean | null
 }
 
 export type pwa_before_install_prompt_event = Event & {

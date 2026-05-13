@@ -30,6 +30,8 @@ type pwa_debug_body = {
   click_handler_reached?: unknown
   modal_component_name?: unknown
   reason?: unknown
+  locale?: unknown
+  fallback_used?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -104,6 +106,9 @@ export async function POST(request: Request) {
       modal_component_name: string_or_null(body?.modal_component_name),
       reason: string_or_null(body?.reason),
       phase: string_or_null(body?.phase),
+      locale: string_or_null(body?.locale),
+      fallback_used:
+        typeof body?.fallback_used === 'boolean' ? body.fallback_used : null,
     },
   })
 

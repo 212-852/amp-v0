@@ -687,6 +687,9 @@ export default function UserFooter() {
         <Pwa_install_modal_body
           role={session?.role ?? null}
           tier={session?.tier ?? null}
+          session_locale={session?.locale ?? null}
+          client_locale_fallback={render_locale}
+          source_channel={session?.source_channel ?? 'web'}
           on_close={() => set_is_pwa_install_modal_open(false)}
         />
       </OverlayRoot>

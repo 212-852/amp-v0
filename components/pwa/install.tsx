@@ -14,8 +14,13 @@ import {
   use_before_install_prompt_state,
 } from '@/lib/pwa/client'
 import { resolve_pwa_install_menu_copy_variant } from '@/lib/pwa/install_menu_copy'
+import {
+  resolve_pwa_install_menu_labels,
+  resolve_pwa_install_ui_locale,
+} from '@/lib/pwa/copy'
+import type { locale_key } from '@/lib/locale/action'
 
-import Pwa_install_menu_item from './install_menu_item'
+import Pwa_install_menu_item from '@/components/pwa/menu/item'
 
 type PwaInstallButtonProps = {
   can_install: boolean
@@ -25,6 +30,8 @@ type PwaInstallButtonProps = {
   role: string | null
   tier: string | null
   source_channel: string
+  session_locale: string | null | undefined
+  client_locale_fallback: locale_key
   on_open_install_modal: () => void
   on_close_menu: () => void
 }
@@ -65,6 +72,25 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
         user_agent,
       }),
     [prompt_available, user_agent],
+  )
+
+  const pwa_ui_locale = useMemo(
+    () =>
+      resolve_pwa_install_ui_locale({
+        session_locale: props.session_locale,
+        client_locale_fallback: props.client_locale_fallback,
+      }),
+    [props.session_locale, props.client_locale_fallback],
+  )
+
+  const menu_labels = useMemo(
+    () =>
+      resolve_pwa_install_menu_labels({
+        locale: pwa_ui_locale.locale,
+        variant: copy_variant,
+        installed,
+      }),
+    [copy_variant, installed, pwa_ui_locale.locale],
   )
 
   const debug_context = useMemo(
@@ -240,7 +266,9 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       <Pwa_install_menu_item
         tone="user"
         installed
-        copy_variant="standard"
+        title={menu_labels.title}
+        subtitle={menu_labels.subtitle}
+        badge_label={menu_labels.badge_label}
       />
     )
   }
@@ -249,7 +277,9 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     <Pwa_install_menu_item
       tone="user"
       installed={false}
-      copy_variant={copy_variant}
+      title={menu_labels.title}
+      subtitle={menu_labels.subtitle}
+      badge_label={menu_labels.badge_label}
       on_press={() => {
         handle_menu_row_click()
       }}
