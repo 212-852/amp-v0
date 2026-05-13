@@ -11,7 +11,12 @@ import {
   set_pwa_source_channel_cookie,
   use_before_install_prompt_state,
 } from '@/lib/pwa/client'
+import {
+  pwa_install_menu_row_copy,
+  resolve_pwa_install_menu_copy_variant,
+} from '@/lib/pwa/install_menu_copy'
 
+import Pwa_install_app_icon from './install_app_icon'
 import { Pwa_safari_install_steps_list } from './safari_install_steps'
 
 type pwa_install_modal_body_props = {
@@ -35,6 +40,18 @@ export default function Pwa_install_modal_body(
   const has_prompt = Boolean(prompt)
   const [is_busy, set_is_busy] = useState(false)
   const [standalone_now, set_standalone_now] = useState(false)
+
+  const user_agent =
+    typeof navigator === 'undefined' ? null : navigator.userAgent
+
+  const header_copy_variant = useMemo(
+    () =>
+      resolve_pwa_install_menu_copy_variant({
+        has_beforeinstallprompt: has_prompt,
+        user_agent,
+      }),
+    [has_prompt, user_agent],
+  )
 
   useEffect(() => {
     set_standalone_now(is_standalone_pwa())
@@ -130,10 +147,34 @@ export default function Pwa_install_modal_body(
 
   return (
     <div className="relative w-[92%] max-w-[360px] rounded-[26px] bg-white px-6 py-6 shadow-[0_12px_40px_rgba(0,0,0,0.14)]">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="pr-2 text-[18px] font-semibold leading-snug text-neutral-900">
-          アプリをインストール
-        </h2>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <Pwa_install_app_icon />
+          <div className="min-w-0 pr-1">
+            {standalone_now ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-[18px] font-semibold leading-snug text-neutral-900">
+                  {pwa_install_menu_row_copy.installed_label}
+                </h2>
+                <span
+                  className="inline-flex shrink-0 items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[10px] font-semibold leading-none text-neutral-600"
+                  aria-hidden
+                >
+                  PWA
+                </span>
+              </div>
+            ) : (
+              <>
+                <h2 className="text-[18px] font-semibold leading-snug text-neutral-900">
+                  {pwa_install_menu_row_copy[header_copy_variant].title}
+                </h2>
+                <p className="mt-1.5 text-left text-[13px] font-medium leading-[1.5] text-neutral-600">
+                  {pwa_install_menu_row_copy[header_copy_variant].subtitle}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
         <button
           type="button"
           aria-label="close"
@@ -144,9 +185,11 @@ export default function Pwa_install_modal_body(
         </button>
       </div>
 
-      <p className="mt-3 text-left text-[14px] leading-[1.65] text-neutral-600">
-        この端末にPET TAXIをインストールしますか？
-      </p>
+      {!standalone_now ? (
+        <p className="mt-3 text-left text-[14px] leading-[1.65] text-neutral-600">
+          この端末にPET TAXIをインストールしますか？
+        </p>
+      ) : null}
 
       {standalone_now ? (
         <div className="mt-5">
