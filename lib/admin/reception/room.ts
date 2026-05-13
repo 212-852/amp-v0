@@ -54,6 +54,11 @@ type message_row = {
   created_at: string | null
 }
 
+type latest_message_summary = {
+  preview: string | null
+  latest_user_sender_display_name: string | null
+}
+
 type memo_row = {
   room_uuid: string
   handoff_memo: string | null
@@ -68,6 +73,8 @@ type participant_row = {
   visitor_uuid: string | null
   role: string | null
   display_name?: string | null
+  nickname?: string | null
+  label?: string | null
 }
 
 type customer_identity_resolve_debug_event =
@@ -224,11 +231,13 @@ async function emit_customer_identity_resolve(input: {
   room_uuid: string
   customer_participant_uuid: string | null
   customer_user_uuid: string | null
+  participant_role: string | null
   user_tier: string | null
   has_user_uuid: boolean
   has_display_name: boolean
   has_identity: boolean
   resolved_display_name_source: resolved_admin_chat_customer_source
+  fallback_used: boolean
   reason: string | null
 }) {
   const payload =
@@ -238,21 +247,25 @@ async function emit_customer_identity_resolve(input: {
           room_uuid: input.room_uuid,
           customer_participant_uuid: input.customer_participant_uuid,
           customer_user_uuid: input.customer_user_uuid,
+          participant_role: input.participant_role,
           user_tier: input.user_tier,
           has_user_uuid: input.has_user_uuid,
           has_display_name: input.has_display_name,
           has_identity: input.has_identity,
+          fallback_used: input.fallback_used,
           reason: input.reason,
         }
       : {
           room_uuid: input.room_uuid,
           customer_participant_uuid: input.customer_participant_uuid,
           customer_user_uuid: input.customer_user_uuid,
+          participant_role: input.participant_role,
           user_tier: input.user_tier,
           has_user_uuid: input.has_user_uuid,
           has_display_name: input.has_display_name,
           has_identity: input.has_identity,
           resolved_display_name_source: input.resolved_display_name_source,
+          fallback_used: input.fallback_used,
           reason: input.reason,
         }
 
@@ -363,6 +376,34 @@ function message_sequence_from_body(
   return pick_number(body?.sequence) ?? pick_number(bundle?.sequence)
 }
 
+function latest_user_sender_display_name(
+  rows: message_row[],
+): string | null {
+  const sorted = [...rows].sort(compare_latest_message_rows)
+
+  for (const row of sorted) {
+    const body = parse_body(row.body)
+    const bundle = pick_object(body?.bundle)
+    const metadata = pick_object(body?.metadata)
+    const sender_role =
+      pick_string(body?.sender_role) ??
+      pick_string(bundle?.sender)
+
+    if (sender_role !== 'user') {
+      continue
+    }
+
+    return (
+      pick_string(metadata?.sender_display_name) ??
+      pick_string(metadata?.actor_display_name) ??
+      pick_string(body?.sender_display_name) ??
+      pick_string(body?.actor_display_name)
+    )
+  }
+
+  return null
+}
+
 function choose_customer_user_participant(
   participants: participant_row[],
 ): participant_row | null {
@@ -394,7 +435,7 @@ async function enrich_room_cards(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role, display_name')
+      .select('*')
       .in('room_uuid', room_uuids)
 
     if (participant_result.error) {
@@ -545,10 +586,10 @@ async function enrich_room_cards(
     await backfill_missing_users(user_uuids, users_by_uuid, users_select_list)
   }
 
-  let preview_by_room = new Map<string, string>()
+  let latest_summary_by_room = new Map<string, latest_message_summary>()
 
   try {
-    preview_by_room = await read_latest_message_previews(room_uuids)
+    latest_summary_by_room = await read_latest_message_summaries(room_uuids)
   } catch (error) {
     await emit_admin_chat_list_debug({
       event: 'admin_chat_list_query_failed',
@@ -570,7 +611,8 @@ async function enrich_room_cards(
       ? users_by_uuid.get(customer_user_uuid)
       : null
 
-    const base_preview = preview_by_room.get(row.room_uuid) ?? null
+    const latest_summary = latest_summary_by_room.get(row.room_uuid) ?? null
+    const base_preview = latest_summary?.preview ?? null
     const preview_resolved = resolve_chat_room_list_preview_text({
       audience: 'admin_inbox',
       latest_message_text: base_preview,
@@ -594,11 +636,13 @@ async function enrich_room_cards(
           customer?.participant_uuid ?? null,
         ),
         customer_user_uuid,
+        participant_role: string_value(customer?.role),
         user_tier: pick_string(customer_user?.['tier']),
         has_user_uuid: true,
         has_display_name,
         has_identity,
         resolved_display_name_source: 'unset',
+        fallback_used: false,
         reason: 'resolve_started',
       })
     }
@@ -607,6 +651,8 @@ async function enrich_room_cards(
       user: customer_user ?? null,
       identity_rows: identity_rows_for_user,
       participant: customer,
+      latest_user_message_sender_display_name:
+        latest_summary?.latest_user_sender_display_name ?? null,
     })
 
     if (has_user_uuid) {
@@ -618,11 +664,13 @@ async function enrich_room_cards(
             customer?.participant_uuid ?? null,
           ),
           customer_user_uuid,
+          participant_role: string_value(customer?.role),
           user_tier: pick_string(customer_user?.['tier']),
           has_user_uuid: true,
           has_display_name,
           has_identity,
           resolved_display_name_source: resolved.source,
+          fallback_used: true,
           reason: !customer_user
             ? 'user_row_not_found_after_batch_and_backfill'
             : 'no_display_source_after_resolve',
@@ -646,11 +694,13 @@ async function enrich_room_cards(
             customer?.participant_uuid ?? null,
           ),
           customer_user_uuid,
+          participant_role: string_value(customer?.role),
           user_tier: pick_string(customer_user?.['tier']),
           has_user_uuid: true,
           has_display_name,
           has_identity,
           resolved_display_name_source: resolved.source,
+          fallback_used: resolved.source !== 'participants.display_name',
           reason: null,
         })
       }
@@ -710,7 +760,7 @@ export async function resolve_room_subject(
   try {
     const participant_result = await supabase
       .from('participants')
-      .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role, display_name')
+      .select('*')
       .eq('room_uuid', room_uuid)
 
     if (participant_result.error) {
@@ -783,6 +833,7 @@ export async function resolve_room_subject(
     user,
     identity_rows,
     participant: subject_participant,
+    latest_user_message_sender_display_name: null,
   })
 
   const display_name =
@@ -821,7 +872,7 @@ export async function list_reception_rooms({
     phase: `rooms_query_${mode}`,
   })
 
-  let query = supabase
+  const query = supabase
     .from('rooms')
     .select(room_select)
     .eq('mode', mode)
@@ -1039,13 +1090,13 @@ function compare_latest_message_rows(a: message_row, b: message_row) {
   )
 }
 
-async function read_latest_message_previews(
+async function read_latest_message_summaries(
   room_uuids: string[],
-): Promise<Map<string, string>> {
-  const previews = new Map<string, string>()
+): Promise<Map<string, latest_message_summary>> {
+  const summaries = new Map<string, latest_message_summary>()
 
   if (room_uuids.length === 0) {
-    return previews
+    return summaries
   }
 
   try {
@@ -1057,7 +1108,7 @@ async function read_latest_message_previews(
       .limit(Math.max(50, room_uuids.length * 10))
 
     if (result.error) {
-      return previews
+      return summaries
     }
 
     const rows_by_room = new Map<string, message_row[]>()
@@ -1071,18 +1122,25 @@ async function read_latest_message_previews(
     for (const [room_uuid, rows] of rows_by_room.entries()) {
       const latest = rows.sort(compare_latest_message_rows)[0] ?? null
       const text = latest ? message_text(parse_body(latest.body)) : null
+      let preview: string | null = null
 
       if (text && text !== '(message)') {
-        previews.set(room_uuid, text)
+        preview = text
       } else if (text) {
-        previews.set(room_uuid, '対応が必要です')
+        preview = '対応が必要です'
       }
+
+      summaries.set(room_uuid, {
+        preview,
+        latest_user_sender_display_name:
+          latest_user_sender_display_name(rows),
+      })
     }
   } catch {
-    return previews
+    return summaries
   }
 
-  return previews
+  return summaries
 }
 
 export async function list_reception_room_messages({

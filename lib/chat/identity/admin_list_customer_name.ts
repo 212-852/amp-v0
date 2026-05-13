@@ -9,9 +9,12 @@ import 'server-only'
 export const admin_chat_unset_customer_label = '未設定ユーザー'
 
 export type resolved_admin_chat_customer_source =
-  | 'users.display_name'
-  | 'identities.line_profile'
   | 'participants.display_name'
+  | 'participants.nickname'
+  | 'participants.label'
+  | 'identities.line_profile'
+  | 'users.display_name'
+  | 'latest_user_message.sender_display_name'
   | 'unset'
 
 export type admin_chat_identity_payload_shape_debug = {
@@ -286,12 +289,38 @@ export function summarize_admin_chat_identity_payload_shape(
 export function resolve_admin_chat_list_customer_display(input: {
   user: Record<string, unknown> | null | undefined
   identity_rows: Record<string, unknown>[] | null | undefined
-  participant: { display_name?: string | null } | null
+  participant: {
+    display_name?: string | null
+    nickname?: string | null
+    label?: string | null
+  } | null
+  latest_user_message_sender_display_name?: string | null
 }): { title: string; source: resolved_admin_chat_customer_source } {
-  const user_display = trim_string(input.user?.['display_name'])
+  const from_participant_display = trim_string(input.participant?.display_name)
 
-  if (user_display) {
-    return { title: user_display, source: 'users.display_name' }
+  if (from_participant_display) {
+    return {
+      title: from_participant_display,
+      source: 'participants.display_name',
+    }
+  }
+
+  const from_participant_nickname = trim_string(input.participant?.nickname)
+
+  if (from_participant_nickname) {
+    return {
+      title: from_participant_nickname,
+      source: 'participants.nickname',
+    }
+  }
+
+  const from_participant_label = trim_string(input.participant?.label)
+
+  if (from_participant_label) {
+    return {
+      title: from_participant_label,
+      source: 'participants.label',
+    }
   }
 
   const from_identity = extract_identity_display_name_for_admin_rows(
@@ -302,10 +331,21 @@ export function resolve_admin_chat_list_customer_display(input: {
     return { title: from_identity, source: 'identities.line_profile' }
   }
 
-  const from_participant = trim_string(input.participant?.display_name)
+  const user_display = trim_string(input.user?.['display_name'])
 
-  if (from_participant) {
-    return { title: from_participant, source: 'participants.display_name' }
+  if (user_display) {
+    return { title: user_display, source: 'users.display_name' }
+  }
+
+  const from_latest_sender = trim_string(
+    input.latest_user_message_sender_display_name,
+  )
+
+  if (from_latest_sender) {
+    return {
+      title: from_latest_sender,
+      source: 'latest_user_message.sender_display_name',
+    }
   }
 
   return { title: admin_chat_unset_customer_label, source: 'unset' }

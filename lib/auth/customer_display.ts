@@ -94,11 +94,16 @@ function normalize_column_list(value: unknown): string[] {
 
 /**
  * Comma-separated SELECT list for `public.users` intersecting allowlist with
- * columns reported by the DB. Always includes `user_uuid` when that column exists.
+ * columns reported by the DB. When the RPC is not deployed, use `*` so PostgREST
+ * returns only actual row columns instead of an invented column list.
  */
 export function pick_users_select_list(
   snapshot: admin_chat_schema_snapshot | null,
 ): string {
+  if (!snapshot) {
+    return '*'
+  }
+
   const allowed = new Set(snapshot?.users_columns ?? [])
   const picked: string[] = []
 
