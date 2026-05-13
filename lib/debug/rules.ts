@@ -273,6 +273,7 @@ export function resolve_debug_rule(input: {
 
   const pwa_lifecycle_events = new Set([
     'pwa_install_modal_opened',
+    'pwa_install_os_detected',
     'pwa_install_button_rendered',
     'pwa_install_not_available',
     'pwa_install_prompt_available',

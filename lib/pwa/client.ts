@@ -25,6 +25,8 @@ type pwa_debug_payload = {
   error_code?: string | null
   error_message?: string | null
   modal_reused?: string | null
+  install_client_os?: string | null
+  prompt_available?: boolean | null
   phase: string
 }
 

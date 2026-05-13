@@ -7,13 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import OverlayRoot from '@/components/overlay/root'
 import Pwa_install_menu_item from '@/components/pwa/install_menu_item'
 import Pwa_install_modal_body from '@/components/pwa/install_modal_body'
-import {
-  get_retained_before_install_prompt,
-  is_standalone_pwa,
-  manifest_is_available,
-  post_pwa_debug,
-  use_before_install_prompt_state,
-} from '@/lib/pwa/client'
+import { is_standalone_pwa, use_before_install_prompt_state } from '@/lib/pwa/client'
 import { resolve_pwa_install_menu_copy_variant } from '@/lib/pwa/install_menu_copy'
 import { can_offer_admin_pwa_install_menu_row } from '@/lib/push/rules'
 
@@ -82,25 +76,6 @@ export default function AdminHeaderMenu({
   }, [is_open])
 
   function open_pwa_modal() {
-    const has_before = Boolean(get_retained_before_install_prompt())
-
-    post_pwa_debug({
-      event: 'pwa_install_modal_opened',
-      role,
-      tier,
-      source_channel: is_standalone_client ? 'pwa' : 'web',
-      has_beforeinstallprompt: has_before,
-      is_standalone: is_standalone_client,
-      modal_reused: 'overlay_root_center',
-      user_agent:
-        typeof navigator === 'undefined' ? null : navigator.userAgent,
-      app_visibility_state:
-        typeof document === 'undefined' ? null : document.visibilityState,
-      manifest_available:
-        typeof document === 'undefined' ? null : manifest_is_available(),
-      phase: 'admin_menu',
-    })
-
     set_is_open(false)
     set_is_pwa_modal_open(true)
   }

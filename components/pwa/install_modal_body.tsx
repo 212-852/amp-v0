@@ -1,23 +1,20 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { X } from 'lucide-react'
 
 import {
   clear_retained_before_install_prompt,
+  get_retained_before_install_prompt,
   is_standalone_pwa,
   manifest_is_available,
   post_pwa_debug,
   set_pwa_source_channel_cookie,
   use_before_install_prompt_state,
 } from '@/lib/pwa/client'
-import {
-  pwa_install_menu_row_copy,
-  resolve_pwa_install_menu_copy_variant,
-} from '@/lib/pwa/install_menu_copy'
+import { resolve_pwa_install_modal_panel_copy } from '@/lib/pwa/copy'
+import { resolve_pwa_install_client_os } from '@/lib/pwa/rules'
 
-import Pwa_install_app_icon from './install_app_icon'
-import { Pwa_safari_install_steps_list } from './safari_install_steps'
+import Pwa_install_modal_body_view from '@/components/pwa/modal/body'
 
 type pwa_install_modal_body_props = {
   role: string | null
@@ -39,23 +36,31 @@ export default function Pwa_install_modal_body(
   const prompt = use_before_install_prompt_state()
   const has_prompt = Boolean(prompt)
   const [is_busy, set_is_busy] = useState(false)
-  const [standalone_now, set_standalone_now] = useState(false)
+  const [standalone_now, set_standalone_now] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+
+    return is_standalone_pwa()
+  })
 
   const user_agent =
     typeof navigator === 'undefined' ? null : navigator.userAgent
 
-  const header_copy_variant = useMemo(
-    () =>
-      resolve_pwa_install_menu_copy_variant({
-        has_beforeinstallprompt: has_prompt,
-        user_agent,
-      }),
-    [has_prompt, user_agent],
+  const client_os = useMemo(
+    () => resolve_pwa_install_client_os(user_agent),
+    [user_agent],
   )
 
-  useEffect(() => {
-    set_standalone_now(is_standalone_pwa())
-  }, [])
+  const panel_copy = useMemo(
+    () =>
+      resolve_pwa_install_modal_panel_copy({
+        client_os,
+        standalone: standalone_now,
+        has_before_install_prompt: has_prompt,
+      }),
+    [client_os, standalone_now, has_prompt],
+  )
 
   const debug_base = useMemo(
     () => ({
@@ -71,10 +76,53 @@ export default function Pwa_install_modal_body(
         typeof document === 'undefined' ? null : document.visibilityState,
       manifest_available:
         typeof document === 'undefined' ? null : manifest_is_available(),
-      phase: 'admin_pwa_install_modal',
+      phase: 'pwa_install_modal',
     }),
     [has_prompt, props.role, props.tier, standalone_now],
   )
+
+  useEffect(() => {
+    const ua =
+      typeof navigator === 'undefined' ? null : navigator.userAgent
+    const os = resolve_pwa_install_client_os(ua)
+    const standalone = is_standalone_pwa()
+    const prompt_ok = Boolean(get_retained_before_install_prompt())
+    const base = {
+      role: props.role,
+      tier: props.tier,
+      source_channel: standalone ? 'pwa' : 'web',
+      has_beforeinstallprompt: prompt_ok,
+      is_standalone: standalone,
+      modal_reused: 'overlay_root_center',
+      user_agent: ua,
+      app_visibility_state:
+        typeof document === 'undefined' ? null : document.visibilityState,
+      manifest_available:
+        typeof document === 'undefined' ? null : manifest_is_available(),
+      phase: 'pwa_install_modal',
+    }
+
+    post_pwa_debug({
+      event: 'pwa_install_modal_opened',
+      ...base,
+      install_client_os: os,
+    })
+
+    post_pwa_debug({
+      event: 'pwa_install_os_detected',
+      ...base,
+      install_client_os: os,
+    })
+  }, [props.role, props.tier])
+
+  useEffect(() => {
+    post_pwa_debug({
+      event: 'pwa_install_prompt_available',
+      ...debug_base,
+      prompt_available: has_prompt,
+      phase: 'pwa_install_modal',
+    })
+  }, [debug_base, has_prompt])
 
   useEffect(() => {
     function handle_app_installed() {
@@ -106,7 +154,7 @@ export default function Pwa_install_modal_body(
     post_pwa_debug({
       event: 'pwa_install_started',
       ...debug_base,
-      phase: 'install_prompt',
+      phase: 'pwa_install_modal',
     })
 
     try {
@@ -117,7 +165,7 @@ export default function Pwa_install_modal_body(
         post_pwa_debug({
           event: 'pwa_install_dismissed',
           ...debug_base,
-          phase: 'install_prompt',
+          phase: 'pwa_install_modal',
         })
         return
       }
@@ -128,114 +176,44 @@ export default function Pwa_install_modal_body(
         source_channel: 'pwa',
         has_beforeinstallprompt: false,
         is_standalone: true,
-        phase: 'install_prompt',
+        phase: 'pwa_install_modal',
       })
 
       set_pwa_source_channel_cookie()
       clear_retained_before_install_prompt()
+      set_standalone_now(true)
     } catch (error) {
       post_pwa_debug({
         event: 'pwa_install_failed',
         ...debug_base,
         error_message: error instanceof Error ? error.message : String(error),
-        phase: 'install_prompt',
+        phase: 'pwa_install_modal',
       })
     } finally {
       set_is_busy(false)
     }
   }
 
+  const show_badge = standalone_now
+
   return (
-    <div className="relative w-[92%] max-w-[360px] rounded-[26px] bg-white px-6 py-6 shadow-[0_12px_40px_rgba(0,0,0,0.14)]">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <Pwa_install_app_icon />
-          <div className="min-w-0 pr-1">
-            {standalone_now ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[18px] font-semibold leading-snug text-neutral-900">
-                  {pwa_install_menu_row_copy.installed_label}
-                </h2>
-                <span
-                  className="inline-flex shrink-0 items-center rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[10px] font-semibold leading-none text-neutral-600"
-                  aria-hidden
-                >
-                  PWA
-                </span>
-              </div>
-            ) : (
-              <>
-                <h2 className="text-[18px] font-semibold leading-snug text-neutral-900">
-                  {pwa_install_menu_row_copy[header_copy_variant].title}
-                </h2>
-                <p className="mt-1.5 text-left text-[13px] font-medium leading-[1.5] text-neutral-600">
-                  {pwa_install_menu_row_copy[header_copy_variant].subtitle}
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-        <button
-          type="button"
-          aria-label="close"
-          onClick={props.on_close}
-          className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.94]"
-        >
-          <X className="h-[22px] w-[22px] stroke-[2.1] text-neutral-700" />
-        </button>
-      </div>
-
-      {!standalone_now ? (
-        <p className="mt-3 text-left text-[14px] leading-[1.65] text-neutral-600">
-          この端末にPET TAXIをインストールしますか？
-        </p>
-      ) : null}
-
-      {standalone_now ? (
-        <div className="mt-5">
-          <button
-            type="button"
-            disabled
-            className="w-full cursor-not-allowed rounded-full bg-neutral-200 px-5 py-3 text-[14px] font-semibold text-neutral-500"
-          >
-            インストール済み
-          </button>
-        </div>
-      ) : has_prompt ? (
-        <div className="mt-6 flex flex-col gap-3">
-          <button
-            type="button"
-            disabled={is_busy}
-            onClick={() => {
+    <Pwa_install_modal_body_view
+      title={panel_copy.title}
+      body={panel_copy.body}
+      steps={panel_copy.steps}
+      primary_button_label={panel_copy.primary_button_label}
+      android_chrome_install_hint={panel_copy.android_chrome_install_hint}
+      close_label={panel_copy.close_label}
+      show_installed_badge={show_badge}
+      on_close={props.on_close}
+      on_primary_press={
+        panel_copy.primary_button_label
+          ? () => {
               void handle_install_click()
-            }}
-            className="w-full rounded-full bg-neutral-900 px-5 py-3 text-[14px] font-semibold text-white disabled:opacity-60"
-          >
-            インストール
-          </button>
-          <button
-            type="button"
-            onClick={props.on_close}
-            className="text-center text-[12px] font-medium text-neutral-500"
-          >
-            閉じる
-          </button>
-        </div>
-      ) : (
-        <div className="mt-4 text-left">
-          <p className="text-[12px] font-semibold text-neutral-800">
-            iPhone Safari / LIFF の場合
-          </p>
-          <Pwa_safari_install_steps_list />
-          <button
-            type="button"
-            onClick={props.on_close}
-            className="mt-5 w-full rounded-full bg-neutral-900 px-5 py-3 text-[14px] font-semibold text-white"
-          >
-            閉じる
-          </button>
-        </div>
-      )}
-    </div>
+            }
+          : undefined
+      }
+      primary_busy={is_busy}
+    />
   )
 }

@@ -1,3 +1,5 @@
+import { resolve_pwa_install_client_os } from '@/lib/pwa/rules'
+
 export type pwa_install_menu_copy_variant = 'standard' | 'safari_manual'
 
 /** Single source for PWA install row / modal header copy (JP). */
@@ -18,17 +20,7 @@ export const pwa_install_menu_row_copy = {
  * Does not decide tier or standalone; callers pass `has_beforeinstallprompt` and UA.
  */
 export function is_ios_like_user_agent(user_agent: string | null | undefined): boolean {
-  if (!user_agent) {
-    return false
-  }
-
-  const ua = user_agent.toLowerCase()
-
-  return (
-    ua.includes('iphone') ||
-    ua.includes('ipad') ||
-    ua.includes('ipod')
-  )
+  return resolve_pwa_install_client_os(user_agent) === 'ios'
 }
 
 export function resolve_pwa_install_menu_copy_variant(input: {

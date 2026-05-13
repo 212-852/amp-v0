@@ -24,6 +24,8 @@ type pwa_debug_body = {
   error_message?: unknown
   phase?: unknown
   modal_reused?: unknown
+  install_client_os?: unknown
+  prompt_available?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -85,6 +87,11 @@ export async function POST(request: Request) {
       error_message: string_or_null(body?.error_message),
       modal_reused:
         typeof body?.modal_reused === 'string' ? body.modal_reused.trim() : null,
+      install_client_os: string_or_null(body?.install_client_os),
+      prompt_available:
+        typeof body?.prompt_available === 'boolean'
+          ? body.prompt_available
+          : null,
       phase: string_or_null(body?.phase),
     },
   })
