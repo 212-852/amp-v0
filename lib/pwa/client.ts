@@ -1,5 +1,7 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+
 import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
 
 type pwa_debug_payload = {
@@ -22,6 +24,7 @@ type pwa_debug_payload = {
   app_visibility_state?: string | null
   error_code?: string | null
   error_message?: string | null
+  modal_reused?: string | null
   phase: string
 }
 
@@ -65,6 +68,19 @@ export function capture_before_install_prompt(event: Event) {
   event.preventDefault()
   retained_before_install_prompt = event as pwa_before_install_prompt_event
   notify_before_install_prompt_listeners()
+}
+
+export function use_before_install_prompt_state() {
+  const [prompt, set_prompt] = useState<pwa_before_install_prompt_event | null>(
+    () =>
+      typeof window === 'undefined'
+        ? null
+        : get_retained_before_install_prompt(),
+  )
+
+  useEffect(() => subscribe_before_install_prompt(set_prompt), [])
+
+  return prompt
 }
 
 export function post_pwa_debug(input: pwa_debug_payload) {

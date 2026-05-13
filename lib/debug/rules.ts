@@ -272,6 +272,7 @@ export function resolve_debug_rule(input: {
   ])
 
   const pwa_lifecycle_events = new Set([
+    'pwa_install_modal_opened',
     'pwa_install_button_rendered',
     'pwa_install_not_available',
     'pwa_install_prompt_available',
@@ -361,6 +362,9 @@ export function resolve_debug_rule(input: {
     'chat_typing_state_updated',
     'chat_support_started_insert_started',
     'chat_support_started_insert_succeeded',
+    'toast_decision_started',
+    'toast_shown',
+    'toast_skipped',
   ])
 
   const chat_realtime_server_failed = new Set([

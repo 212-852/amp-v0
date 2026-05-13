@@ -23,6 +23,7 @@ type pwa_debug_body = {
   error_code?: unknown
   error_message?: unknown
   phase?: unknown
+  modal_reused?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -82,6 +83,8 @@ export async function POST(request: Request) {
       app_visibility_state: string_or_null(body?.app_visibility_state),
       error_code: string_or_null(body?.error_code),
       error_message: string_or_null(body?.error_message),
+      modal_reused:
+        typeof body?.modal_reused === 'string' ? body.modal_reused.trim() : null,
       phase: string_or_null(body?.phase),
     },
   })

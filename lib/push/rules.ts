@@ -44,3 +44,10 @@ export function should_offer_pwa_install(input: {
 }): boolean {
   return can_save_push_subscription(input.session) && !input.pwa_push_installed
 }
+
+/** Admin header menu: any authenticated admin tier may open the install guide. */
+export function can_offer_admin_pwa_install_menu_row(
+  session: push_session_slice,
+): boolean {
+  return session.role === 'admin'
+}

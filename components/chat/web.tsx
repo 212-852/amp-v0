@@ -31,6 +31,7 @@ import type {
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 import { create_browser_supabase } from '@/lib/db/browser'
+import { handle_chat_message_toast } from '@/lib/output/toast'
 
 function post_presence(input: {
   room_uuid: string
@@ -371,6 +372,7 @@ export function WebChat({
     scroll_to_bottom,
     room_uuid: active_room_uuid,
     messages: active_messages,
+    is_chat_open,
     room_realtime_channel_ref: room_realtime_channelRef,
   } = chat
   const append_realtime_message_ref = useRef(append_realtime_message)
@@ -379,7 +381,13 @@ export function WebChat({
 
   const self_participant_uuid_ref = useRef(participant_uuid)
 
-  const web_rt_ctx_ref = useRef({
+  const web_rt_ctx_ref = useRef<{
+    active_room_uuid: string | null
+    participant_uuid: string
+    user_uuid: string | null
+    tier: string | null
+    source_channel: 'web' | 'liff' | 'pwa' | 'line'
+  }>({
     active_room_uuid: active_room_uuid ?? room_uuid,
     participant_uuid,
     user_uuid: session?.user_uuid ?? null,
@@ -414,7 +422,7 @@ export function WebChat({
     latest_room_uuid_ref.current = room_uuid
     self_participant_uuid_ref.current = participant_uuid
     web_rt_ctx_ref.current = {
-      active_room_uuid: active_room_uuid ?? room_uuid,
+      active_room_uuid: is_chat_open ? active_room_uuid ?? room_uuid : null,
       participant_uuid,
       user_uuid: session?.user_uuid ?? null,
       tier: session?.tier ?? null,
@@ -428,6 +436,7 @@ export function WebChat({
   }, [
     active_room_uuid,
     append_realtime_message,
+    is_chat_open,
     participant_uuid,
     room_uuid,
     session?.source_channel,
@@ -572,6 +581,23 @@ export function WebChat({
 
         const dbg = web_rt_ctx_ref.current
         const update_result = append_realtime_message_ref.current(message)
+
+        handle_chat_message_toast({
+          room_uuid: message.room_uuid,
+          active_room_uuid: dbg.active_room_uuid,
+          message_uuid: message.archive_uuid,
+          sender_user_uuid: message.sender_user_uuid ?? null,
+          sender_participant_uuid: message.sender_participant_uuid ?? null,
+          sender_role: message.sender_role ?? message.bundle.sender ?? null,
+          active_user_uuid: dbg.user_uuid,
+          active_participant_uuid: dbg.participant_uuid,
+          active_role: 'user',
+          role: 'user',
+          tier: dbg.tier,
+          source_channel: dbg.source_channel,
+          target_path: '/user',
+          phase: 'web_chat_realtime_message',
+        })
 
         send_chat_realtime_debug({
           event: 'chat_realtime_message_state_updated',

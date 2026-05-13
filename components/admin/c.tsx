@@ -15,6 +15,7 @@ import {
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
 import { create_browser_supabase } from '@/lib/db/browser'
+import { handle_chat_message_toast } from '@/lib/output/toast'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 type AdminChatTimelineProps = {
@@ -399,6 +400,23 @@ export default function AdminChatTimeline({
         })
 
         const dbg = admin_rt_ctx_ref.current
+
+        handle_chat_message_toast({
+          room_uuid: archived.room_uuid,
+          active_room_uuid: locked_room,
+          message_uuid: archived.archive_uuid,
+          sender_user_uuid: archived.sender_user_uuid ?? null,
+          sender_participant_uuid: archived.sender_participant_uuid ?? null,
+          sender_role: archived.sender_role ?? archived.bundle.sender ?? null,
+          active_user_uuid: dbg.staff_user_uuid,
+          active_participant_uuid: dbg.staff_participant_uuid,
+          active_role: 'admin',
+          role: 'admin',
+          tier: dbg.staff_tier,
+          source_channel: 'admin',
+          target_path: `/admin/reception/${archived.room_uuid}`,
+          phase: 'admin_chat_detail_realtime_message',
+        })
 
         send_chat_realtime_debug({
           event: 'chat_realtime_message_state_updated',

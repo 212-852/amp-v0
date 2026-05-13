@@ -63,7 +63,11 @@ export default function AdminHeader({
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
           <AdminReceptionButton />
-          <AdminHeaderMenu can_access_management={can_access_management} />
+          <AdminHeaderMenu
+            can_access_management={can_access_management}
+            role={role ?? null}
+            tier={tier ?? null}
+          />
         </div>
       </div>
     </header>

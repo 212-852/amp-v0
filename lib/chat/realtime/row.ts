@@ -4,8 +4,15 @@ import type { message_bundle } from '@/lib/chat/message'
 export type message_insert_row = {
   message_uuid: string
   room_uuid: string
+  participant_uuid?: string | null
   body: string | null
   created_at: string
+}
+
+export type realtime_archived_message = archived_message & {
+  sender_user_uuid?: string | null
+  sender_participant_uuid?: string | null
+  sender_role?: string | null
 }
 
 /**
@@ -13,7 +20,7 @@ export type message_insert_row = {
  */
 export function archived_message_from_message_row(
   row: message_insert_row,
-): archived_message | null {
+): realtime_archived_message | null {
   if (!row.body) {
     return null
   }
@@ -23,6 +30,9 @@ export function archived_message_from_message_row(
       bundle?: message_bundle
       bundle_type?: string
       sequence?: number
+      user_uuid?: string | null
+      participant_uuid?: string | null
+      sender_role?: string | null
     }
 
     const bundle = parsed.bundle
@@ -40,6 +50,20 @@ export function archived_message_from_message_row(
       sequence,
       bundle,
       created_at: row.created_at,
+      sender_user_uuid:
+        typeof parsed.user_uuid === 'string' ? parsed.user_uuid : null,
+      sender_participant_uuid:
+        typeof parsed.participant_uuid === 'string'
+          ? parsed.participant_uuid
+          : typeof row.participant_uuid === 'string'
+            ? row.participant_uuid
+            : null,
+      sender_role:
+        typeof parsed.sender_role === 'string'
+          ? parsed.sender_role
+          : typeof bundle.sender === 'string'
+            ? bundle.sender
+            : null,
     }
   } catch {
     return null

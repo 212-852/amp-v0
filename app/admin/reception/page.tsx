@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { MessageCircle, Search } from 'lucide-react'
 
+import AdminReceptionToastListener from '@/components/admin/reception/toast'
 import {
   list_reception_rooms,
   type reception_room,
@@ -73,6 +74,8 @@ export default async function AdminReceptionPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <AdminReceptionToastListener rooms={rooms} />
+
       <header>
         <nav
           aria-label="Breadcrumb"

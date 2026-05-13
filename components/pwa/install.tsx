@@ -1,11 +1,9 @@
 'use client'
 
-import { Download, Smartphone } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import {
   clear_retained_before_install_prompt,
-  get_retained_before_install_prompt,
   is_standalone_pwa,
   log_pwa_installability_state,
   manifest_is_available,
@@ -13,9 +11,11 @@ import {
   register_push_subscription,
   register_pwa_service_worker,
   set_pwa_source_channel_cookie,
-  subscribe_before_install_prompt,
-  type pwa_before_install_prompt_event,
+  use_before_install_prompt_state,
 } from '@/lib/pwa/client'
+import { resolve_pwa_install_menu_copy_variant } from '@/lib/pwa/install_menu_copy'
+
+import Pwa_install_menu_item from './install_menu_item'
 
 type PwaInstallButtonProps = {
   can_install: boolean
@@ -24,9 +24,6 @@ type PwaInstallButtonProps = {
   room_uuid: string | null
   role: string | null
   tier: string | null
-  label: string
-  fallback_label: string
-  fallback_help: string
 }
 
 function initial_pwa_installed_state() {
@@ -39,13 +36,23 @@ function initial_pwa_installed_state() {
 
 export default function PwaInstallButton(props: PwaInstallButtonProps) {
   const [installed, set_installed] = useState(initial_pwa_installed_state)
-  const [prompt, set_prompt] =
-    useState<pwa_before_install_prompt_event | null>(
-      get_retained_before_install_prompt,
-    )
+  const prompt = use_before_install_prompt_state()
   const [is_busy, set_is_busy] = useState(false)
   const prompt_available = Boolean(prompt)
   const show_install_section = props.can_install && !installed
+
+  const user_agent =
+    typeof navigator === 'undefined' ? null : navigator.userAgent
+
+  const copy_variant = useMemo(
+    () =>
+      resolve_pwa_install_menu_copy_variant({
+        has_beforeinstallprompt: prompt_available,
+        user_agent,
+      }),
+    [prompt_available, user_agent],
+  )
+
   const debug_context = useMemo(
     () => ({
       user_uuid: props.user_uuid,
@@ -58,7 +65,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       is_standalone: installed,
       manifest_available:
         typeof document === 'undefined' ? null : manifest_is_available(),
-      user_agent: typeof navigator === 'undefined' ? null : navigator.userAgent,
+      user_agent,
       app_visibility_state:
         typeof document === 'undefined' ? null : document.visibilityState,
     }),
@@ -85,7 +92,6 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
   useEffect(() => {
     async function handle_app_installed() {
       set_installed(true)
-      set_prompt(null)
       clear_retained_before_install_prompt()
       set_pwa_source_channel_cookie()
 
@@ -119,11 +125,9 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       }
     }
 
-    const unsubscribe = subscribe_before_install_prompt(set_prompt)
     window.addEventListener('appinstalled', handle_app_installed)
 
     return () => {
-      unsubscribe()
       window.removeEventListener('appinstalled', handle_app_installed)
     }
   }, [
@@ -152,7 +156,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       })
     }
 
-    if (!prompt_available) {
+    if (!prompt_available && (show_install_section || !props.can_install)) {
       post_pwa_debug({
         event: 'pwa_install_not_available',
         ...debug_context,
@@ -170,10 +174,6 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     prompt_available,
     show_install_section,
   ])
-
-  if (!show_install_section) {
-    return null
-  }
 
   async function handle_click() {
     if (!prompt || is_busy) {
@@ -201,9 +201,17 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
         return
       }
 
+      post_pwa_debug({
+        event: 'pwa_install_accepted',
+        ...debug_context,
+        source_channel: 'pwa',
+        has_beforeinstallprompt: false,
+        is_standalone: true,
+        phase: 'install_prompt',
+      })
+
       set_pwa_source_channel_cookie()
       set_installed(true)
-      set_prompt(null)
       clear_retained_before_install_prompt()
 
       const push_ok = await register_push_subscription({
@@ -238,35 +246,29 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     }
   }
 
-  if (!prompt_available) {
+  if (!props.can_install) {
+    return null
+  }
+
+  if (installed) {
     return (
-      <div className="mt-auto w-full rounded-2xl border border-[#eadfd7] bg-white px-4 py-3 text-left shadow-[0_2px_10px_rgba(42,29,24,0.04)]">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f3ebe2] text-[#9b6b4b]">
-            <Smartphone className="h-4.5 w-4.5" strokeWidth={2.2} />
-          </span>
-          <span className="text-[14px] font-semibold text-[#2a1d18]">
-            {props.fallback_label}
-          </span>
-        </div>
-        <p className="mt-2 pl-12 text-[11px] font-medium leading-[1.55] text-[#8a7568]">
-          {props.fallback_help}
-        </p>
-      </div>
+      <Pwa_install_menu_item
+        tone="user"
+        installed
+        copy_variant="standard"
+        interactive={false}
+      />
     )
   }
 
   return (
-    <button
-      type="button"
-      onClick={handle_click}
-      disabled={is_busy}
-      className="mt-auto flex w-full items-center gap-3 rounded-2xl border border-[#eadfd7] bg-white px-4 py-3 text-left text-[14px] font-semibold text-[#2a1d18] shadow-[0_2px_10px_rgba(42,29,24,0.04)] disabled:opacity-60"
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f3ebe2] text-[#9b6b4b]">
-        <Download className="h-4.5 w-4.5" strokeWidth={2.2} />
-      </span>
-      <span>{props.label}</span>
-    </button>
+    <Pwa_install_menu_item
+      tone="user"
+      installed={false}
+      copy_variant={copy_variant}
+      interactive={prompt_available}
+      is_busy={is_busy}
+      on_press={prompt_available ? () => void handle_click() : undefined}
+    />
   )
 }

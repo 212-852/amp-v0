@@ -30,21 +30,6 @@ const content = {
     en: 'Check settings and support items.',
     es: 'Consulta ajustes y opciones de soporte.',
   },
-  install: {
-    ja: 'アプリをインストール',
-    en: 'Install app',
-    es: 'Instalar app',
-  },
-  add_to_home: {
-    ja: 'アプリをホーム画面に追加',
-    en: 'Add app to home screen',
-    es: 'Agregar app a la pantalla de inicio',
-  },
-  safari_help: {
-    ja: 'Safariの場合は共有ボタンから「ホーム画面に追加」を選択してください',
-    en: 'In Safari, use Share and choose Add to Home Screen.',
-    es: 'En Safari, usa Compartir y elige Agregar a inicio.',
-  },
 }
 
 export default function MenuModal(props: menu_modal_props) {
@@ -86,9 +71,6 @@ export default function MenuModal(props: menu_modal_props) {
             room_uuid={props.room_uuid}
             role={props.session?.role ?? null}
             tier={props.session?.tier ?? null}
-            label={content.install[props.locale]}
-            fallback_label={content.add_to_home[props.locale]}
-            fallback_help={content.safari_help[props.locale]}
           />
         </div>
       </div>

@@ -8,6 +8,7 @@ import { get_browser_supabase_client_instance_id } from '@/lib/db/browser'
 import {
   archived_message_from_message_row,
   type message_insert_row,
+  type realtime_archived_message,
 } from './row'
 import { is_self_typing_broadcast } from './typing_identity'
 
@@ -186,7 +187,7 @@ export function subscribe_chat_room_realtime(input: {
     participant_uuid: string | null
     role: string | null
   }>
-  on_message: (message: ReturnType<typeof archived_message_from_message_row>) => void
+  on_message: (message: realtime_archived_message) => void
   on_typing: (payload: chat_typing_payload) => void
 }): RealtimeChannel {
   const channel_name = chat_room_realtime_channel_name(input.room_uuid)
@@ -345,12 +346,14 @@ export function subscribe_chat_room_realtime(input: {
         }
 
         const sender_role =
-          typeof message.bundle.sender === 'string' ? message.bundle.sender : null
+          message.sender_role ??
+          (typeof message.bundle.sender === 'string' ? message.bundle.sender : null)
         const sender_user_uuid =
-          message.bundle.bundle_type === 'room_action_log' &&
+          message.sender_user_uuid ??
+          (message.bundle.bundle_type === 'room_action_log' &&
           typeof message.bundle.metadata?.admin_user_uuid === 'string'
             ? message.bundle.metadata.admin_user_uuid
-            : null
+            : null)
         const action_uuid =
           message.bundle.bundle_type === 'room_action_log'
             ? message.bundle.bundle_uuid
@@ -363,6 +366,7 @@ export function subscribe_chat_room_realtime(input: {
           payload_action_uuid: action_uuid,
           payload_room_uuid,
           sender_user_uuid,
+          sender_participant_uuid: message.sender_participant_uuid ?? null,
           sender_role,
           phase: 'postgres_changes_insert',
         })
