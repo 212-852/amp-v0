@@ -15,6 +15,7 @@ import MenuModal from '@/components/modal/menu'
 import MypageModal from '@/components/modal/mypage'
 import QuickModal from '@/components/modal/quick'
 import OverlayRoot from '@/components/overlay/root'
+import Pwa_install_modal_body from '@/components/pwa/install_modal_body'
 import type {
   quick_menu_item,
   quick_menu_item_key,
@@ -218,6 +219,8 @@ export default function UserFooter() {
   const [card_scale, set_card_scale] = useState(1)
   const [is_mypage_open, set_is_mypage_open] = useState(false)
   const [is_menu_open, set_is_menu_open] = useState(false)
+  const [is_pwa_install_modal_open, set_is_pwa_install_modal_open] =
+    useState(false)
   const [is_quick_menu_open, set_is_quick_menu_open] = useState(false)
   const [is_link_required_open, set_is_link_required_open] = useState(false)
   const [is_paw_pressed, set_is_paw_pressed] = useState(false)
@@ -672,6 +675,19 @@ export default function UserFooter() {
           room_uuid={chat.room_uuid}
           participant_uuid={chat.participant_uuid}
           on_close={() => set_is_menu_open(false)}
+          on_open_pwa_install_modal={() => set_is_pwa_install_modal_open(true)}
+        />
+      </OverlayRoot>
+
+      <OverlayRoot
+        open={is_pwa_install_modal_open}
+        on_close={() => set_is_pwa_install_modal_open(false)}
+        variant="center"
+      >
+        <Pwa_install_modal_body
+          role={session?.role ?? null}
+          tier={session?.tier ?? null}
+          on_close={() => set_is_pwa_install_modal_open(false)}
         />
       </OverlayRoot>
 

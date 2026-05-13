@@ -7,7 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import OverlayRoot from '@/components/overlay/root'
 import Pwa_install_menu_item from '@/components/pwa/install_menu_item'
 import Pwa_install_modal_body from '@/components/pwa/install_modal_body'
-import { is_standalone_pwa, use_before_install_prompt_state } from '@/lib/pwa/client'
+import {
+  is_standalone_pwa,
+  manifest_is_available,
+  post_pwa_debug,
+  use_before_install_prompt_state,
+} from '@/lib/pwa/client'
 import { resolve_pwa_install_menu_copy_variant } from '@/lib/pwa/install_menu_copy'
 import { can_offer_admin_pwa_install_menu_row } from '@/lib/push/rules'
 
@@ -76,8 +81,51 @@ export default function AdminHeaderMenu({
   }, [is_open])
 
   function open_pwa_modal() {
-    set_is_open(false)
-    set_is_pwa_modal_open(true)
+    const has_before = Boolean(before_install_prompt)
+    const standalone = is_standalone_pwa()
+    const base = {
+      role,
+      tier,
+      source_channel: 'web' as const,
+      platform:
+        typeof navigator === 'undefined' ? null : navigator.platform,
+      has_beforeinstallprompt: has_before,
+      is_standalone: standalone,
+      click_handler_reached: true as const,
+      modal_component_name: 'Pwa_install_modal_body' as const,
+      user_agent:
+        typeof navigator === 'undefined' ? null : navigator.userAgent,
+      manifest_available:
+        typeof document === 'undefined' ? null : manifest_is_available(),
+      phase: 'admin_menu_pwa_install_row',
+    }
+
+    post_pwa_debug({
+      event: 'pwa_install_menu_clicked',
+      ...base,
+    })
+
+    post_pwa_debug({
+      event: 'pwa_install_modal_open_started',
+      ...base,
+    })
+
+    try {
+      set_is_pwa_modal_open(true)
+    } catch (error) {
+      post_pwa_debug({
+        event: 'pwa_install_modal_open_failed',
+        ...base,
+        error_message: error instanceof Error ? error.message : String(error),
+        reason: 'set_modal_state_threw',
+      })
+
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      set_is_open(false)
+    })
   }
 
   const has_menu_items = can_access_management || show_pwa_row
@@ -119,7 +167,6 @@ export default function AdminHeaderMenu({
                   tone="admin"
                   installed={is_standalone_client}
                   copy_variant={pwa_install_copy_variant}
-                  interactive={!is_standalone_client}
                   on_press={
                     is_standalone_client
                       ? undefined

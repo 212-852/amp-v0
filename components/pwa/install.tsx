@@ -24,6 +24,9 @@ type PwaInstallButtonProps = {
   room_uuid: string | null
   role: string | null
   tier: string | null
+  source_channel: string
+  on_open_install_modal: () => void
+  on_close_menu: () => void
 }
 
 function initial_pwa_installed_state() {
@@ -34,10 +37,21 @@ function initial_pwa_installed_state() {
   return is_standalone_pwa()
 }
 
+function resolve_client_platform() {
+  if (typeof navigator === 'undefined') {
+    return null
+  }
+
+  const nav = navigator as Navigator & {
+    userAgentData?: { platform?: string }
+  }
+
+  return nav.userAgentData?.platform ?? nav.platform ?? null
+}
+
 export default function PwaInstallButton(props: PwaInstallButtonProps) {
   const [installed, set_installed] = useState(initial_pwa_installed_state)
   const prompt = use_before_install_prompt_state()
-  const [is_busy, set_is_busy] = useState(false)
   const prompt_available = Boolean(prompt)
   const show_install_section = props.can_install && !installed
 
@@ -60,7 +74,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       role: props.role,
       tier: props.tier,
       room_uuid: props.room_uuid,
-      source_channel: installed ? 'pwa' : 'web',
+      source_channel: props.source_channel,
       has_beforeinstallprompt: prompt_available,
       is_standalone: installed,
       manifest_available:
@@ -75,6 +89,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       props.participant_uuid,
       props.role,
       props.room_uuid,
+      props.source_channel,
       props.tier,
       props.user_uuid,
     ],
@@ -175,75 +190,45 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     show_install_section,
   ])
 
-  async function handle_click() {
-    if (!prompt || is_busy) {
-      return
+  function handle_menu_row_click() {
+    const has_prompt = Boolean(prompt)
+    const standalone_now = is_standalone_pwa()
+    const base = {
+      ...debug_context,
+      has_beforeinstallprompt: has_prompt,
+      is_standalone: standalone_now,
+      click_handler_reached: true as const,
+      modal_component_name: 'Pwa_install_modal_body' as const,
+      platform: resolve_client_platform(),
+      phase: 'user_menu_pwa_install_row',
     }
 
-    set_is_busy(true)
+    post_pwa_debug({
+      event: 'pwa_install_menu_clicked',
+      ...base,
+    })
 
     post_pwa_debug({
-      event: 'pwa_install_started',
-      ...debug_context,
-      phase: 'install_prompt',
+      event: 'pwa_install_modal_open_started',
+      ...base,
     })
 
     try {
-      await prompt.prompt()
-      const choice = await prompt.userChoice
-
-      if (choice.outcome !== 'accepted') {
-        post_pwa_debug({
-          event: 'pwa_install_dismissed',
-          ...debug_context,
-          phase: 'install_prompt',
-        })
-        return
-      }
-
-      post_pwa_debug({
-        event: 'pwa_install_accepted',
-        ...debug_context,
-        source_channel: 'pwa',
-        has_beforeinstallprompt: false,
-        is_standalone: true,
-        phase: 'install_prompt',
-      })
-
-      set_pwa_source_channel_cookie()
-      set_installed(true)
-      clear_retained_before_install_prompt()
-
-      const push_ok = await register_push_subscription({
-        user_uuid: props.user_uuid,
-        participant_uuid: props.participant_uuid,
-        room_uuid: props.room_uuid,
-        role: props.role,
-        tier: props.tier,
-      })
-
-      if (push_ok) {
-        post_pwa_debug({
-          event: 'pwa_install_succeeded',
-          ...debug_context,
-          source_channel: 'pwa',
-          has_beforeinstallprompt: false,
-          is_standalone: true,
-          has_push_subscription: true,
-          phase: 'install_prompt',
-        })
-      }
+      props.on_open_install_modal()
     } catch (error) {
       post_pwa_debug({
-        event: 'pwa_install_failed',
-        ...debug_context,
+        event: 'pwa_install_modal_open_failed',
+        ...base,
         error_message: error instanceof Error ? error.message : String(error),
-        phase: 'install_prompt',
+        reason: 'open_install_modal_callback_threw',
       })
-    } finally {
-      clear_retained_before_install_prompt()
-      set_is_busy(false)
+
+      return
     }
+
+    window.requestAnimationFrame(() => {
+      props.on_close_menu()
+    })
   }
 
   if (!props.can_install) {
@@ -256,7 +241,6 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
         tone="user"
         installed
         copy_variant="standard"
-        interactive={false}
       />
     )
   }
@@ -266,9 +250,9 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       tone="user"
       installed={false}
       copy_variant={copy_variant}
-      interactive={prompt_available}
-      is_busy={is_busy}
-      on_press={prompt_available ? () => void handle_click() : undefined}
+      on_press={() => {
+        handle_menu_row_click()
+      }}
     />
   )
 }

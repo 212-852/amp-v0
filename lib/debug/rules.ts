@@ -272,6 +272,9 @@ export function resolve_debug_rule(input: {
   ])
 
   const pwa_lifecycle_events = new Set([
+    'pwa_install_menu_clicked',
+    'pwa_install_modal_open_started',
+    'pwa_install_modal_open_failed',
     'pwa_install_modal_opened',
     'pwa_install_os_detected',
     'pwa_install_button_rendered',

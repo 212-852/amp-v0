@@ -27,6 +27,10 @@ type pwa_debug_payload = {
   modal_reused?: string | null
   install_client_os?: string | null
   prompt_available?: boolean | null
+  platform?: string | null
+  click_handler_reached?: boolean | null
+  modal_component_name?: string | null
+  reason?: string | null
   phase: string
 }
 

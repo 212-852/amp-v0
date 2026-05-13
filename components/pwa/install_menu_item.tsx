@@ -11,7 +11,6 @@ export type pwa_install_menu_item_props = {
   tone: pwa_install_menu_tone
   installed: boolean
   copy_variant: pwa_install_menu_copy_variant
-  interactive: boolean
   is_busy?: boolean
   on_press?: () => void
   class_name?: string
@@ -44,12 +43,12 @@ export default function Pwa_install_menu_item(props: pwa_install_menu_item_props
     : pwa_install_menu_row_copy[variant].title
   const subtitle = installed ? null : pwa_install_menu_row_copy[variant].subtitle
 
-  const shell =
-    props.interactive && !installed
-      ? tone_shell[props.tone].interactive
-      : tone_shell[props.tone].static
+  const can_press = !installed && typeof props.on_press === 'function'
+  const shell = can_press
+    ? tone_shell[props.tone].interactive
+    : tone_shell[props.tone].static
 
-  const disabled = installed || busy || !props.on_press
+  const disabled = installed || busy
   const title_class =
     props.tone === 'user'
       ? installed
@@ -90,7 +89,7 @@ export default function Pwa_install_menu_item(props: pwa_install_menu_item_props
 
   const merged = [shell, props.class_name].filter(Boolean).join(' ')
 
-  if (props.interactive && !installed && props.on_press) {
+  if (can_press && props.on_press) {
     return (
       <button
         type="button"
@@ -104,12 +103,7 @@ export default function Pwa_install_menu_item(props: pwa_install_menu_item_props
   }
 
   return (
-    <div
-      className={[merged, installed || !props.on_press ? '' : 'opacity-80']
-        .filter(Boolean)
-        .join(' ')}
-      aria-disabled={disabled}
-    >
+    <div className={merged} aria-disabled={disabled}>
       {inner}
     </div>
   )

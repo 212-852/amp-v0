@@ -9,11 +9,13 @@ import { can_show_pwa_install } from '@/lib/pwa/rules'
 type menu_modal_props = {
   locale: locale_key
   on_close: () => void
+  on_open_pwa_install_modal: () => void
   session: {
     user_uuid?: string | null
     role?: 'user' | 'driver' | 'admin' | 'guest' | null
     tier?: 'guest' | 'member' | 'vip' | null
     pwa_installed?: boolean
+    source_channel?: 'web' | 'liff' | 'pwa' | 'line'
   } | null
   room_uuid: string | null
   participant_uuid: string | null
@@ -71,6 +73,9 @@ export default function MenuModal(props: menu_modal_props) {
             room_uuid={props.room_uuid}
             role={props.session?.role ?? null}
             tier={props.session?.tier ?? null}
+            source_channel={props.session?.source_channel ?? 'web'}
+            on_open_install_modal={props.on_open_pwa_install_modal}
+            on_close_menu={props.on_close}
           />
         </div>
       </div>
