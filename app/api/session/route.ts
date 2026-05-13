@@ -19,6 +19,7 @@ import { ensure_direct_room_for_visitor } from '@/lib/chat/room'
 import type { chat_channel } from '@/lib/chat/room'
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
+import { load_user_pwa_installed } from '@/lib/push/action'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
 type normalized_role = 'user' | 'driver' | 'admin' | 'guest'
@@ -208,6 +209,7 @@ function create_session_payload(input: {
   requires_line_auth: boolean
   line_auth_method: string | null
   source_channel: browser_session_source_channel
+  pwa_installed: boolean
 }) {
   const session = input.visitor_uuid
     ? {
@@ -222,6 +224,7 @@ function create_session_payload(input: {
         connected_providers: input.connected_providers,
         chat: input.chat,
         source_channel: input.source_channel,
+        pwa_installed: input.pwa_installed,
       }
     : null
 
@@ -244,6 +247,7 @@ function create_session_payload(input: {
     requires_line_auth: input.requires_line_auth,
     line_auth_method: input.line_auth_method,
     source_channel: input.source_channel,
+    pwa_installed: input.pwa_installed,
   }
 }
 
@@ -401,6 +405,12 @@ async function resolve_session_payload() {
   const requires_line_auth = is_line_webview && !line_connected
   const line_auth_method = requires_line_auth ? 'line_login' : null
 
+  let pwa_installed = false
+
+  if (session_state.user_uuid) {
+    pwa_installed = await load_user_pwa_installed(session_state.user_uuid)
+  }
+
   if (control.debug.liff_auth && display_name) {
     await debug_event({
       category: 'liff',
@@ -431,6 +441,7 @@ async function resolve_session_payload() {
       requires_line_auth,
       line_auth_method,
       source_channel: session_src,
+      pwa_installed,
     }),
     visitor,
   }
@@ -492,6 +503,7 @@ export async function GET() {
         requires_line_auth: false,
         line_auth_method: null,
         source_channel: fallback_source_channel,
+        pwa_installed: false,
       }),
     )
   }

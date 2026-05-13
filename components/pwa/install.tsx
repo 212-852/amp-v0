@@ -1,6 +1,6 @@
 'use client'
 
-import { Download } from 'lucide-react'
+import { Download, Smartphone } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import {
@@ -25,6 +25,8 @@ type PwaInstallButtonProps = {
   role: string | null
   tier: string | null
   label: string
+  fallback_label: string
+  fallback_help: string
 }
 
 function initial_pwa_installed_state() {
@@ -43,10 +45,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     )
   const [is_busy, set_is_busy] = useState(false)
   const prompt_available = Boolean(prompt)
-  const show_install_button =
-    props.can_install &&
-    prompt_available &&
-    !installed
+  const show_install_section = props.can_install && !installed
   const debug_context = useMemo(
     () => ({
       user_uuid: props.user_uuid,
@@ -84,7 +83,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
   }, [])
 
   useEffect(() => {
-    function handle_app_installed() {
+    async function handle_app_installed() {
       set_installed(true)
       set_prompt(null)
       clear_retained_before_install_prompt()
@@ -99,13 +98,25 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
         phase: 'appinstalled',
       })
 
-      void register_push_subscription({
+      const push_ok = await register_push_subscription({
         user_uuid: props.user_uuid,
         participant_uuid: props.participant_uuid,
         room_uuid: props.room_uuid,
         role: props.role,
         tier: props.tier,
       })
+
+      if (push_ok) {
+        post_pwa_debug({
+          event: 'pwa_install_succeeded',
+          ...debug_context,
+          source_channel: 'pwa',
+          has_beforeinstallprompt: false,
+          is_standalone: true,
+          has_push_subscription: true,
+          phase: 'appinstalled',
+        })
+      }
     }
 
     const unsubscribe = subscribe_before_install_prompt(set_prompt)
@@ -131,27 +142,36 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       service_worker_registered: null,
     })
 
-    if (show_install_button) {
+    if (show_install_section) {
       post_pwa_debug({
         event: 'pwa_install_button_rendered',
         ...debug_context,
-        phase: 'install_button_render',
+        phase: prompt_available
+          ? 'install_button_prompt_render'
+          : 'install_button_fallback_render',
       })
-      return
     }
 
-    post_pwa_debug({
-      event: 'pwa_install_not_available',
-      ...debug_context,
-      phase: !props.can_install
-        ? 'install_rule_not_allowed'
-        : installed
-          ? 'already_standalone'
-          : 'beforeinstallprompt_missing',
-    })
-  }, [debug_context, installed, props.can_install, prompt_available, show_install_button])
+    if (!prompt_available) {
+      post_pwa_debug({
+        event: 'pwa_install_not_available',
+        ...debug_context,
+        phase: !props.can_install
+          ? 'install_rule_not_allowed'
+          : installed
+            ? 'already_standalone'
+            : 'beforeinstallprompt_missing_fallback_visible',
+      })
+    }
+  }, [
+    debug_context,
+    installed,
+    props.can_install,
+    prompt_available,
+    show_install_section,
+  ])
 
-  if (!show_install_button) {
+  if (!show_install_section) {
     return null
   }
 
@@ -186,22 +206,25 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       set_prompt(null)
       clear_retained_before_install_prompt()
 
-      post_pwa_debug({
-        event: 'pwa_install_accepted',
-        ...debug_context,
-        source_channel: 'pwa',
-        has_beforeinstallprompt: false,
-        is_standalone: true,
-        phase: 'install_prompt',
-      })
-
-      await register_push_subscription({
+      const push_ok = await register_push_subscription({
         user_uuid: props.user_uuid,
         participant_uuid: props.participant_uuid,
         room_uuid: props.room_uuid,
         role: props.role,
         tier: props.tier,
       })
+
+      if (push_ok) {
+        post_pwa_debug({
+          event: 'pwa_install_succeeded',
+          ...debug_context,
+          source_channel: 'pwa',
+          has_beforeinstallprompt: false,
+          is_standalone: true,
+          has_push_subscription: true,
+          phase: 'install_prompt',
+        })
+      }
     } catch (error) {
       post_pwa_debug({
         event: 'pwa_install_failed',
@@ -213,6 +236,24 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       clear_retained_before_install_prompt()
       set_is_busy(false)
     }
+  }
+
+  if (!prompt_available) {
+    return (
+      <div className="mt-auto w-full rounded-2xl border border-[#eadfd7] bg-white px-4 py-3 text-left shadow-[0_2px_10px_rgba(42,29,24,0.04)]">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f3ebe2] text-[#9b6b4b]">
+            <Smartphone className="h-4.5 w-4.5" strokeWidth={2.2} />
+          </span>
+          <span className="text-[14px] font-semibold text-[#2a1d18]">
+            {props.fallback_label}
+          </span>
+        </div>
+        <p className="mt-2 pl-12 text-[11px] font-medium leading-[1.55] text-[#8a7568]">
+          {props.fallback_help}
+        </p>
+      </div>
+    )
   }
 
   return (

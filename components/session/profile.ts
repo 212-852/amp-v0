@@ -21,6 +21,7 @@ export type session_profile_snapshot = {
   visitor_uuid?: string | null
   user_uuid?: string | null
   source_channel?: 'web' | 'liff' | 'pwa' | 'line'
+  pwa_installed?: boolean
 }
 
 export function use_session_profile() {

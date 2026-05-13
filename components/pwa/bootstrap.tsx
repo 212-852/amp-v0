@@ -41,7 +41,7 @@ export default function PwaBootstrap() {
       })
 
       post_pwa_debug({
-        event: 'pwa_beforeinstallprompt_received',
+        event: 'pwa_install_prompt_available',
         source_channel: standalone ? 'pwa' : 'web',
         has_beforeinstallprompt: true,
         is_standalone: standalone,

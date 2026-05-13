@@ -203,7 +203,7 @@ export async function register_push_subscription(input: {
       applicationServerKey: url_base64_to_uint8_array(public_key),
     })
 
-    const response = await fetch('/api/pwa/subscription', {
+    const response = await fetch('/api/push/subscribe', {
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json' },
@@ -212,11 +212,16 @@ export async function register_push_subscription(input: {
         participant_uuid: input.participant_uuid,
         subscription: subscription.toJSON(),
         user_agent: navigator.userAgent,
+        is_pwa: true,
       }),
     })
 
     if (!response.ok) {
       throw new Error(`subscription_save_http_${response.status}`)
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('amp_session_changed'))
     }
 
     post_pwa_debug({

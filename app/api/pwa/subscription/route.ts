@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { save_push_subscription } from '@/lib/pwa/action'
+import { save_push_subscription } from '@/lib/push/action'
 
 type push_subscription_request = {
   room_uuid?: unknown
