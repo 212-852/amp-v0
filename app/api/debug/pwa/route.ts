@@ -35,6 +35,14 @@ type pwa_debug_body = {
   current_url?: unknown
   is_ios?: unknown
   is_liff?: unknown
+  manifest_exists?: unknown
+  manifest_valid?: unknown
+  manifest_url?: unknown
+  service_worker_supported?: unknown
+  is_https?: unknown
+  is_localhost_exception?: unknown
+  is_secure_context?: unknown
+  is_installable?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -115,6 +123,30 @@ export async function POST(request: Request) {
       current_url: string_or_null(body?.current_url),
       is_ios: typeof body?.is_ios === 'boolean' ? body.is_ios : null,
       is_liff: typeof body?.is_liff === 'boolean' ? body.is_liff : null,
+      manifest_exists:
+        typeof body?.manifest_exists === 'boolean'
+          ? body.manifest_exists
+          : null,
+      manifest_valid:
+        typeof body?.manifest_valid === 'boolean' ? body.manifest_valid : null,
+      manifest_url: string_or_null(body?.manifest_url),
+      service_worker_supported:
+        typeof body?.service_worker_supported === 'boolean'
+          ? body.service_worker_supported
+          : null,
+      is_https: typeof body?.is_https === 'boolean' ? body.is_https : null,
+      is_localhost_exception:
+        typeof body?.is_localhost_exception === 'boolean'
+          ? body.is_localhost_exception
+          : null,
+      is_secure_context:
+        typeof body?.is_secure_context === 'boolean'
+          ? body.is_secure_context
+          : null,
+      is_installable:
+        typeof body?.is_installable === 'boolean'
+          ? body.is_installable
+          : null,
     },
   })
 

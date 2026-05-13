@@ -267,6 +267,7 @@ export function resolve_debug_rule(input: {
 
   const pwa_problem_events = new Set([
     'pwa_install_failed',
+    'pwa_service_worker_register_failed',
     'push_subscription_save_failed',
     'notification_push_failed',
     'notification_line_failed',
@@ -292,6 +293,12 @@ export function resolve_debug_rule(input: {
     'pwa_install_copy_failed',
     'pwa_install_open_safari_clicked',
     'pwa_install_open_safari_succeeded',
+    'pwa_manifest_loaded',
+    'pwa_service_worker_register_started',
+    'pwa_service_worker_register_succeeded',
+    'pwa_installability_checked',
+    'pwa_beforeinstallprompt_received',
+    'pwa_beforeinstallprompt_missing',
     'push_subscription_save_started',
     'push_subscription_save_succeeded',
     'notification_route_decided',

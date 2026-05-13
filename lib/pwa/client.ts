@@ -19,7 +19,15 @@ type pwa_debug_payload = {
   has_beforeinstallprompt?: boolean | null
   is_standalone?: boolean | null
   manifest_available?: boolean | null
+  manifest_exists?: boolean | null
+  manifest_valid?: boolean | null
+  manifest_url?: string | null
+  service_worker_supported?: boolean | null
   service_worker_registered?: boolean | null
+  is_https?: boolean | null
+  is_localhost_exception?: boolean | null
+  is_secure_context?: boolean | null
+  is_installable?: boolean | null
   user_agent?: string | null
   app_visibility_state?: string | null
   error_code?: string | null
@@ -79,6 +87,14 @@ export function capture_before_install_prompt(event: Event) {
   event.preventDefault()
   retained_before_install_prompt = event as pwa_before_install_prompt_event
   notify_before_install_prompt_listeners()
+
+  post_pwa_debug({
+    event: 'pwa_beforeinstallprompt_received',
+    phase: 'beforeinstallprompt',
+    ...build_pwa_diagnostic_payload({
+      has_beforeinstallprompt: true,
+    }),
+  })
 }
 
 export function use_before_install_prompt_state() {
@@ -122,6 +138,223 @@ export function is_standalone_pwa() {
 
 export function manifest_is_available() {
   return Boolean(document.querySelector('link[rel="manifest"]'))
+}
+
+export type pwa_manifest_probe_result = {
+  manifest_url: string
+  manifest_exists: boolean
+  manifest_valid: boolean
+}
+
+/**
+ * Fetches the linked web app manifest and validates install-related fields.
+ */
+export async function load_pwa_manifest_for_debug(): Promise<pwa_manifest_probe_result> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return {
+      manifest_url: '',
+      manifest_exists: false,
+      manifest_valid: false,
+    }
+  }
+
+  const link = document.querySelector(
+    'link[rel="manifest"]',
+  ) as HTMLLinkElement | null
+  const manifest_url = link?.href
+    ? link.href
+    : new URL('/manifest.webmanifest', window.location.origin).toString()
+
+  try {
+    const response = await fetch(manifest_url, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+
+    if (!response.ok) {
+      return {
+        manifest_url,
+        manifest_exists: false,
+        manifest_valid: false,
+      }
+    }
+
+    const json = (await response.json()) as Record<string, unknown>
+    const icons = json.icons
+    const has_icons = Array.isArray(icons) && icons.length > 0
+    const manifest_valid = Boolean(
+      typeof json.name === 'string' &&
+        json.name.trim().length > 0 &&
+        typeof json.short_name === 'string' &&
+        json.short_name.trim().length > 0 &&
+        json.display === 'standalone' &&
+        typeof json.start_url === 'string' &&
+        json.start_url.trim().length > 0 &&
+        typeof json.theme_color === 'string' &&
+        typeof json.background_color === 'string' &&
+        has_icons,
+    )
+
+    return {
+      manifest_url,
+      manifest_exists: true,
+      manifest_valid,
+    }
+  } catch {
+    return {
+      manifest_url,
+      manifest_exists: false,
+      manifest_valid: false,
+    }
+  }
+}
+
+export type pwa_diagnostic_merge_input = {
+  manifest_exists?: boolean | null
+  manifest_valid?: boolean | null
+  manifest_url?: string | null
+  service_worker_registered?: boolean | null
+  has_beforeinstallprompt?: boolean | null
+}
+
+/**
+ * Builds the standard PWA diagnostic payload for debug events (browser only).
+ */
+export function build_pwa_diagnostic_payload(
+  input: pwa_diagnostic_merge_input = {},
+): Omit<pwa_debug_payload, 'event' | 'phase' | 'error_code' | 'error_message'> & {
+  error_code?: string | null
+  error_message?: string | null
+} {
+  if (typeof window === 'undefined') {
+    return {
+      user_agent: null,
+      app_visibility_state: null,
+      source_channel: 'web',
+      is_standalone: false,
+      is_https: null,
+      is_localhost_exception: null,
+      is_secure_context: null,
+      service_worker_supported: null,
+      has_beforeinstallprompt: null,
+      manifest_available: null,
+      manifest_exists: input.manifest_exists ?? null,
+      manifest_valid: input.manifest_valid ?? null,
+      manifest_url: input.manifest_url ?? null,
+      service_worker_registered: input.service_worker_registered ?? null,
+      is_installable: null,
+    }
+  }
+
+  const loc = window.location
+  const host = loc.hostname
+  const is_localhost_exception =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '[::1]'
+  const is_https = loc.protocol === 'https:'
+  const is_secure_context = window.isSecureContext
+  const service_worker_supported = 'serviceWorker' in navigator
+  const has_beforeinstallprompt =
+    input.has_beforeinstallprompt ??
+    Boolean(get_retained_before_install_prompt())
+  const manifest_exists = input.manifest_exists ?? null
+  const manifest_valid = input.manifest_valid ?? null
+  const manifest_url = input.manifest_url ?? null
+  const service_worker_registered = input.service_worker_registered ?? null
+
+  const manifest_ok =
+    manifest_exists === true && manifest_valid === true
+  const transport_ok =
+    is_secure_context && (is_https || is_localhost_exception)
+  const sw_ok = service_worker_registered === true
+  const bip_ok = has_beforeinstallprompt === true
+
+  const is_installable = Boolean(
+    transport_ok && manifest_ok && sw_ok && bip_ok,
+  )
+
+  return {
+    user_agent: navigator.userAgent,
+    app_visibility_state: document.visibilityState,
+    source_channel: is_standalone_pwa() ? 'pwa' : 'web',
+    is_standalone: is_standalone_pwa(),
+    is_https,
+    is_localhost_exception,
+    is_secure_context,
+    service_worker_supported,
+    has_beforeinstallprompt,
+    manifest_available: manifest_is_available(),
+    manifest_exists,
+    manifest_valid,
+    manifest_url,
+    service_worker_registered,
+    is_installable,
+  }
+}
+
+export function post_pwa_installability_checked(
+  input: pwa_diagnostic_merge_input,
+) {
+  post_pwa_debug({
+    event: 'pwa_installability_checked',
+    phase: 'pwa_bootstrap',
+    ...build_pwa_diagnostic_payload(input),
+  })
+}
+
+export async function register_pwa_service_worker_with_debug(): Promise<ServiceWorkerRegistration | null> {
+  post_pwa_debug({
+    event: 'pwa_service_worker_register_started',
+    phase: 'pwa_bootstrap',
+    ...build_pwa_diagnostic_payload({
+      service_worker_registered: false,
+      manifest_exists: null,
+      manifest_valid: null,
+      manifest_url: null,
+    }),
+  })
+
+  if (!('serviceWorker' in navigator)) {
+    post_pwa_debug({
+      event: 'pwa_service_worker_register_failed',
+      phase: 'pwa_bootstrap',
+      ...build_pwa_diagnostic_payload({
+        service_worker_registered: false,
+      }),
+      error_code: 'service_worker_not_supported',
+      error_message: 'navigator.serviceWorker is not available',
+    })
+
+    return null
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js')
+
+    post_pwa_debug({
+      event: 'pwa_service_worker_register_succeeded',
+      phase: 'pwa_bootstrap',
+      ...build_pwa_diagnostic_payload({
+        service_worker_registered: true,
+      }),
+    })
+
+    return registration
+  } catch (error) {
+    post_pwa_debug({
+      event: 'pwa_service_worker_register_failed',
+      phase: 'pwa_bootstrap',
+      ...build_pwa_diagnostic_payload({
+        service_worker_registered: false,
+      }),
+      error_code: 'service_worker_register_threw',
+      error_message:
+        error instanceof Error ? error.message : String(error),
+    })
+
+    return null
+  }
 }
 
 export function log_pwa_installability_state(input: {
