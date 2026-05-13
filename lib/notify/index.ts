@@ -1,6 +1,8 @@
 import 'server-only'
 
 import {
+  mask_discord_action_id_for_log,
+  normalize_discord_thread_action_id,
   send_discord_notify,
   short_room_uuid,
   sync_discord_action_context,
@@ -71,13 +73,26 @@ export async function notify(
   })
 }
 
-async function admin_support_notify_trace(
+async function emit_support_started_admin_chat_debug(
+  event: string,
+  payload: Record<string, unknown>,
+) {
+  const { debug_event } = await import('@/lib/debug')
+
+  await debug_event({
+    category: 'admin_chat',
+    event,
+    payload,
+  })
+}
+
+async function notification_route_trace(
   debug_event: string,
   payload: Record<string, unknown>,
 ) {
   await notify({
     event: 'debug_trace',
-    category: 'admin_chat',
+    category: 'notification',
     debug_event,
     payload,
   })
@@ -86,70 +101,183 @@ async function admin_support_notify_trace(
 async function deliver_support_started(
   event: Extract<notify_event, { event: 'support_started' }>,
 ): Promise<notify_delivery_result[]> {
-  await admin_support_notify_trace('support_started_notify_started', {
+  const raw_discord_id =
+    typeof event.discord_thread_action_id === 'string'
+      ? event.discord_thread_action_id.trim()
+      : ''
+  const normalized_thread_action_id = normalize_discord_thread_action_id(
+    event.discord_thread_action_id,
+  )
+  const discord_id_exists = Boolean(normalized_thread_action_id)
+
+  const base_debug_payload = {
     room_uuid: event.room_uuid,
     action_uuid: event.action_uuid,
-  })
+    admin_user_uuid: event.admin_user_uuid,
+    admin_participant_uuid: event.admin_participant_uuid,
+    admin_internal_name: event.admin_internal_name,
+    customer_user_uuid: event.customer_user_uuid,
+    customer_participant_uuid: event.customer_participant_uuid,
+    discord_id_exists,
+    discord_id: mask_discord_action_id_for_log(
+      normalized_thread_action_id ?? raw_discord_id,
+    ),
+    notification_route: null as string | null,
+    phase: 'deliver_support_started',
+  }
+
+  await emit_support_started_admin_chat_debug(
+    'support_started_notify_started',
+    base_debug_payload,
+  )
 
   const content = format_support_started_notify_content(event)
 
   try {
-    if (event.discord_thread_action_id) {
+    if (normalized_thread_action_id) {
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_route_decided',
+        {
+          ...base_debug_payload,
+          notification_route: 'discord_action_thread',
+        },
+      )
+
       const result = await sync_discord_action_context({
         title: 'Support started',
         content,
-        action_id: event.discord_thread_action_id,
+        action_id: normalized_thread_action_id,
       })
 
-      await admin_support_notify_trace('support_started_notify_succeeded', {
-        room_uuid: event.room_uuid,
-        action_uuid: event.action_uuid,
-        route: 'discord_action_thread',
-      })
+      if (!result) {
+        await emit_support_started_admin_chat_debug(
+          'support_started_notify_failed',
+          {
+            ...base_debug_payload,
+            notification_route: 'discord_action_thread',
+            error_code: 'discord_thread_sync_failed',
+            error_message:
+              'sync_discord_action_context returned null (reopen or post failed)',
+          },
+        )
+
+        return []
+      }
+
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_succeeded',
+        {
+          ...base_debug_payload,
+          notification_route: 'discord_action_thread',
+        },
+      )
 
       return [
         {
           channel: 'discord',
-          action_id: result?.action_id ?? event.discord_thread_action_id,
+          action_id: result.action_id ?? normalized_thread_action_id,
         },
       ]
+    }
+
+    if (raw_discord_id) {
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_discord_id_missing',
+        {
+          ...base_debug_payload,
+          discord_id_exists: false,
+          discord_id: mask_discord_action_id_for_log(raw_discord_id),
+          notification_route: 'none',
+          error_code: 'discord_thread_action_id_unusable',
+          error_message:
+            'rooms.action_id was set but could not be normalized to discord:<snowflake>',
+        },
+      )
+    } else {
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_discord_id_missing',
+        {
+          ...base_debug_payload,
+          notification_route: 'notify_wolf_webhook',
+          error_code: null,
+          error_message: null,
+        },
+      )
     }
 
     const rule = resolve_notify_rule(event)
 
     if (!rule.channels.includes('discord')) {
-      await admin_support_notify_trace('support_started_notify_failed', {
-        room_uuid: event.room_uuid,
-        reason: 'notify_rule_skipped_discord',
-      })
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_failed',
+        {
+          ...base_debug_payload,
+          notification_route: 'none',
+          error_code: 'notify_rule_skipped_discord',
+          error_message: 'resolve_notify_rule returned no discord channel',
+        },
+      )
       return []
     }
 
+    await emit_support_started_admin_chat_debug(
+      'support_started_notify_route_decided',
+      {
+        ...base_debug_payload,
+        notification_route: 'notify_wolf_webhook',
+      },
+    )
+
     const sent = await send_discord_notify(event)
 
-    if (sent?.ok === false) {
-      await admin_support_notify_trace('support_started_notify_failed', {
-        room_uuid: event.room_uuid,
-        action_uuid: event.action_uuid,
-        http_status: sent.http_status ?? null,
-        error_text: sent.error_text ?? null,
-      })
-    } else {
-      await admin_support_notify_trace('support_started_notify_succeeded', {
-        room_uuid: event.room_uuid,
-        action_uuid: event.action_uuid,
-        route: 'notify_wolf_webhook',
-      })
+    if (sent?.ok === true) {
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_succeeded',
+        {
+          ...base_debug_payload,
+          notification_route: 'notify_wolf_webhook',
+        },
+      )
+
+      return [{ channel: 'discord' }]
     }
 
-    return [{ channel: 'discord' }]
+    if (sent?.ok === false) {
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_failed',
+        {
+          ...base_debug_payload,
+          notification_route: 'notify_wolf_webhook',
+          http_status: sent.http_status ?? null,
+          error_text: sent.error_text ?? null,
+          error_code: 'discord_webhook_non_ok',
+          error_message: 'DISCORD_NOTIFY_WEBHOOK_URL returned non-2xx',
+        },
+      )
+    } else {
+      await emit_support_started_admin_chat_debug(
+        'support_started_notify_failed',
+        {
+          ...base_debug_payload,
+          notification_route: 'notify_wolf_webhook',
+          error_code: 'discord_webhook_skipped_or_empty',
+          error_message:
+            'send_discord_notify returned null (missing URL, empty content, or transport skip)',
+        },
+      )
+    }
+
+    return []
   } catch (error) {
-    await admin_support_notify_trace('support_started_notify_failed', {
-      room_uuid: event.room_uuid,
-      action_uuid: event.action_uuid,
-      error_message:
-        error instanceof Error ? error.message : String(error),
-    })
+    await emit_support_started_admin_chat_debug(
+      'support_started_notify_failed',
+      {
+        ...base_debug_payload,
+        error_code: 'support_started_notify_exception',
+        error_message:
+          error instanceof Error ? error.message : String(error),
+      },
+    )
     return []
   }
 }
@@ -303,6 +431,13 @@ async function deliver_personal_to_recipient(input: {
   recipient: notify_recipient
   message: string
 }): Promise<personal_delivery_outcome> {
+  await notification_route_trace('notification_route_decided', {
+    user_uuid: input.recipient.user_uuid,
+    notification_route: 'push_first',
+    has_line_identity: Boolean(input.recipient.line_user_id),
+    phase: 'personal_delivery_start',
+  })
+
   const push = await send_push_notify({
     user_uuid: input.recipient.user_uuid,
     message: input.message,
@@ -313,11 +448,30 @@ async function deliver_personal_to_recipient(input: {
   }))
 
   if (push.ok && push.available) {
+    await notification_route_trace('notification_push_sent', {
+      user_uuid: input.recipient.user_uuid,
+      notification_route: 'push',
+      has_push_subscription: true,
+      has_line_identity: Boolean(input.recipient.line_user_id),
+      phase: 'personal_delivery_push',
+    })
+
     return {
       recipient: input.recipient,
       channel: 'push',
       ok: true,
     }
+  }
+
+  if (push.available || push.reason) {
+    await notification_route_trace('notification_push_failed', {
+      user_uuid: input.recipient.user_uuid,
+      notification_route: 'push',
+      has_push_subscription: push.available,
+      has_line_identity: Boolean(input.recipient.line_user_id),
+      error_message: push.reason ?? 'push_failed',
+      phase: 'personal_delivery_push',
+    })
   }
 
   const line_user_id = input.recipient.line_user_id
@@ -338,12 +492,29 @@ async function deliver_personal_to_recipient(input: {
       message: input.message,
     })
 
+    await notification_route_trace('notification_line_sent', {
+      user_uuid: input.recipient.user_uuid,
+      notification_route: 'line',
+      has_push_subscription: push.available,
+      has_line_identity: true,
+      phase: 'personal_delivery_line',
+    })
+
     return {
       recipient: input.recipient,
       channel: 'line',
       ok: true,
     }
   } catch (error) {
+    await notification_route_trace('notification_line_failed', {
+      user_uuid: input.recipient.user_uuid,
+      notification_route: 'line',
+      has_push_subscription: push.available,
+      has_line_identity: true,
+      error_message: error instanceof Error ? error.message : 'line_push_failed',
+      phase: 'personal_delivery_line',
+    })
+
     return {
       recipient: input.recipient,
       channel: 'line',

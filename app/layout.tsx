@@ -1,7 +1,8 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { M_PLUS_Rounded_1c } from 'next/font/google'
 import './globals.css'
 import LiffBootstrapLoader from '@/components/session/liff/loader'
+import PwaBootstrap from '@/components/pwa/bootstrap'
 
 const rounded = M_PLUS_Rounded_1c({
   subsets: ['latin'],
@@ -12,6 +13,11 @@ const rounded = M_PLUS_Rounded_1c({
 export const metadata: Metadata = {
   title: 'PET TAXI',
   description: 'Pet taxi reservation assistant',
+  manifest: '/manifest.webmanifest',
+}
+
+export const viewport: Viewport = {
+  themeColor: '#ead5c0',
 }
 
 export default function RootLayout({
@@ -23,6 +29,7 @@ export default function RootLayout({
     <html lang="ja">
       <body className={rounded.variable}>
         <LiffBootstrapLoader />
+        <PwaBootstrap />
         {children}
       </body>
     </html>

@@ -1,9 +1,13 @@
 import 'server-only'
 
+import { supabase } from '@/lib/db/supabase'
+
 export type push_notify_input = {
   user_uuid: string
   message: string
   title?: string
+  room_uuid?: string | null
+  message_uuid?: string | null
 }
 
 export type push_notify_result = {
@@ -12,22 +16,47 @@ export type push_notify_result = {
   reason?: string
 }
 
-/**
- * Personal push delivery for an admin / owner / core user.
- *
- * The push subscription system is not yet wired up, so this stub always
- * reports `available: false`. Callers must treat this as a signal to fall
- * back to LINE personal push (see `notify/index.ts`).
- *
- * Future work plugs WebPush/FCM here without changing the orchestrator
- * contract: return `{ ok: true, available: true }` on success.
- */
 export async function send_push_notify(
-  _input: push_notify_input,
+  input: push_notify_input,
 ): Promise<push_notify_result> {
+  const result = await supabase
+    .from('push_subscriptions')
+    .select('subscription_uuid')
+    .eq('user_uuid', input.user_uuid)
+    .eq('is_active', true)
+    .limit(1)
+
+  if (result.error) {
+    return {
+      ok: false,
+      available: false,
+      reason: result.error.message,
+    }
+  }
+
+  if ((result.data ?? []).length === 0) {
+    return {
+      ok: false,
+      available: false,
+      reason: 'push_subscription_missing',
+    }
+  }
+
+  if (
+    !process.env.VAPID_PRIVATE_KEY ||
+    !process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
+    !process.env.VAPID_SUBJECT
+  ) {
+    return {
+      ok: false,
+      available: false,
+      reason: 'vapid_keys_not_configured',
+    }
+  }
+
   return {
     ok: false,
-    available: false,
-    reason: 'push_subscriptions_not_configured',
+    available: true,
+    reason: 'webpush_delivery_not_configured',
   }
 }

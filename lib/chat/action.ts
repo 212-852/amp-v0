@@ -39,6 +39,10 @@ import {
 import { deliver_line_text_reply } from '@/lib/output/line'
 import type { chat_locale } from './message'
 import { notify } from '@/lib/notify'
+import {
+  mask_discord_action_id_for_log,
+  normalize_discord_thread_action_id,
+} from '@/lib/notify/discord'
 import { normalize_locale } from '@/lib/locale/action'
 import {
   ensure_direct_room_for_visitor,
@@ -1864,10 +1868,10 @@ export async function handle_admin_reception_room_opened(
     }
   }
 
-  const [user_result, bot_result] = await Promise.all([
+  const [user_result, bot_result, admin_participant_pick] = await Promise.all([
     supabase
       .from('participants')
-      .select('participant_uuid')
+      .select('participant_uuid, user_uuid')
       .eq('room_uuid', room_uuid)
       .eq('role', 'user')
       .order('created_at', { ascending: true })
@@ -1881,6 +1885,15 @@ export async function handle_admin_reception_room_opened(
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('user_uuid', admin_uuid)
+      .in('role', ['admin', 'concierge'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   if (user_result.error) {
@@ -1891,12 +1904,23 @@ export async function handle_admin_reception_room_opened(
     throw bot_result.error
   }
 
+  if (admin_participant_pick.error) {
+    throw admin_participant_pick.error
+  }
+
   const user_participant_uuid = clean_uuid(
     (user_result.data as { participant_uuid?: string } | null)
       ?.participant_uuid ?? null,
   )
   const bot_participant_uuid = clean_uuid(
     (bot_result.data as { participant_uuid?: string } | null)
+      ?.participant_uuid ?? null,
+  )
+  const customer_user_uuid = clean_uuid(
+    (user_result.data as { user_uuid?: string } | null)?.user_uuid ?? null,
+  )
+  const admin_participant_uuid = clean_uuid(
+    (admin_participant_pick.data as { participant_uuid?: string } | null)
       ?.participant_uuid ?? null,
   )
 
@@ -1987,11 +2011,38 @@ export async function handle_admin_reception_room_opened(
     })
   }
 
-  const discord_thread_action_id =
-    typeof room_pick.data?.action_id === 'string' &&
-    room_pick.data.action_id.trim().length > 0
+  const action_id_raw =
+    typeof room_pick.data?.action_id === 'string'
       ? room_pick.data.action_id.trim()
-      : null
+      : ''
+
+  const discord_thread_action_id = normalize_discord_thread_action_id(
+    room_pick.data?.action_id ?? null,
+  )
+
+  if (
+    discord_thread_action_id &&
+    action_id_raw &&
+    discord_thread_action_id !== action_id_raw
+  ) {
+    const repair = await supabase
+      .from('rooms')
+      .update({
+        action_id: discord_thread_action_id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('room_uuid', room_uuid)
+
+    if (repair.error) {
+      console.warn(
+        '[admin_reception_open] room_action_id_normalize_save_failed',
+        {
+          room_uuid,
+          error: repair.error,
+        },
+      )
+    }
+  }
 
   const subject = await resolve_room_subject(room_uuid)
   const customer_display_name = subject.display_name
@@ -2008,6 +2059,32 @@ export async function handle_admin_reception_room_opened(
       : ''
   const admin_internal_name =
     admin_internal_name_raw.length > 0 ? admin_internal_name_raw : null
+
+  const support_started_debug_participants = {
+    admin_user_uuid: admin_uuid,
+    admin_participant_uuid,
+    admin_internal_name,
+    customer_user_uuid,
+    customer_participant_uuid: user_participant_uuid,
+    discord_id_exists: Boolean(discord_thread_action_id),
+    discord_id: mask_discord_action_id_for_log(
+      discord_thread_action_id ?? action_id_raw,
+    ),
+    notification_route: null,
+    error_code: null,
+    error_message: null,
+    phase: 'support_actions_insert',
+  }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'support_started_action_create_started',
+    payload: {
+      room_uuid,
+      action_uuid: null,
+      ...support_started_debug_participants,
+    },
+  })
 
   const insert_row = {
     room_uuid,
@@ -2031,6 +2108,21 @@ export async function handle_admin_reception_room_opened(
       room_uuid,
       error: inserted.error,
     })
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'support_started_action_create_failed',
+      payload: {
+        room_uuid,
+        action_uuid: null,
+        ...support_started_debug_participants,
+        error_code:
+          typeof inserted.error.code === 'string'
+            ? inserted.error.code
+            : null,
+        error_message: inserted.error.message,
+      },
+    })
   } else {
     const action_uuid = String(
       (inserted.data as { action_uuid?: string }).action_uuid ?? '',
@@ -2041,10 +2133,11 @@ export async function handle_admin_reception_room_opened(
 
     await debug_event({
       category: 'admin_chat',
-      event: 'support_started_action_created',
+      event: 'support_started_action_create_succeeded',
       payload: {
         room_uuid,
         action_uuid,
+        ...support_started_debug_participants,
       },
     })
 
@@ -2056,6 +2149,10 @@ export async function handle_admin_reception_room_opened(
       admin_display_label: display_name,
       customer_display_name,
       admin_internal_name,
+      admin_user_uuid: admin_uuid,
+      admin_participant_uuid,
+      customer_user_uuid,
+      customer_participant_uuid: user_participant_uuid,
       discord_thread_action_id,
     }).catch(async (error) => {
       console.error('[admin_reception_open] support_started_notify_rejected', {
@@ -2069,8 +2166,12 @@ export async function handle_admin_reception_room_opened(
         payload: {
           room_uuid,
           action_uuid,
+          ...support_started_debug_participants,
+          notification_route: 'notify_unexpected_rejection',
+          error_code: 'notify_rejected',
           error_message:
             error instanceof Error ? error.message : String(error),
+          phase: 'notify_support_started',
         },
       })
     })

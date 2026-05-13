@@ -64,6 +64,10 @@ export type notify_event =
       admin_display_label: string
       customer_display_name: string
       admin_internal_name: string | null
+      admin_user_uuid: string
+      admin_participant_uuid: string | null
+      customer_user_uuid: string | null
+      customer_participant_uuid: string | null
       discord_thread_action_id: string | null
     }
 

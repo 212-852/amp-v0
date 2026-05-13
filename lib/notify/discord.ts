@@ -49,6 +49,63 @@ function discord_thread_id_from_action_id(
   return thread_id || null
 }
 
+const discord_thread_snowflake_re = /^\d{15,22}$/
+
+/**
+ * Canonical Discord action thread id: `discord:<forum_thread_snowflake>`.
+ * Accepts legacy bare snowflakes stored on `rooms.action_id`.
+ */
+export function normalize_discord_thread_action_id(
+  raw: string | null | undefined,
+): string | null {
+  if (raw == null) {
+    return null
+  }
+
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+
+  if (!trimmed) {
+    return null
+  }
+
+  if (trimmed.startsWith('discord:')) {
+    const suffix = trimmed.slice('discord:'.length).trim()
+
+    if (suffix && discord_thread_snowflake_re.test(suffix)) {
+      return `discord:${suffix}`
+    }
+
+    return null
+  }
+
+  if (discord_thread_snowflake_re.test(trimmed)) {
+    return `discord:${trimmed}`
+  }
+
+  return null
+}
+
+export function mask_discord_action_id_for_log(
+  raw: string | null | undefined,
+): string | null {
+  const normalized = normalize_discord_thread_action_id(raw)
+
+  const tail =
+    normalized?.startsWith('discord:') === true
+      ? normalized.slice('discord:'.length)
+      : (raw ?? '').trim()
+
+  if (!tail) {
+    return null
+  }
+
+  if (tail.length <= 8) {
+    return `${tail.slice(0, 2)}**`
+  }
+
+  return `${tail.slice(0, 4)}...${tail.slice(-4)}`
+}
+
 async function discord_action_bot_fetch(
   path: string,
   init: RequestInit,
@@ -355,13 +412,24 @@ async function update_discord_action_context(input: {
 export async function sync_discord_action_context(
   input: discord_action_context_input,
 ): Promise<discord_action_context_result | null> {
-  if (input.close && !input.action_id) {
+  const raw =
+    typeof input.action_id === 'string' ? input.action_id.trim() : ''
+  const action_id = normalize_discord_thread_action_id(input.action_id)
+
+  if (input.close && !raw) {
     return null
   }
 
-  if (input.action_id) {
+  if (raw && !action_id) {
+    console.warn('[discord_action] sync_skipped_malformed_action_id', {
+      action_id_masked: mask_discord_action_id_for_log(raw),
+    })
+    return null
+  }
+
+  if (action_id) {
     const updated = await update_discord_action_context({
-      action_id: input.action_id,
+      action_id,
       content: input.content,
       close: input.close,
     })

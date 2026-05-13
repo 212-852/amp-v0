@@ -668,6 +668,9 @@ export default function UserFooter() {
       >
         <MenuModal
           locale={render_locale}
+          session={session}
+          room_uuid={chat.room_uuid}
+          participant_uuid={chat.participant_uuid}
           on_close={() => set_is_menu_open(false)}
         />
       </OverlayRoot>

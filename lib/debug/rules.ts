@@ -206,8 +206,25 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  if (
+    input.category === 'admin_chat' &&
+    input.event === 'support_started_notify_discord_id_missing'
+  ) {
+    const has_error =
+      typeof input.payload?.error_message === 'string' &&
+      input.payload.error_message.length > 0
+
+    return {
+      category: 'admin_chat',
+      level: has_error ? 'warn' : 'info',
+      channels: ['discord'],
+    }
+  }
+
   const support_started_ok_debug = new Set([
-    'support_started_action_created',
+    'support_started_action_create_started',
+    'support_started_action_create_succeeded',
+    'support_started_notify_route_decided',
     'support_started_notify_started',
     'support_started_notify_succeeded',
   ])
@@ -227,12 +244,64 @@ export function resolve_debug_rule(input: {
 
   if (
     input.category === 'admin_chat' &&
+    input.event === 'support_started_action_create_failed'
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'error',
+      channels: ['discord'],
+    }
+  }
+
+  if (
+    input.category === 'admin_chat' &&
     input.event === 'support_started_notify_failed'
   ) {
     return {
       category: 'admin_chat',
       level: 'error',
       channels: ['discord'],
+    }
+  }
+
+  const pwa_problem_events = new Set([
+    'pwa_install_failed',
+    'push_subscription_save_failed',
+    'notification_push_failed',
+    'notification_line_failed',
+  ])
+
+  const pwa_lifecycle_events = new Set([
+    'pwa_install_prompt_available',
+    'pwa_install_started',
+    'pwa_install_succeeded',
+    'push_subscription_save_started',
+    'push_subscription_save_succeeded',
+    'notification_route_decided',
+    'notification_push_sent',
+    'notification_line_sent',
+    'toast_shown',
+  ])
+
+  if (
+    (input.category === 'pwa' || input.category === 'notification') &&
+    pwa_problem_events.has(input.event)
+  ) {
+    return {
+      category: input.category,
+      level: 'error',
+      channels: ['discord'],
+    }
+  }
+
+  if (
+    (input.category === 'pwa' || input.category === 'notification') &&
+    pwa_lifecycle_events.has(input.event)
+  ) {
+    return {
+      category: input.category,
+      level: 'info',
+      channels: [],
     }
   }
 

@@ -32,6 +32,8 @@ export const control = {
       'admin_chat',
       'chat_message',
       'chat_realtime',
+      'pwa',
+      'notification',
     ],
   },
 
