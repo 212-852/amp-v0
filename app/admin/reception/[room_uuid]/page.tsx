@@ -191,6 +191,7 @@ export default async function AdminReceptionRoomPage({
           staff_display_name={staff_display_name}
           staff_user_uuid={access.user_uuid}
           staff_tier={access.tier}
+          room_display_title={subject.display_name}
         />
       </section>
     </div>

@@ -1,7 +1,11 @@
 import 'server-only'
 
 /**
- * Physical `public` action log table (e.g. legacy `4_actions`).
+ * Physical `public` action log table.
+ *
+ * The deployed Supabase schema currently exposes `public.chat_actions`.
+ * Set ACTIONS_TABLE_NAME only when a legacy table such as `4_actions` is
+ * actually present in PostgREST schema metadata.
  * Override when the deployed name differs.
  */
 export function public_actions_table_name(): string {
@@ -11,5 +15,5 @@ export function public_actions_table_name(): string {
     return raw
   }
 
-  return '4_actions'
+  return 'chat_actions'
 }

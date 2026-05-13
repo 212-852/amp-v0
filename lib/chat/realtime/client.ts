@@ -128,6 +128,9 @@ type chat_realtime_debug_payload = {
   listener_registered?: boolean | null
   client_instance_id?: string | null
   payload_preview?: string | null
+  visibility_state?: string | null
+  is_scrolled_to_bottom?: boolean | null
+  skip_reason?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {

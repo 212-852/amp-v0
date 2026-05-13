@@ -14,6 +14,7 @@ import {
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import type { archived_message } from '@/lib/chat/archive'
+import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 
@@ -47,6 +48,7 @@ type chat_context_value = chat_room_client_state & {
   close_chat: () => void
   set_scroll_container: (node: HTMLDivElement | null) => void
   scroll_to_bottom: (behavior?: ScrollBehavior) => void
+  get_message_list_near_bottom: (threshold_px?: number) => boolean
   append_realtime_message: (message: archived_message) => {
     prev_message_count: number
     next_message_count: number
@@ -259,6 +261,16 @@ export function UserChatProvider({
     [],
   )
 
+  const get_message_list_near_bottom = useCallback(
+    (threshold_px = 80) => {
+      return compute_message_list_near_bottom(
+        scroll_area_ref.current,
+        threshold_px,
+      )
+    },
+    [],
+  )
+
   useEffect(() => {
     if (room_state.mode !== 'concierge') {
       return
@@ -298,6 +310,7 @@ export function UserChatProvider({
       close_chat,
       set_scroll_container,
       scroll_to_bottom,
+      get_message_list_near_bottom,
       room_realtime_channel_ref,
     }),
     [
@@ -316,6 +329,7 @@ export function UserChatProvider({
       close_chat,
       set_scroll_container,
       scroll_to_bottom,
+      get_message_list_near_bottom,
     ],
   )
 

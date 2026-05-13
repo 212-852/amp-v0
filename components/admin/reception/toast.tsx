@@ -8,11 +8,18 @@ import {
   cleanup_chat_room_realtime,
   subscribe_chat_room_realtime,
 } from '@/lib/chat/realtime/client'
+import { resolve_realtime_message_subtitle_for_toast } from '@/lib/chat/realtime/toast_decision'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { handle_chat_message_toast } from '@/lib/output/toast'
 
+type admin_reception_toast_room_row = {
+  room_uuid: string
+  title: string
+  display_name: string
+}
+
 type AdminReceptionToastListenerProps = {
-  rooms: Array<{ room_uuid: string }>
+  rooms: admin_reception_toast_room_row[]
 }
 
 export default function AdminReceptionToastListener({
@@ -39,6 +46,12 @@ export default function AdminReceptionToastListener({
     const channels: RealtimeChannel[] = []
 
     room_uuids.forEach((room_uuid) => {
+      const room_row = rooms.find((row) => row.room_uuid === room_uuid)
+      const list_title =
+        room_row?.title?.trim() ||
+        room_row?.display_name?.trim() ||
+        room_uuid.slice(0, 8)
+
       const channel = subscribe_chat_room_realtime({
         supabase,
         room_uuid,
@@ -64,6 +77,12 @@ export default function AdminReceptionToastListener({
             source_channel: 'admin',
             target_path: `/admin/reception/${message.room_uuid}`,
             phase: 'admin_chat_list_realtime_message',
+            is_scrolled_to_bottom: null,
+            subtitle: resolve_realtime_message_subtitle_for_toast(
+              message,
+              list_title,
+            ),
+            scroll_to_bottom: null,
           })
         },
         on_typing: () => {},
@@ -88,7 +107,7 @@ export default function AdminReceptionToastListener({
         })
       })
     }
-  }, [room_key, room_uuids, session?.role, session?.tier, session?.user_uuid])
+  }, [room_key, room_uuids, rooms, session?.role, session?.tier, session?.user_uuid])
 
   return null
 }

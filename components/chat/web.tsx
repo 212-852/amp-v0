@@ -32,6 +32,7 @@ import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { handle_chat_message_toast } from '@/lib/output/toast'
+import { resolve_realtime_message_subtitle_for_toast } from '@/lib/chat/realtime/toast_decision'
 
 function post_presence(input: {
   room_uuid: string
@@ -370,6 +371,7 @@ export function WebChat({
     append_realtime_message,
     set_scroll_container,
     scroll_to_bottom,
+    get_message_list_near_bottom,
     room_uuid: active_room_uuid,
     messages: active_messages,
     is_chat_open,
@@ -580,7 +582,12 @@ export function WebChat({
         }
 
         const dbg = web_rt_ctx_ref.current
+        const near_bottom_before = get_message_list_near_bottom()
         const update_result = append_realtime_message_ref.current(message)
+
+        if (update_result.dedupe_hit) {
+          return
+        }
 
         handle_chat_message_toast({
           room_uuid: message.room_uuid,
@@ -597,6 +604,11 @@ export function WebChat({
           source_channel: dbg.source_channel,
           target_path: '/user',
           phase: 'web_chat_realtime_message',
+          is_scrolled_to_bottom: near_bottom_before,
+          subtitle: resolve_realtime_message_subtitle_for_toast(message, null),
+          scroll_to_bottom: () => {
+            scroll_to_bottom('smooth')
+          },
         })
 
         send_chat_realtime_debug({

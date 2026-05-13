@@ -16,6 +16,10 @@ import {
 } from '@/lib/chat/realtime/client'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { handle_chat_message_toast } from '@/lib/output/toast'
+import {
+  compute_message_list_near_bottom,
+  resolve_realtime_message_subtitle_for_toast,
+} from '@/lib/chat/realtime/toast_decision'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 type AdminChatTimelineProps = {
@@ -26,6 +30,7 @@ type AdminChatTimelineProps = {
   staff_display_name: string
   staff_user_uuid: string | null
   staff_tier: string | null
+  room_display_title: string
 }
 
 function compare_timeline_asc(
@@ -194,8 +199,10 @@ export default function AdminChatTimeline({
   staff_display_name,
   staff_user_uuid,
   staff_tier,
+  room_display_title,
 }: AdminChatTimelineProps) {
   const bottom_ref = useRef<HTMLDivElement | null>(null)
+  const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
   const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
@@ -382,6 +389,10 @@ export default function AdminChatTimeline({
           bundle: archived.bundle as message_bundle_payload,
         })
 
+        const near_bottom_before = compute_message_list_near_bottom(
+          message_list_scroll_ref.current,
+        )
+
         let update_result = {
           prev_message_count: 0,
           next_message_count: 0,
@@ -398,6 +409,10 @@ export default function AdminChatTimeline({
 
           return result.rows
         })
+
+        if (update_result.dedupe_hit) {
+          return
+        }
 
         const dbg = admin_rt_ctx_ref.current
 
@@ -416,6 +431,17 @@ export default function AdminChatTimeline({
           source_channel: 'admin',
           target_path: `/admin/reception/${archived.room_uuid}`,
           phase: 'admin_chat_detail_realtime_message',
+          is_scrolled_to_bottom: near_bottom_before,
+          subtitle: resolve_realtime_message_subtitle_for_toast(
+            archived,
+            room_display_title,
+          ),
+          scroll_to_bottom: () => {
+            bottom_ref.current?.scrollIntoView({
+              block: 'end',
+              behavior: 'smooth',
+            })
+          },
         })
 
         send_chat_realtime_debug({
@@ -504,7 +530,7 @@ export default function AdminChatTimeline({
         realtime_channel_ref.current = null
       }
     }
-  }, [room_uuid])
+  }, [room_uuid, room_display_title])
 
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {
@@ -639,7 +665,10 @@ export default function AdminChatTimeline({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-6 pb-24 pt-3">
+      <div
+        ref={message_list_scroll_ref}
+        className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-6 pb-24 pt-3"
+      >
         {load_failed ? (
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
             メッセージを読み込めませんでした

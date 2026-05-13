@@ -2073,6 +2073,7 @@ export async function handle_admin_reception_room_opened(
     discord_id: mask_discord_action_id_for_log(
       discord_thread_action_id ?? action_id_raw,
     ),
+    insert_payload_keys: [] as string[],
     notification_route: null,
     error_code: null,
     error_message: null,
@@ -2086,6 +2087,18 @@ export async function handle_admin_reception_room_opened(
       room_uuid,
       action_uuid: null,
       ...support_started_debug_participants,
+      insert_payload_keys: [
+        'action_type',
+        'actor_display_name',
+        'actor_participant_uuid',
+        'actor_role',
+        'actor_user_uuid',
+        'body',
+        'created_at',
+        'room_uuid',
+        'source_channel',
+        'visibility',
+      ],
     },
   })
 
@@ -2143,6 +2156,7 @@ export async function handle_admin_reception_room_opened(
         room_uuid,
         action_uuid,
         ...support_started_debug_participants,
+        insert_payload_keys: inserted.insert_payload_keys,
       },
     })
 

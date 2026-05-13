@@ -366,6 +366,8 @@ export function resolve_debug_rule(input: {
     'toast_decision_started',
     'toast_shown',
     'toast_skipped',
+    'toast_clicked',
+    'toast_auto_hidden',
   ])
 
   const chat_realtime_server_failed = new Set([

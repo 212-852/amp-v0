@@ -21,6 +21,7 @@ export type insert_support_started_action_ok = {
   ok: true
   action_row_id: string
   created_at: string
+  insert_payload_keys: string[]
 }
 
 export type insert_support_started_action_result =
@@ -43,26 +44,70 @@ function should_attach_meta_json(): boolean {
   return process.env.ACTIONS_INSERT_META_JSON?.trim() !== 'false'
 }
 
-/**
- * Inserts one `support_started` row into the configured public action table.
- * Extra fields (display names) go to `meta_json` when enabled and the column exists.
- */
-export async function insert_support_started_action(
-  client: SupabaseClient,
-  input: insert_support_started_action_input,
-): Promise<insert_support_started_action_result> {
-  const created_at = new Date().toISOString()
-  const table = public_actions_table_name()
-
-  const row: Record<string, unknown> = {
-    action_type: 'support_started',
-    body: input.body,
-    room_uuid: input.room_uuid,
+function optional_context_fields(input: insert_support_started_action_input) {
+  return {
     admin_user_uuid: input.admin_user_uuid,
     admin_participant_uuid: input.admin_participant_uuid,
     customer_user_uuid: input.customer_user_uuid,
     customer_participant_uuid: input.customer_participant_uuid,
     discord_id: input.discord_id,
+  }
+}
+
+function build_chat_actions_row(input: insert_support_started_action_input) {
+  const created_at = new Date().toISOString()
+  const row: Record<string, unknown> = {
+    room_uuid: input.room_uuid,
+    actor_user_uuid: input.admin_user_uuid,
+    actor_participant_uuid: input.admin_participant_uuid,
+    actor_display_name: input.admin_display_label,
+    actor_role: 'admin',
+    action_type: 'support_started',
+    body: input.body,
+    visibility: 'admin',
+    source_channel: 'web',
+    created_at,
+  }
+
+  Object.assign(row, optional_context_fields(input))
+
+  if (should_attach_meta_json()) {
+    row.meta_json = {
+      customer_display_name: input.customer_display_name,
+      admin_internal_name: input.admin_internal_name,
+      admin_display_label: input.admin_display_label,
+      ...optional_context_fields(input),
+      source: 'admin_reception_open',
+    }
+  }
+
+  return { row, created_at }
+}
+
+function strip_chat_actions_optional_context(row: Record<string, unknown>) {
+  const stripped = { ...row }
+
+  for (const key of [
+    'admin_user_uuid',
+    'admin_participant_uuid',
+    'customer_user_uuid',
+    'customer_participant_uuid',
+    'discord_id',
+    'meta_json',
+  ]) {
+    delete stripped[key]
+  }
+
+  return stripped
+}
+
+function build_legacy_actions_row(input: insert_support_started_action_input) {
+  const created_at = new Date().toISOString()
+  const row: Record<string, unknown> = {
+    action_type: 'support_started',
+    body: input.body,
+    room_uuid: input.room_uuid,
+    ...optional_context_fields(input),
     created_at,
   }
 
@@ -75,7 +120,35 @@ export async function insert_support_started_action(
     }
   }
 
-  const inserted = await client.from(table).insert(row).select('*').single()
+  return { row, created_at }
+}
+
+/**
+ * Inserts one `support_started` row into the configured public action table.
+ * Extra fields (display names) go to `meta_json` when enabled and the column exists.
+ */
+export async function insert_support_started_action(
+  client: SupabaseClient,
+  input: insert_support_started_action_input,
+): Promise<insert_support_started_action_result> {
+  const table = public_actions_table_name()
+  const { row, created_at } =
+    table === 'chat_actions'
+      ? build_chat_actions_row(input)
+      : build_legacy_actions_row(input)
+
+  let inserted = await client.from(table).insert(row).select('*').single()
+  let inserted_row = row
+
+  if (
+    inserted.error &&
+    table === 'chat_actions' &&
+    (inserted.error.code === 'PGRST204' ||
+      inserted.error.message.includes('Could not find'))
+  ) {
+    inserted_row = strip_chat_actions_optional_context(row)
+    inserted = await client.from(table).insert(inserted_row).select('*').single()
+  }
 
   if (inserted.error) {
     return { ok: false, error: inserted.error }
@@ -101,5 +174,6 @@ export async function insert_support_started_action(
     ok: true,
     action_row_id,
     created_at: created_at_out,
+    insert_payload_keys: Object.keys(inserted_row).sort(),
   }
 }

@@ -47,6 +47,9 @@ type chat_debug_body = {
   listener_registered?: unknown
   client_instance_id?: unknown
   payload_preview?: unknown
+  visibility_state?: unknown
+  is_scrolled_to_bottom?: unknown
+  skip_reason?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -124,6 +127,12 @@ export async function POST(request: Request) {
           : null,
       client_instance_id: string_or_null(body?.client_instance_id),
       payload_preview: string_or_null(body?.payload_preview),
+      visibility_state: string_or_null(body?.visibility_state),
+      is_scrolled_to_bottom:
+        typeof body?.is_scrolled_to_bottom === 'boolean'
+          ? body.is_scrolled_to_bottom
+          : null,
+      skip_reason: string_or_null(body?.skip_reason),
     },
   })
 
