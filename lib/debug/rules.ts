@@ -272,8 +272,14 @@ export function resolve_debug_rule(input: {
   ])
 
   const pwa_lifecycle_events = new Set([
+    'pwa_beforeinstallprompt_received',
+    'pwa_install_button_rendered',
+    'pwa_install_not_available',
     'pwa_install_prompt_available',
     'pwa_install_started',
+    'pwa_install_accepted',
+    'pwa_install_dismissed',
+    'pwa_install_completed',
     'pwa_install_succeeded',
     'push_subscription_save_started',
     'push_subscription_save_succeeded',

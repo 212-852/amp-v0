@@ -38,6 +38,8 @@ import {
 } from './message'
 import { deliver_line_text_reply } from '@/lib/output/line'
 import type { chat_locale } from './message'
+import { insert_support_started_action } from '@/lib/actions/support_started'
+import { public_actions_table_name } from '@/lib/actions/table'
 import { notify } from '@/lib/notify'
 import {
   mask_discord_action_id_for_log,
@@ -2061,6 +2063,7 @@ export async function handle_admin_reception_room_opened(
     admin_internal_name_raw.length > 0 ? admin_internal_name_raw : null
 
   const support_started_debug_participants = {
+    actions_table: public_actions_table_name(),
     admin_user_uuid: admin_uuid,
     admin_participant_uuid,
     admin_internal_name,
@@ -2073,7 +2076,7 @@ export async function handle_admin_reception_room_opened(
     notification_route: null,
     error_code: null,
     error_message: null,
-    phase: 'support_actions_insert',
+    phase: 'actions_table_insert',
   }
 
   await debug_event({
@@ -2086,25 +2089,34 @@ export async function handle_admin_reception_room_opened(
     },
   })
 
-  const insert_row = {
+  const inserted = await insert_support_started_action(supabase, {
     room_uuid,
-    kind: 'support_started',
     admin_user_uuid: admin_uuid,
+    admin_participant_uuid,
+    customer_user_uuid,
+    customer_participant_uuid: user_participant_uuid,
     discord_id: discord_thread_action_id,
+    body: text,
     customer_display_name: customer_display_name.slice(0, 500),
-    admin_internal_name: admin_internal_name
-      ? admin_internal_name.slice(0, 200)
-      : null,
-  }
+    admin_internal_name,
+    admin_display_label: display_name,
+  })
 
-  const inserted = await supabase
-    .from('support_actions')
-    .insert(insert_row)
-    .select('action_uuid, created_at')
-    .single()
+  if (!inserted.ok) {
+    const err = inserted.error
+    const err_code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code ?? '')
+        : ''
+    const err_message =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message?: unknown }).message ?? err)
+          : String(err)
 
-  if (inserted.error) {
-    console.error('[admin_reception_open] support_actions_insert_failed', {
+    console.error('[admin_reception_open] actions_insert_failed', {
+      actions_table: public_actions_table_name(),
       room_uuid,
       error: inserted.error,
     })
@@ -2116,20 +2128,13 @@ export async function handle_admin_reception_room_opened(
         room_uuid,
         action_uuid: null,
         ...support_started_debug_participants,
-        error_code:
-          typeof inserted.error.code === 'string'
-            ? inserted.error.code
-            : null,
-        error_message: inserted.error.message,
+        error_code: err_code.length > 0 ? err_code : null,
+        error_message: err_message,
       },
     })
   } else {
-    const action_uuid = String(
-      (inserted.data as { action_uuid?: string }).action_uuid ?? '',
-    )
-    const created_at = String(
-      (inserted.data as { created_at?: string }).created_at ?? '',
-    )
+    const action_uuid = inserted.action_row_id
+    const created_at = inserted.created_at
 
     await debug_event({
       category: 'admin_chat',

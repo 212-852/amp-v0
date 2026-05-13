@@ -1,14 +1,19 @@
 'use client'
 
 import { Download } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import {
+  clear_retained_before_install_prompt,
+  get_retained_before_install_prompt,
   is_standalone_pwa,
+  log_pwa_installability_state,
+  manifest_is_available,
   post_pwa_debug,
   register_push_subscription,
   register_pwa_service_worker,
   set_pwa_source_channel_cookie,
+  subscribe_before_install_prompt,
   type pwa_before_install_prompt_event,
 } from '@/lib/pwa/client'
 
@@ -31,10 +36,43 @@ function initial_pwa_installed_state() {
 }
 
 export default function PwaInstallButton(props: PwaInstallButtonProps) {
-  const prompt_ref = useRef<pwa_before_install_prompt_event | null>(null)
   const [installed, set_installed] = useState(initial_pwa_installed_state)
-  const [prompt_available, set_prompt_available] = useState(false)
+  const [prompt, set_prompt] =
+    useState<pwa_before_install_prompt_event | null>(
+      get_retained_before_install_prompt,
+    )
   const [is_busy, set_is_busy] = useState(false)
+  const prompt_available = Boolean(prompt)
+  const show_install_button =
+    props.can_install &&
+    prompt_available &&
+    !installed
+  const debug_context = useMemo(
+    () => ({
+      user_uuid: props.user_uuid,
+      participant_uuid: props.participant_uuid,
+      role: props.role,
+      tier: props.tier,
+      room_uuid: props.room_uuid,
+      source_channel: installed ? 'pwa' : 'web',
+      has_beforeinstallprompt: prompt_available,
+      is_standalone: installed,
+      manifest_available:
+        typeof document === 'undefined' ? null : manifest_is_available(),
+      user_agent: typeof navigator === 'undefined' ? null : navigator.userAgent,
+      app_visibility_state:
+        typeof document === 'undefined' ? null : document.visibilityState,
+    }),
+    [
+      installed,
+      prompt_available,
+      props.participant_uuid,
+      props.role,
+      props.room_uuid,
+      props.tier,
+      props.user_uuid,
+    ],
+  )
 
   useEffect(() => {
     const standalone = is_standalone_pwa()
@@ -46,38 +84,18 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
   }, [])
 
   useEffect(() => {
-    function handle_before_install_prompt(event: Event) {
-      event.preventDefault()
-      prompt_ref.current = event as pwa_before_install_prompt_event
-      set_prompt_available(true)
-
-      post_pwa_debug({
-        event: 'pwa_install_prompt_available',
-        user_uuid: props.user_uuid,
-        participant_uuid: props.participant_uuid,
-        role: props.role,
-        tier: props.tier,
-        source_channel: 'web',
-        room_uuid: props.room_uuid,
-        app_visibility_state: document.visibilityState,
-        phase: 'beforeinstallprompt',
-      })
-    }
-
     function handle_app_installed() {
       set_installed(true)
-      set_prompt_available(false)
+      set_prompt(null)
+      clear_retained_before_install_prompt()
       set_pwa_source_channel_cookie()
 
       post_pwa_debug({
-        event: 'pwa_install_succeeded',
-        user_uuid: props.user_uuid,
-        participant_uuid: props.participant_uuid,
-        role: props.role,
-        tier: props.tier,
+        event: 'pwa_install_completed',
+        ...debug_context,
         source_channel: 'pwa',
-        room_uuid: props.room_uuid,
-        app_visibility_state: document.visibilityState,
+        has_beforeinstallprompt: false,
+        is_standalone: true,
         phase: 'appinstalled',
       })
 
@@ -90,17 +108,15 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       })
     }
 
-    window.addEventListener('beforeinstallprompt', handle_before_install_prompt)
+    const unsubscribe = subscribe_before_install_prompt(set_prompt)
     window.addEventListener('appinstalled', handle_app_installed)
 
     return () => {
-      window.removeEventListener(
-        'beforeinstallprompt',
-        handle_before_install_prompt,
-      )
+      unsubscribe()
       window.removeEventListener('appinstalled', handle_app_installed)
     }
   }, [
+    debug_context,
     props.participant_uuid,
     props.role,
     props.room_uuid,
@@ -108,13 +124,38 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     props.user_uuid,
   ])
 
-  if (!props.can_install || installed || !prompt_available) {
+  useEffect(() => {
+    log_pwa_installability_state({
+      phase: 'install_button_render_check',
+      has_beforeinstallprompt: prompt_available,
+      service_worker_registered: null,
+    })
+
+    if (show_install_button) {
+      post_pwa_debug({
+        event: 'pwa_install_button_rendered',
+        ...debug_context,
+        phase: 'install_button_render',
+      })
+      return
+    }
+
+    post_pwa_debug({
+      event: 'pwa_install_not_available',
+      ...debug_context,
+      phase: !props.can_install
+        ? 'install_rule_not_allowed'
+        : installed
+          ? 'already_standalone'
+          : 'beforeinstallprompt_missing',
+    })
+  }, [debug_context, installed, props.can_install, prompt_available, show_install_button])
+
+  if (!show_install_button) {
     return null
   }
 
   async function handle_click() {
-    const prompt = prompt_ref.current
-
     if (!prompt || is_busy) {
       return
     }
@@ -123,13 +164,7 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
 
     post_pwa_debug({
       event: 'pwa_install_started',
-      user_uuid: props.user_uuid,
-      participant_uuid: props.participant_uuid,
-      role: props.role,
-      tier: props.tier,
-      source_channel: 'web',
-      room_uuid: props.room_uuid,
-      app_visibility_state: document.visibilityState,
+      ...debug_context,
       phase: 'install_prompt',
     })
 
@@ -138,22 +173,25 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
       const choice = await prompt.userChoice
 
       if (choice.outcome !== 'accepted') {
-        throw new Error('install_prompt_dismissed')
+        post_pwa_debug({
+          event: 'pwa_install_dismissed',
+          ...debug_context,
+          phase: 'install_prompt',
+        })
+        return
       }
 
       set_pwa_source_channel_cookie()
       set_installed(true)
-      set_prompt_available(false)
+      set_prompt(null)
+      clear_retained_before_install_prompt()
 
       post_pwa_debug({
-        event: 'pwa_install_succeeded',
-        user_uuid: props.user_uuid,
-        participant_uuid: props.participant_uuid,
-        role: props.role,
-        tier: props.tier,
+        event: 'pwa_install_accepted',
+        ...debug_context,
         source_channel: 'pwa',
-        room_uuid: props.room_uuid,
-        app_visibility_state: document.visibilityState,
+        has_beforeinstallprompt: false,
+        is_standalone: true,
         phase: 'install_prompt',
       })
 
@@ -167,18 +205,12 @@ export default function PwaInstallButton(props: PwaInstallButtonProps) {
     } catch (error) {
       post_pwa_debug({
         event: 'pwa_install_failed',
-        user_uuid: props.user_uuid,
-        participant_uuid: props.participant_uuid,
-        role: props.role,
-        tier: props.tier,
-        source_channel: 'web',
-        room_uuid: props.room_uuid,
-        app_visibility_state: document.visibilityState,
+        ...debug_context,
         error_message: error instanceof Error ? error.message : String(error),
         phase: 'install_prompt',
       })
     } finally {
-      prompt_ref.current = null
+      clear_retained_before_install_prompt()
       set_is_busy(false)
     }
   }
