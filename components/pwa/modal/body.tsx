@@ -1,16 +1,28 @@
 'use client'
 
-import { X } from 'lucide-react'
+import { Copy, X } from 'lucide-react'
 
-import type { pwa_install_modal_panel_copy } from '@/lib/pwa/copy'
+import type {
+  pwa_install_modal_ios_assist_copy,
+  pwa_install_modal_panel_copy,
+} from '@/lib/pwa/copy'
 
 import Pwa_install_app_icon from '@/components/pwa/install_app_icon'
+
+export type pwa_install_modal_ios_assist_view_props = {
+  strings: pwa_install_modal_ios_assist_copy
+  current_url: string
+  toast_visible: boolean
+  on_copy: () => void
+  on_open_safari: () => void
+}
 
 export type pwa_install_modal_view_props = pwa_install_modal_panel_copy & {
   show_installed_badge: boolean
   on_close: () => void
   on_primary_press?: () => void
   primary_busy?: boolean
+  ios_install_assist?: pwa_install_modal_ios_assist_view_props | null
 }
 
 /**
@@ -61,6 +73,48 @@ export default function Pwa_install_modal_body_view(props: pwa_install_modal_vie
             <li key={step}>{step}</li>
           ))}
         </ol>
+      ) : null}
+
+      {props.ios_install_assist ? (
+        <>
+          <div className="mt-4 flex flex-col gap-2.5">
+            <div className="flex gap-2 rounded-xl border border-neutral-900/10 bg-neutral-900/[0.06] p-2">
+              <input
+                readOnly
+                value={props.ios_install_assist.current_url}
+                aria-label={props.ios_install_assist.strings.url_field_aria_label}
+                className="min-w-0 flex-1 rounded-lg border border-neutral-200/90 bg-white/95 px-2.5 py-2 text-[11px] font-mono leading-snug text-neutral-900 outline-none ring-0"
+              />
+              <button
+                type="button"
+                aria-label={props.ios_install_assist.strings.copy_button_aria_label}
+                onClick={props.ios_install_assist.on_copy}
+                className="inline-flex shrink-0 items-center justify-center gap-1 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-neutral-800 shadow-sm active:scale-[0.98]"
+              >
+                <Copy className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+                <span className="max-w-[4.5rem] truncate">
+                  {props.ios_install_assist.strings.copy_button_label}
+                </span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={props.ios_install_assist.on_open_safari}
+              className="w-full rounded-xl bg-neutral-900 px-4 py-2.5 text-[14px] font-semibold text-white shadow-sm active:scale-[0.99]"
+            >
+              {props.ios_install_assist.strings.safari_open_label}
+            </button>
+          </div>
+          {props.ios_install_assist.toast_visible ? (
+            <div
+              className="pointer-events-none absolute bottom-[5.5rem] left-1/2 z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-lg bg-neutral-900/92 px-4 py-2 text-center text-[12px] font-medium leading-snug text-white shadow-lg"
+              role="status"
+              aria-live="polite"
+            >
+              {props.ios_install_assist.strings.toast_copied_label}
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {props.android_chrome_install_hint ? (

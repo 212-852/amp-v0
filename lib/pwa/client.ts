@@ -34,6 +34,9 @@ type pwa_debug_payload = {
   phase: string
   locale?: string | null
   fallback_used?: boolean | null
+  current_url?: string | null
+  is_ios?: boolean | null
+  is_liff?: boolean | null
 }
 
 export type pwa_before_install_prompt_event = Event & {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   clear_retained_before_install_prompt,
@@ -12,6 +12,8 @@ import {
   use_before_install_prompt_state,
 } from '@/lib/pwa/client'
 import {
+  normalize_pwa_install_share_url,
+  resolve_pwa_install_modal_ios_assist_copy,
   resolve_pwa_install_modal_panel_copy,
   resolve_pwa_install_ui_locale,
 } from '@/lib/pwa/copy'
@@ -19,6 +21,36 @@ import { resolve_pwa_install_client_os } from '@/lib/pwa/rules'
 import type { locale_key } from '@/lib/locale/action'
 
 import Pwa_install_modal_body_view from '@/components/pwa/modal/body'
+
+function copy_url_via_exec_command(text: string): boolean {
+  if (typeof document === 'undefined') {
+    return false
+  }
+
+  const ta = document.createElement('textarea')
+
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.left = '0'
+  ta.style.top = '0'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+
+  let ok = false
+
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+
+  document.body.removeChild(ta)
+
+  return ok
+}
 
 type pwa_install_modal_body_props = {
   role: string | null
@@ -51,6 +83,9 @@ export default function Pwa_install_modal_body(
   const prompt = use_before_install_prompt_state()
   const has_prompt = Boolean(prompt)
   const [is_busy, set_is_busy] = useState(false)
+  const [share_url, set_share_url] = useState('')
+  const [toast_visible, set_toast_visible] = useState(false)
+  const toast_timer_ref = useRef<number | null>(null)
   const [standalone_now, set_standalone_now] = useState(() => {
     if (typeof window === 'undefined') {
       return false
@@ -58,6 +93,24 @@ export default function Pwa_install_modal_body(
 
     return is_standalone_pwa()
   })
+
+  const is_liff = source_channel === 'liff'
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    set_share_url(normalize_pwa_install_share_url(window.location.href))
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (toast_timer_ref.current !== null) {
+        window.clearTimeout(toast_timer_ref.current)
+      }
+    }
+  }, [])
 
   const user_agent =
     typeof navigator === 'undefined' ? null : navigator.userAgent
@@ -91,7 +144,7 @@ export default function Pwa_install_modal_body(
     () => ({
       role,
       tier,
-      source_channel: resolve_pwa_debug_channel(),
+      source_channel: source_channel ?? resolve_pwa_debug_channel(),
       locale: pwa_ui_locale.locale,
       has_beforeinstallprompt: has_prompt,
       is_standalone: standalone_now,
@@ -104,7 +157,29 @@ export default function Pwa_install_modal_body(
         typeof document === 'undefined' ? null : manifest_is_available(),
       phase: 'pwa_install_modal',
     }),
-    [has_prompt, pwa_ui_locale.locale, role, standalone_now, tier],
+    [
+      has_prompt,
+      pwa_ui_locale.locale,
+      role,
+      source_channel,
+      standalone_now,
+      tier,
+    ],
+  )
+
+  const interaction_debug = useMemo(
+    () => ({
+      ...debug_base,
+      current_url: share_url,
+      is_ios: client_os === 'ios',
+      is_liff,
+    }),
+    [client_os, debug_base, is_liff, share_url],
+  )
+
+  const ios_assist_strings = useMemo(
+    () => resolve_pwa_install_modal_ios_assist_copy({ locale: pwa_ui_locale.locale }),
+    [pwa_ui_locale.locale],
   )
 
   useEffect(() => {
@@ -238,6 +313,84 @@ export default function Pwa_install_modal_body(
     }
   }
 
+  const handle_copy_url = useCallback(async () => {
+    if (!share_url.trim()) {
+      return
+    }
+
+    post_pwa_debug({
+      event: 'pwa_install_copy_clicked',
+      ...interaction_debug,
+      phase: 'pwa_install_modal',
+    })
+
+    try {
+      if (typeof navigator.clipboard?.writeText === 'function') {
+        await navigator.clipboard.writeText(share_url)
+      } else if (!copy_url_via_exec_command(share_url)) {
+        throw new Error('clipboard_copy_failed')
+      }
+
+      post_pwa_debug({
+        event: 'pwa_install_copy_succeeded',
+        ...interaction_debug,
+        phase: 'pwa_install_modal',
+      })
+
+      if (toast_timer_ref.current !== null) {
+        window.clearTimeout(toast_timer_ref.current)
+      }
+
+      set_toast_visible(true)
+      toast_timer_ref.current = window.setTimeout(() => {
+        set_toast_visible(false)
+        toast_timer_ref.current = null
+      }, 2000)
+    } catch (error) {
+      post_pwa_debug({
+        event: 'pwa_install_copy_failed',
+        ...interaction_debug,
+        phase: 'pwa_install_modal',
+        error_code: 'clipboard_copy_failed',
+        error_message:
+          error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [interaction_debug, share_url])
+
+  const handle_open_safari = useCallback(() => {
+    if (!share_url.trim()) {
+      return
+    }
+
+    post_pwa_debug({
+      event: 'pwa_install_open_safari_clicked',
+      ...interaction_debug,
+      phase: 'pwa_install_modal',
+    })
+
+    window.open(share_url, '_blank', 'noopener,noreferrer')
+
+    post_pwa_debug({
+      event: 'pwa_install_open_safari_succeeded',
+      ...interaction_debug,
+      phase: 'pwa_install_modal',
+    })
+  }, [interaction_debug, share_url])
+
+  const ios_install_assist =
+    client_os === 'ios' && !standalone_now && share_url.trim().length > 0
+      ? {
+          strings: ios_assist_strings,
+          current_url: share_url,
+          toast_visible,
+          on_copy: () => {
+            void handle_copy_url()
+          },
+          on_open_safari: handle_open_safari,
+        }
+      : null
+
   const show_badge = standalone_now
 
   return (
@@ -251,6 +404,7 @@ export default function Pwa_install_modal_body(
       close_aria_label={panel_copy.close_aria_label}
       installed_badge_label={panel_copy.installed_badge_label}
       show_installed_badge={show_badge}
+      ios_install_assist={ios_install_assist}
       on_close={on_close}
       on_primary_press={
         panel_copy.primary_button_label

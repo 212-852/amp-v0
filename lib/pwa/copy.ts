@@ -65,9 +65,9 @@ const content = {
     es: 'En iPhone, abre Safari, pulsa Compartir y elige Anadir a la pantalla de inicio.',
   },
   modal_ios_step_1: {
-    ja: 'Safariでこのページを開く',
-    en: 'Open this page in Safari',
-    es: 'Abre esta pagina en Safari',
+    ja: 'Safariで開く',
+    en: 'Open in Safari',
+    es: 'Abrir en Safari',
   },
   modal_ios_step_2: {
     ja: '共有ボタンを押す',
@@ -79,10 +79,30 @@ const content = {
     en: 'Choose Add to Home Screen',
     es: 'Elige Anadir a la pantalla de inicio',
   },
-  modal_ios_step_4: {
-    ja: '追加を押す',
-    en: 'Tap Add',
-    es: 'Pulsa Anadir',
+  modal_ios_url_copy_button: {
+    ja: 'コピー',
+    en: 'Copy',
+    es: 'Copiar',
+  },
+  modal_ios_safari_open_button: {
+    ja: 'Safariで開く',
+    en: 'Open in Safari',
+    es: 'Abrir en Safari',
+  },
+  modal_ios_url_field_aria: {
+    ja: 'アプリのURL',
+    en: 'App URL',
+    es: 'URL de la app',
+  },
+  modal_ios_copy_button_aria: {
+    ja: 'URLをコピー',
+    en: 'Copy URL',
+    es: 'Copiar URL',
+  },
+  modal_ios_toast_copied: {
+    ja: 'コピーしました',
+    en: 'Copied',
+    es: 'Copiado',
   },
   modal_android_title: {
     ja: 'アプリをインストール',
@@ -135,6 +155,64 @@ export type pwa_install_modal_panel_copy = {
   close_label: string
   close_aria_label: string
   installed_badge_label: string
+}
+
+export type pwa_install_modal_ios_assist_copy = {
+  copy_button_label: string
+  safari_open_label: string
+  url_field_aria_label: string
+  copy_button_aria_label: string
+  toast_copied_label: string
+}
+
+/**
+ * Normalizes the current page URL for sharing (https, path trailing slash, no hash).
+ */
+export function normalize_pwa_install_share_url(raw_href: string): string {
+  const trimmed = raw_href.trim()
+
+  if (!trimmed) {
+    return ''
+  }
+
+  try {
+    const u = new URL(trimmed)
+    const host = u.hostname
+    const is_local =
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '[::1]' ||
+      host.endsWith('.local')
+
+    if (!is_local && u.protocol === 'http:') {
+      u.protocol = 'https:'
+    }
+
+    let path = u.pathname || '/'
+
+    if (!path.endsWith('/')) {
+      path = `${path}/`
+    }
+
+    u.pathname = path
+    u.hash = ''
+
+    return u.toString()
+  } catch {
+    return trimmed
+  }
+}
+
+export function resolve_pwa_install_modal_ios_assist_copy(input: {
+  locale: locale_key
+}): pwa_install_modal_ios_assist_copy {
+  return {
+    copy_button_label: pick(content.modal_ios_url_copy_button, input.locale),
+    safari_open_label: pick(content.modal_ios_safari_open_button, input.locale),
+    url_field_aria_label: pick(content.modal_ios_url_field_aria, input.locale),
+    copy_button_aria_label: pick(content.modal_ios_copy_button_aria, input.locale),
+    toast_copied_label: pick(content.modal_ios_toast_copied, input.locale),
+  }
 }
 
 /**
@@ -239,7 +317,6 @@ export function resolve_pwa_install_modal_panel_copy(input: {
       pick(content.modal_ios_step_1, input.locale),
       pick(content.modal_ios_step_2, input.locale),
       pick(content.modal_ios_step_3, input.locale),
-      pick(content.modal_ios_step_4, input.locale),
     ] as const
 
     return {

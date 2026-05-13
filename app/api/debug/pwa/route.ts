@@ -32,6 +32,9 @@ type pwa_debug_body = {
   reason?: unknown
   locale?: unknown
   fallback_used?: unknown
+  current_url?: unknown
+  is_ios?: unknown
+  is_liff?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -109,6 +112,9 @@ export async function POST(request: Request) {
       locale: string_or_null(body?.locale),
       fallback_used:
         typeof body?.fallback_used === 'boolean' ? body.fallback_used : null,
+      current_url: string_or_null(body?.current_url),
+      is_ios: typeof body?.is_ios === 'boolean' ? body.is_ios : null,
+      is_liff: typeof body?.is_liff === 'boolean' ? body.is_liff : null,
     },
   })
 
