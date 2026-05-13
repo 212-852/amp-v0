@@ -35,6 +35,14 @@ type pwa_debug_body = {
   current_url?: unknown
   is_ios?: unknown
   is_liff?: unknown
+  host?: unknown
+  origin?: unknown
+  pathname?: unknown
+  visitor_uuid?: unknown
+  cookie_present?: unknown
+  local_storage_visitor_present?: unknown
+  session_restored?: unknown
+  identity_provider?: unknown
   manifest_exists?: unknown
   manifest_valid?: unknown
   manifest_url?: unknown
@@ -123,6 +131,21 @@ export async function POST(request: Request) {
       current_url: string_or_null(body?.current_url),
       is_ios: typeof body?.is_ios === 'boolean' ? body.is_ios : null,
       is_liff: typeof body?.is_liff === 'boolean' ? body.is_liff : null,
+      host: string_or_null(body?.host),
+      origin: string_or_null(body?.origin),
+      pathname: string_or_null(body?.pathname),
+      visitor_uuid: string_or_null(body?.visitor_uuid),
+      cookie_present:
+        typeof body?.cookie_present === 'boolean' ? body.cookie_present : null,
+      local_storage_visitor_present:
+        typeof body?.local_storage_visitor_present === 'boolean'
+          ? body.local_storage_visitor_present
+          : null,
+      session_restored:
+        typeof body?.session_restored === 'boolean'
+          ? body.session_restored
+          : null,
+      identity_provider: string_or_null(body?.identity_provider),
       manifest_exists:
         typeof body?.manifest_exists === 'boolean'
           ? body.manifest_exists

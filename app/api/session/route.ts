@@ -11,7 +11,12 @@ import {
   type browser_session_result,
   type browser_session_source_channel,
 } from '@/lib/auth/session'
-import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
+import {
+  browser_channel_cookie_name,
+  client_display_mode_header_name,
+  client_source_channel_header_name,
+  client_visitor_header_name,
+} from '@/lib/visitor/cookie'
 import { get_request_visitor_uuid } from '@/lib/visitor/request'
 import { control } from '@/lib/config/control'
 import { resolve_initial_chat } from '@/lib/chat/action'
@@ -19,6 +24,7 @@ import { ensure_direct_room_for_visitor } from '@/lib/chat/room'
 import type { chat_channel } from '@/lib/chat/room'
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 import { load_user_pwa_installed } from '@/lib/push/action'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 
@@ -35,8 +41,15 @@ type session_chat_state = {
 
 function resolve_session_source_channel(
   browser_channel_cookie: string | null,
+  client_source_channel: string | null,
   user_agent: string | null,
 ): browser_session_source_channel {
+  const client_raw = client_source_channel?.trim().toLowerCase()
+
+  if (client_raw === 'liff' || client_raw === 'pwa') {
+    return client_raw
+  }
+
   const raw = browser_channel_cookie?.trim().toLowerCase()
 
   if (raw === 'liff' || raw === 'pwa') {
@@ -368,13 +381,51 @@ async function resolve_session_payload() {
   const is_line_webview = is_line_in_app_browser(user_agent)
   const browser_channel_cookie =
     cookie_store.get(browser_channel_cookie_name)?.value ?? null
+  const cookie_visitor_uuid =
+    cookie_store.get(visitor_cookie_name)?.value ?? null
+  const client_visitor_uuid = clean_uuid(
+    header_store.get(client_visitor_header_name),
+  )
+  const client_source_channel =
+    header_store.get(client_source_channel_header_name)
+  const display_mode = header_store.get(client_display_mode_header_name)
   const session_src = resolve_session_source_channel(
     browser_channel_cookie,
+    client_source_channel,
     user_agent,
   )
+  const request_visitor_uuid = await get_request_visitor_uuid()
+  const restored_visitor_uuid = request_visitor_uuid ?? client_visitor_uuid
+  const debug_base = {
+    source_channel: session_src,
+    host: header_store.get('host'),
+    origin: header_store.get('origin'),
+    pathname: '/api/session',
+    is_standalone: display_mode === 'standalone',
+    cookie_present: Boolean(cookie_visitor_uuid),
+    local_storage_visitor_present: Boolean(client_visitor_uuid),
+  }
+
+  await debug_event({
+    category: 'pwa',
+    event: 'pwa_session_restore_started',
+    payload: {
+      ...debug_base,
+      visitor_uuid: restored_visitor_uuid,
+      user_uuid: null,
+      role: null,
+      tier: null,
+      room_uuid: null,
+      session_restored: false,
+      reason:
+        client_visitor_uuid && !cookie_visitor_uuid
+          ? 'client_visitor_header_used'
+          : 'cookie_or_request_header_used',
+    },
+  })
 
   const visitor = await ensure_session({
-    visitor_uuid: (await get_request_visitor_uuid()) ?? null,
+    visitor_uuid: restored_visitor_uuid,
     caller: 'api_session',
     source_channel: session_src,
     locale,
@@ -409,6 +460,61 @@ async function resolve_session_payload() {
 
   if (session_state.user_uuid) {
     pwa_installed = await load_user_pwa_installed(session_state.user_uuid)
+  }
+
+  const session_restored = Boolean(session_state.user_uuid)
+
+  await debug_event({
+    category: 'pwa',
+    event: session_restored
+      ? 'pwa_session_restore_succeeded'
+      : 'pwa_session_restore_failed',
+    payload: {
+      ...debug_base,
+      visitor_uuid: visitor.visitor_uuid,
+      user_uuid: session_state.user_uuid,
+      role,
+      tier,
+      room_uuid: chat?.room_uuid ?? null,
+      session_restored,
+      reason: session_restored ? 'user_uuid_restored' : 'user_uuid_missing',
+    },
+  })
+
+  await debug_event({
+    category: 'pwa',
+    event: visitor.is_new_visitor
+      ? 'visitor_uuid_recreated'
+      : 'visitor_uuid_reused',
+    payload: {
+      ...debug_base,
+      visitor_uuid: visitor.visitor_uuid,
+      user_uuid: session_state.user_uuid,
+      role,
+      tier,
+      room_uuid: chat?.room_uuid ?? null,
+      session_restored,
+      reason: visitor.is_new_visitor
+        ? 'new_visitor_row'
+        : 'existing_visitor_row',
+    },
+  })
+
+  if (session_state.user_uuid) {
+    await debug_event({
+      category: 'pwa',
+      event: 'user_uuid_restored',
+      payload: {
+        ...debug_base,
+        visitor_uuid: visitor.visitor_uuid,
+        user_uuid: session_state.user_uuid,
+        role,
+        tier,
+        room_uuid: chat?.room_uuid ?? null,
+        session_restored: true,
+        reason: 'visitor_linked_to_user',
+      },
+    })
   }
 
   if (control.debug.liff_auth && display_name) {
@@ -474,6 +580,7 @@ export async function GET() {
     const cookie_store = await cookies()
     const fallback_source_channel = resolve_session_source_channel(
       cookie_store.get(browser_channel_cookie_name)?.value ?? null,
+      header_store.get(client_source_channel_header_name),
       header_store.get('user-agent'),
     )
     const fallback_is_line_webview = is_line_in_app_browser(

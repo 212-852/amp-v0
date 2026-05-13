@@ -59,6 +59,21 @@ export async function resolve_auth_access(
   }
   const input_locale = normalize_locale(input.locale)
 
+  await debug_event({
+    category: 'pwa',
+    event: 'pwa_identity_link_started',
+    payload: {
+      source_channel: 'web',
+      identity_provider: input.provider,
+      visitor_uuid: input.visitor_uuid ?? null,
+      user_uuid: null,
+      role: null,
+      tier: null,
+      session_restored: false,
+      reason: 'resolve_auth_access_started',
+    },
+  })
+
   if (input.provider === 'line') {
     await debug_line_identity('line_identity_lookup_started', {
       line_user_id: input.provider_id,
@@ -159,13 +174,30 @@ export async function resolve_auth_access(
       })
     }
 
-    return {
+    const result = {
       user_uuid,
       visitor_uuid: visitor.visitor_uuid,
       locale: resolved_locale,
       is_new_user: false,
       is_new_visitor: visitor.is_new_visitor,
     }
+
+    await debug_event({
+      category: 'pwa',
+      event: 'pwa_identity_link_succeeded',
+      payload: {
+        source_channel: 'web',
+        identity_provider: input.provider,
+        visitor_uuid: result.visitor_uuid,
+        user_uuid: result.user_uuid,
+        role: 'user',
+        tier: 'member',
+        session_restored: true,
+        reason: 'existing_identity_restored',
+      },
+    })
+
+    return result
   }
 
   if (input.provider === 'line') {
@@ -256,11 +288,28 @@ export async function resolve_auth_access(
     })
   }
 
-  return {
+  const result = {
     user_uuid,
     visitor_uuid: visitor.visitor_uuid,
     locale: created_user.data.locale ?? null,
     is_new_user: true,
     is_new_visitor: visitor.is_new_visitor,
   }
+
+  await debug_event({
+    category: 'pwa',
+    event: 'pwa_identity_link_succeeded',
+    payload: {
+      source_channel: 'web',
+      identity_provider: input.provider,
+      visitor_uuid: result.visitor_uuid,
+      user_uuid: result.user_uuid,
+      role: 'user',
+      tier: 'member',
+      session_restored: true,
+      reason: 'new_identity_linked',
+    },
+  })
+
+  return result
 }

@@ -5,6 +5,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 
+import {
+  build_session_restore_headers,
+  write_local_visitor_uuid,
+} from '@/lib/visitor/client'
 import type { locale_key } from '@/lib/locale/action'
 
 export type session_profile_snapshot = {
@@ -35,6 +39,7 @@ export function use_session_profile() {
       const response = await fetch('/api/session', {
         method: 'GET',
         credentials: 'include',
+        headers: build_session_restore_headers(),
       })
 
       if (!response.ok) {
@@ -51,6 +56,7 @@ export function use_session_profile() {
         : {}
       const data = { ...raw, ...nested } as session_profile_snapshot
 
+      write_local_visitor_uuid(data.visitor_uuid ?? null)
       set_session(data)
     } catch {
       set_session(null)

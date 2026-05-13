@@ -45,6 +45,14 @@ type pwa_debug_payload = {
   current_url?: string | null
   is_ios?: boolean | null
   is_liff?: boolean | null
+  host?: string | null
+  origin?: string | null
+  pathname?: string | null
+  visitor_uuid?: string | null
+  cookie_present?: boolean | null
+  local_storage_visitor_present?: boolean | null
+  session_restored?: boolean | null
+  identity_provider?: string | null
 }
 
 export type pwa_before_install_prompt_event = Event & {
@@ -278,6 +286,9 @@ export function build_pwa_diagnostic_payload(
     user_agent: navigator.userAgent,
     app_visibility_state: document.visibilityState,
     source_channel: is_standalone_pwa() ? 'pwa' : 'web',
+    host: loc.host,
+    origin: loc.origin,
+    pathname: loc.pathname,
     is_standalone: is_standalone_pwa(),
     is_https,
     is_localhost_exception,

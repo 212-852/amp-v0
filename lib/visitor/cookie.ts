@@ -1,4 +1,8 @@
 export const visitor_cookie_name = 'amp_visitor_uuid'
+export const visitor_local_storage_key = 'amp_visitor_uuid'
+export const client_visitor_header_name = 'x-amp-client-visitor-uuid'
+export const client_source_channel_header_name = 'x-amp-source-channel'
+export const client_display_mode_header_name = 'x-amp-display-mode'
 
 /**
  * Set by middleware on the forwarded request only (client-supplied values removed).

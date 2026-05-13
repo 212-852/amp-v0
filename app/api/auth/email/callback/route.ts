@@ -1,7 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
+import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import {
+  get_browser_session_cookie_options,
+  visitor_cookie_max_age,
+  visitor_cookie_name,
+} from '@/lib/auth/session'
 import { notify_new_user_created } from '@/lib/notify/user/created'
 import { debug } from '@/lib/debug'
 
@@ -128,6 +134,9 @@ async function get_email_from_callback(url: URL) {
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const error = url.searchParams.get('error')
+  const cookie_store = await cookies()
+  const browser_visitor_uuid =
+    cookie_store.get(visitor_cookie_name)?.value ?? null
 
   if (error) {
     await debug_email_login_failed('email_error', {
@@ -147,6 +156,7 @@ export async function GET(request: Request) {
     const access = await resolve_auth_access({
       provider: 'email',
       provider_id: email.trim().toLowerCase(),
+      visitor_uuid: browser_visitor_uuid,
       display_name: null,
       image_url: null,
       locale: null,
@@ -175,6 +185,15 @@ export async function GET(request: Request) {
         email_exists: true,
       },
     })
+    const response = redirect_home()
+
+    response.cookies.set(
+      visitor_cookie_name,
+      access.visitor_uuid,
+      get_browser_session_cookie_options(visitor_cookie_max_age),
+    )
+
+    return response
   } catch (error) {
     await debug_email_login_failed('unexpected_error', {
       error: format_error(error),
@@ -182,6 +201,4 @@ export async function GET(request: Request) {
 
     return redirect_home()
   }
-
-  return redirect_home()
 }

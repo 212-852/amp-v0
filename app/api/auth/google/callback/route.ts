@@ -2,6 +2,11 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
+import {
+  get_browser_session_cookie_options,
+  visitor_cookie_max_age,
+  visitor_cookie_name,
+} from '@/lib/auth/session'
 import { debug } from '@/lib/debug'
 import { notify_new_user_created } from '@/lib/notify/user/created'
 import { google_login_state_cookie_name } from '../route'
@@ -116,6 +121,8 @@ export async function GET(request: Request) {
   const error = url.searchParams.get('error')
   const cookie_store = await cookies()
   const saved_state = cookie_store.get(google_login_state_cookie_name)?.value
+  const browser_visitor_uuid =
+    cookie_store.get(visitor_cookie_name)?.value ?? null
 
   cookie_store.delete(google_login_state_cookie_name)
 
@@ -159,6 +166,7 @@ export async function GET(request: Request) {
     const access = await resolve_auth_access({
       provider: 'google',
       provider_id: sub,
+      visitor_uuid: browser_visitor_uuid,
       display_name: userinfo?.name ?? null,
       image_url: userinfo?.picture ?? null,
       locale: null,
@@ -188,11 +196,18 @@ export async function GET(request: Request) {
         email_exists: Boolean(userinfo?.email),
       },
     })
+    const response = redirect_home()
+
+    response.cookies.set(
+      visitor_cookie_name,
+      access.visitor_uuid,
+      get_browser_session_cookie_options(visitor_cookie_max_age),
+    )
+
+    return response
   } catch {
     await debug_google_login_failed('unexpected_error')
 
     return redirect_home()
   }
-
-  return redirect_home()
 }
