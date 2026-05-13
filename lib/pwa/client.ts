@@ -49,6 +49,12 @@ type pwa_debug_payload = {
   origin?: string | null
   pathname?: string | null
   visitor_uuid?: string | null
+  link_session_uuid?: string | null
+  state_exists?: boolean | null
+  completed_user_uuid?: string | null
+  provider?: string | null
+  status?: string | null
+  return_path?: string | null
   cookie_present?: boolean | null
   local_storage_visitor_present?: boolean | null
   session_restored?: boolean | null

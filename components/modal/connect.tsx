@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ChevronDown,
@@ -12,6 +12,15 @@ import {
 
 import { is_line_in_app_browser } from '@/lib/auth/context'
 import type { locale_key } from '@/lib/locale/action'
+import {
+  build_pwa_diagnostic_payload,
+  is_standalone_pwa,
+  post_pwa_debug,
+} from '@/lib/pwa/client'
+import {
+  build_session_restore_headers,
+  write_local_visitor_uuid,
+} from '@/lib/visitor/client'
 
 type connected_provider = 'line' | 'google' | 'email'
 
@@ -102,6 +111,26 @@ const content = {
     en: 'Connected',
     es: 'Conectado',
   },
+  checking_line: {
+    ja: 'LINE連携を確認しています',
+    en: 'Checking LINE connection',
+    es: 'Verificando conexion con LINE',
+  },
+  completed_line: {
+    ja: '連携が完了しました。アプリを更新します',
+    en: 'Connection completed. Refreshing the app.',
+    es: 'Conexion completada. Actualizando la app.',
+  },
+  timeout_line: {
+    ja: '連携が反映されない場合は、アプリを開き直してください',
+    en: 'If the connection is not reflected, reopen the app.',
+    es: 'Si la conexion no aparece, vuelve a abrir la app.',
+  },
+  manual_refresh: {
+    ja: '更新する',
+    en: 'Refresh',
+    es: 'Actualizar',
+  },
 }
 
 const provider_labels: Record<connected_provider, string> = {
@@ -120,11 +149,164 @@ export default function ConnectModal({
   const [email_status, set_email_status] = useState<
     'idle' | 'sending' | 'sent' | 'failed'
   >('idle')
+  const [line_status, set_line_status] = useState<
+    'idle' | 'checking' | 'completed' | 'timeout' | 'failed'
+  >('idle')
+  const [link_session_uuid, set_link_session_uuid] = useState<string | null>(
+    null,
+  )
+  const poll_started_at_ref = useRef<number | null>(null)
+  const poll_timer_ref = useRef<number | null>(null)
+  const polling_ref = useRef(false)
 
   const is_email_loading = email_status === 'sending'
   const has_connected_provider = connected_providers.length > 0
+  const is_line_polling = line_status === 'checking'
 
-  function open_line_login() {
+  function clear_poll_timer() {
+    if (poll_timer_ref.current !== null) {
+      window.clearTimeout(poll_timer_ref.current)
+      poll_timer_ref.current = null
+    }
+  }
+
+  async function refresh_session_and_reload(uuid: string) {
+    post_pwa_debug({
+      event: 'pwa_session_refresh_started',
+      phase: 'link_session_refresh',
+      link_session_uuid: uuid,
+      provider: 'line',
+      status: 'completed',
+      ...build_pwa_diagnostic_payload(),
+    })
+
+    try {
+      const response = await fetch('/api/session', {
+        method: 'GET',
+        credentials: 'include',
+        headers: build_session_restore_headers(),
+      })
+
+      const payload = (await response.json().catch(() => null)) as {
+        visitor_uuid?: string | null
+        user_uuid?: string | null
+      } | null
+
+      write_local_visitor_uuid(payload?.visitor_uuid ?? null)
+
+      if (!response.ok) {
+        throw new Error(`session_refresh_http_${response.status}`)
+      }
+
+      post_pwa_debug({
+        event: 'pwa_session_refresh_succeeded',
+        phase: 'link_session_refresh',
+        link_session_uuid: uuid,
+        user_uuid: payload?.user_uuid ?? null,
+        visitor_uuid: payload?.visitor_uuid ?? null,
+        provider: 'line',
+        status: 'completed',
+        ...build_pwa_diagnostic_payload(),
+      })
+
+      post_pwa_debug({
+        event: 'pwa_reload_triggered',
+        phase: 'link_session_reload',
+        link_session_uuid: uuid,
+        provider: 'line',
+        status: 'completed',
+        ...build_pwa_diagnostic_payload(),
+      })
+
+      window.location.reload()
+    } catch (error) {
+      set_line_status('failed')
+      post_pwa_debug({
+        event: 'pwa_session_refresh_failed',
+        phase: 'link_session_refresh',
+        link_session_uuid: uuid,
+        provider: 'line',
+        status: 'completed',
+        error_code: 'session_refresh_failed',
+        error_message: error instanceof Error ? error.message : String(error),
+        ...build_pwa_diagnostic_payload(),
+      })
+    }
+  }
+
+  async function poll_link_status(uuid: string) {
+    if (polling_ref.current) {
+      return
+    }
+
+    polling_ref.current = true
+
+    try {
+      const started_at = poll_started_at_ref.current ?? Date.now()
+      poll_started_at_ref.current = started_at
+
+      if (Date.now() - started_at >= 60_000) {
+        clear_poll_timer()
+        set_line_status('timeout')
+        post_pwa_debug({
+          event: 'pwa_link_poll_timeout',
+          phase: 'link_session_poll',
+          link_session_uuid: uuid,
+          provider: 'line',
+          status: 'pending',
+          ...build_pwa_diagnostic_payload(),
+        })
+
+        return
+      }
+
+      const response = await fetch('/api/auth/link/status', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ link_session_uuid: uuid }),
+      })
+      const payload = (await response.json().catch(() => null)) as {
+        status?: string
+        completed_user_uuid?: string | null
+        return_path?: string | null
+      } | null
+      const status = payload?.status ?? 'failed'
+
+      if (status === 'completed') {
+        clear_poll_timer()
+        set_line_status('completed')
+        post_pwa_debug({
+          event: 'pwa_link_poll_completed',
+          phase: 'link_session_poll',
+          link_session_uuid: uuid,
+          completed_user_uuid: payload?.completed_user_uuid ?? null,
+          provider: 'line',
+          status,
+          return_path: payload?.return_path ?? null,
+          ...build_pwa_diagnostic_payload(),
+        })
+        await refresh_session_and_reload(uuid)
+
+        return
+      }
+
+      if (status === 'expired' || status === 'failed' || !response.ok) {
+        clear_poll_timer()
+        set_line_status(status === 'expired' ? 'timeout' : 'failed')
+
+        return
+      }
+
+      poll_timer_ref.current = window.setTimeout(() => {
+        void poll_link_status(uuid)
+      }, 2_000)
+    } finally {
+      polling_ref.current = false
+    }
+  }
+
+  async function open_line_login() {
     if (connected_providers.includes('line')) {
       return
     }
@@ -141,7 +323,90 @@ export default function ConnectModal({
       return
     }
 
-    window.location.href = '/api/auth/line'
+    set_line_status('checking')
+    clear_poll_timer()
+
+    const auth_window = window.open('', '_blank')
+
+    try {
+      const standalone = is_standalone_pwa()
+      const session_response = await fetch('/api/session', {
+        method: 'GET',
+        credentials: 'include',
+        headers: build_session_restore_headers(),
+      })
+      const session_payload = (await session_response
+        .json()
+        .catch(() => null)) as {
+        visitor_uuid?: string | null
+      } | null
+
+      write_local_visitor_uuid(session_payload?.visitor_uuid ?? null)
+
+      const response = await fetch('/api/auth/link/start', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/json',
+          ...build_session_restore_headers(),
+        },
+        body: JSON.stringify({
+          provider: 'line',
+          source_channel: standalone ? 'pwa' : 'web',
+          return_path: window.location.pathname,
+          is_standalone: standalone,
+        }),
+      })
+      const payload = (await response.json()) as {
+        auth_url?: string
+        link_session_uuid?: string
+      }
+
+      if (!response.ok || !payload.auth_url || !payload.link_session_uuid) {
+        throw new Error('link_start_failed')
+      }
+
+      set_link_session_uuid(payload.link_session_uuid)
+      poll_started_at_ref.current = Date.now()
+
+      post_pwa_debug({
+        event: 'pwa_link_poll_started',
+        phase: 'link_session_poll',
+        link_session_uuid: payload.link_session_uuid,
+        provider: 'line',
+        status: 'pending',
+        ...build_pwa_diagnostic_payload(),
+      })
+
+      post_pwa_debug({
+        event: 'pwa_line_auth_opened',
+        phase: 'line_auth_opened',
+        link_session_uuid: payload.link_session_uuid,
+        provider: 'line',
+        status: 'pending',
+        ...build_pwa_diagnostic_payload(),
+      })
+
+      if (auth_window) {
+        auth_window.opener = null
+        auth_window.location.href = payload.auth_url
+      } else {
+        window.location.href = payload.auth_url
+      }
+
+      void poll_link_status(payload.link_session_uuid)
+    } catch (error) {
+      auth_window?.close()
+      set_line_status('failed')
+      post_pwa_debug({
+        event: 'pwa_identity_link_failed',
+        phase: 'link_start_failed',
+        provider: 'line',
+        error_code: 'link_start_failed',
+        error_message: error instanceof Error ? error.message : String(error),
+        ...build_pwa_diagnostic_payload(),
+      })
+    }
   }
 
   function open_google_login() {
@@ -178,6 +443,29 @@ export default function ConnectModal({
       set_email_status('failed')
     }
   }
+
+  useEffect(() => {
+    function handle_visibility_change() {
+      if (
+        document.visibilityState === 'visible' &&
+        line_status === 'checking' &&
+        link_session_uuid
+      ) {
+        clear_poll_timer()
+        void poll_link_status(link_session_uuid)
+      }
+    }
+
+    document.addEventListener('visibilitychange', handle_visibility_change)
+
+    return () => {
+      document.removeEventListener(
+        'visibilitychange',
+        handle_visibility_change,
+      )
+      clear_poll_timer()
+    }
+  }, [line_status, link_session_uuid])
 
   return (
     <div className="relative w-[92%] max-w-[420px] rounded-[34px] bg-[#fdfaf8] px-7 py-7 shadow-[0_12px_40px_rgba(42,29,24,0.08)]">
@@ -255,6 +543,45 @@ export default function ConnectModal({
             ) : null}
           </form>
         </div>
+      ) : line_status !== 'idle' ? (
+        <div className="animate-[modal_in_220ms_ease-out_both]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 pr-1">
+              <h2 className="text-[21px] font-semibold leading-[1.45] text-[#2a1d18]">
+                {line_status === 'completed'
+                  ? content.completed_line[locale]
+                  : line_status === 'timeout' || line_status === 'failed'
+                    ? content.timeout_line[locale]
+                    : content.checking_line[locale]}
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              onClick={on_close}
+              aria-label="close"
+              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.94]"
+            >
+              <X className="h-[24px] w-[24px] stroke-[2.1] text-[#2a1d18]" />
+            </button>
+          </div>
+
+          {line_status === 'checking' ? (
+            <div className="mt-6 h-2 overflow-hidden rounded-full bg-[#e8dfd6]">
+              <div className="h-full w-1/2 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[#06c755]" />
+            </div>
+          ) : null}
+
+          {line_status === 'timeout' || line_status === 'failed' ? (
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-6 flex h-[54px] w-full items-center justify-center rounded-[22px] bg-[#2a1d18] px-5 text-[14px] font-semibold text-white transition-transform active:scale-[0.98]"
+            >
+              {content.manual_refresh[locale]}
+            </button>
+          ) : null}
+        </div>
       ) : (
         <div className="animate-[modal_in_220ms_ease-out_both]">
           <div className="flex items-start justify-between gap-3">
@@ -303,6 +630,7 @@ export default function ConnectModal({
                 <button
                   type="button"
                   onClick={open_line_login}
+                  disabled={is_line_polling}
                   className="flex min-h-[80px] w-full items-center justify-between rounded-[28px] bg-[#06c755] px-5 py-3 text-white shadow-[0_4px_16px_rgba(6,199,85,0.14)] transition-transform active:scale-[0.97]"
                 >
                   <div className="flex min-w-0 items-center gap-3.5">

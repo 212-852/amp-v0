@@ -39,6 +39,12 @@ type pwa_debug_body = {
   origin?: unknown
   pathname?: unknown
   visitor_uuid?: unknown
+  link_session_uuid?: unknown
+  state_exists?: unknown
+  completed_user_uuid?: unknown
+  provider?: unknown
+  status?: unknown
+  return_path?: unknown
   cookie_present?: unknown
   local_storage_visitor_present?: unknown
   session_restored?: unknown
@@ -135,6 +141,13 @@ export async function POST(request: Request) {
       origin: string_or_null(body?.origin),
       pathname: string_or_null(body?.pathname),
       visitor_uuid: string_or_null(body?.visitor_uuid),
+      link_session_uuid: string_or_null(body?.link_session_uuid),
+      state_exists:
+        typeof body?.state_exists === 'boolean' ? body.state_exists : null,
+      completed_user_uuid: string_or_null(body?.completed_user_uuid),
+      provider: string_or_null(body?.provider),
+      status: string_or_null(body?.status),
+      return_path: string_or_null(body?.return_path),
       cookie_present:
         typeof body?.cookie_present === 'boolean' ? body.cookie_present : null,
       local_storage_visitor_present:
