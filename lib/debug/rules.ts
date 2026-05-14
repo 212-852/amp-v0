@@ -436,6 +436,40 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const notification_settings_debug_events = new Set([
+    'notification_modal_opened',
+    'notification_tab_changed',
+    'push_toggle_clicked',
+    'push_standalone_checked',
+    'push_service_worker_checked',
+    'push_permission_requested',
+    'push_permission_granted',
+    'push_permission_denied',
+    'push_subscribe_started',
+    'push_subscribe_succeeded',
+    'push_subscription_save_started',
+    'push_subscription_save_succeeded',
+    'push_subscription_save_failed',
+    'notification_setting_save_started',
+    'notification_setting_save_succeeded',
+    'notification_setting_save_failed',
+  ])
+
+  if (
+    input.category === 'pwa' &&
+    notification_settings_debug_events.has(input.event)
+  ) {
+    const is_failed =
+      input.event.endsWith('_failed') ||
+      input.event === 'push_permission_denied'
+
+    return {
+      category: 'pwa',
+      level: is_failed ? 'error' : 'info',
+      channels: ['discord'],
+    }
+  }
+
   if (input.category === 'pwa' && pwa_discord_lifecycle_events.has(input.event)) {
     return {
       category: 'pwa',

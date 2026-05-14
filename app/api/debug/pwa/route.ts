@@ -14,6 +14,8 @@ type pwa_debug_body = {
   message_uuid?: unknown
   notification_route?: unknown
   has_push_subscription?: unknown
+  permission?: unknown
+  enabled?: unknown
   has_line_identity?: unknown
   has_beforeinstallprompt?: unknown
   is_standalone?: unknown
@@ -96,6 +98,11 @@ export async function POST(request: Request) {
       has_push_subscription:
         typeof body?.has_push_subscription === 'boolean'
           ? body.has_push_subscription
+          : null,
+      permission: string_or_null(body?.permission),
+      enabled:
+        typeof body?.enabled === 'boolean'
+          ? body.enabled
           : null,
       has_line_identity:
         typeof body?.has_line_identity === 'boolean'

@@ -16,6 +16,8 @@ type pwa_debug_payload = {
   message_uuid?: string | null
   notification_route?: string | null
   has_push_subscription?: boolean | null
+  permission?: string | null
+  enabled?: boolean | null
   has_line_identity?: boolean | null
   has_beforeinstallprompt?: boolean | null
   is_standalone?: boolean | null
@@ -426,11 +428,28 @@ export async function register_push_subscription(input: {
   role: string | null
   tier: string | null
 }) {
-  if (!('Notification' in window) || !('PushManager' in window)) {
+  const service_worker_supported = 'serviceWorker' in navigator
+
+  post_pwa_debug({
+    event: 'push_service_worker_checked',
+    ...input,
+    source_channel: 'pwa',
+    service_worker_supported,
+    has_push_subscription: false,
+    app_visibility_state: document.visibilityState,
+    phase: 'push_capability_check',
+  })
+
+  if (
+    !('Notification' in window) ||
+    !('PushManager' in window) ||
+    !service_worker_supported
+  ) {
     post_pwa_debug({
       event: 'push_subscription_save_failed',
       ...input,
       source_channel: 'pwa',
+      service_worker_supported,
       has_push_subscription: false,
       app_visibility_state: document.visibilityState,
       error_code: 'push_not_supported',
@@ -448,6 +467,7 @@ export async function register_push_subscription(input: {
       event: 'push_subscription_save_failed',
       ...input,
       source_channel: 'pwa',
+      service_worker_supported,
       has_push_subscription: false,
       app_visibility_state: document.visibilityState,
       error_code: 'vapid_public_key_missing',
@@ -458,34 +478,98 @@ export async function register_push_subscription(input: {
     return false
   }
 
-  post_pwa_debug({
-    event: 'push_subscription_save_started',
-    ...input,
-    source_channel: 'pwa',
-    has_push_subscription: false,
-    app_visibility_state: document.visibilityState,
-    phase: 'push_subscribe_started',
-  })
-
   try {
-    const permission =
-      Notification.permission === 'default'
-        ? await Notification.requestPermission()
-        : Notification.permission
-
-    if (permission !== 'granted') {
-      throw new Error(`notification_permission_${permission}`)
-    }
-
     const registration = await register_pwa_service_worker()
 
     if (!registration) {
       throw new Error('service_worker_registration_missing')
     }
 
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: url_base64_to_uint8_array(public_key),
+    const initial_permission = Notification.permission
+
+    if (initial_permission === 'default') {
+      post_pwa_debug({
+        event: 'push_permission_requested',
+        ...input,
+        source_channel: 'pwa',
+        service_worker_supported,
+        permission: initial_permission,
+        app_visibility_state: document.visibilityState,
+        phase: 'push_permission_request',
+      })
+    }
+
+    const permission =
+      initial_permission === 'default'
+        ? await Notification.requestPermission()
+        : initial_permission
+
+    if (permission !== 'granted') {
+      post_pwa_debug({
+        event: 'push_permission_denied',
+        ...input,
+        source_channel: 'pwa',
+        service_worker_supported,
+        permission,
+        has_push_subscription: false,
+        app_visibility_state: document.visibilityState,
+        error_code: `permission_${permission}`,
+        error_message: 'notification_permission_denied',
+        phase: 'push_permission_request',
+      })
+      throw new Error(`notification_permission_${permission}`)
+    }
+
+    post_pwa_debug({
+      event: 'push_permission_granted',
+      ...input,
+      source_channel: 'pwa',
+      service_worker_supported,
+      permission,
+      app_visibility_state: document.visibilityState,
+      phase: 'push_permission_request',
+    })
+
+    post_pwa_debug({
+      event: 'push_subscribe_started',
+      ...input,
+      source_channel: 'pwa',
+      service_worker_supported,
+      permission,
+      has_push_subscription: false,
+      app_visibility_state: document.visibilityState,
+      phase: 'push_manager_subscribe',
+    })
+
+    const existing_subscription =
+      await registration.pushManager.getSubscription()
+    const subscription =
+      existing_subscription ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: url_base64_to_uint8_array(public_key),
+      }))
+
+    post_pwa_debug({
+      event: 'push_subscribe_succeeded',
+      ...input,
+      source_channel: 'pwa',
+      service_worker_supported,
+      permission,
+      has_push_subscription: true,
+      app_visibility_state: document.visibilityState,
+      phase: 'push_manager_subscribe',
+    })
+
+    post_pwa_debug({
+      event: 'push_subscription_save_started',
+      ...input,
+      source_channel: 'pwa',
+      service_worker_supported,
+      permission,
+      has_push_subscription: true,
+      app_visibility_state: document.visibilityState,
+      phase: 'push_subscription_api',
     })
 
     const response = await fetch('/api/push/subscribe', {
@@ -513,15 +597,19 @@ export async function register_push_subscription(input: {
       event: 'push_subscription_save_succeeded',
       ...input,
       source_channel: 'pwa',
+      service_worker_supported,
+      permission,
       has_push_subscription: true,
       app_visibility_state: document.visibilityState,
-      phase: 'push_subscription_saved',
+      phase: 'push_subscription_api',
     })
 
     post_pwa_debug({
       event: 'push_subscription_saved',
       ...input,
       source_channel: 'pwa',
+      service_worker_supported,
+      permission,
       has_push_subscription: true,
       app_visibility_state: document.visibilityState,
       phase: 'push_subscription_saved',
@@ -533,6 +621,9 @@ export async function register_push_subscription(input: {
       event: 'push_subscription_save_failed',
       ...input,
       source_channel: 'pwa',
+      service_worker_supported,
+      permission:
+        'Notification' in window ? Notification.permission : null,
       has_push_subscription: false,
       app_visibility_state: document.visibilityState,
       error_message: error instanceof Error ? error.message : String(error),
@@ -543,6 +634,9 @@ export async function register_push_subscription(input: {
       event: 'push_subscription_failed',
       ...input,
       source_channel: 'pwa',
+      service_worker_supported,
+      permission:
+        'Notification' in window ? Notification.permission : null,
       has_push_subscription: false,
       app_visibility_state: document.visibilityState,
       error_message: error instanceof Error ? error.message : String(error),

@@ -21,7 +21,17 @@ function merge_profile_json(
 
   return {
     ...base,
-    notification_preferences: preferences,
+    notification_preferences: to_settings_json(preferences),
+  }
+}
+
+function to_settings_json(preferences: notification_preferences) {
+  return {
+    push_enabled: preferences.pwa_push_enabled,
+    line_enabled: preferences.line_enabled,
+    new_chat: preferences.kinds.chat,
+    reservation: preferences.kinds.reservation,
+    announcement: preferences.kinds.announcement,
   }
 }
 
@@ -39,7 +49,7 @@ export async function load_notification_settings() {
 
   const result = await supabase
     .from('users')
-    .select('profile_json')
+    .select('profile_json, notification_settings')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -52,11 +62,15 @@ export async function load_notification_settings() {
   }
 
   const row = result.data as { profile_json?: unknown } | null
+  const settings_row = result.data as {
+    notification_settings?: unknown
+  } | null
   const profile_json = row?.profile_json
   const source =
-    profile_json && typeof profile_json === 'object'
+    settings_row?.notification_settings ??
+    (profile_json && typeof profile_json === 'object'
       ? (profile_json as Record<string, unknown>).notification_preferences
-      : null
+      : null)
 
   return {
     ok: true as const,
@@ -80,7 +94,7 @@ export async function save_notification_settings(input: {
 
   const current = await supabase
     .from('users')
-    .select('profile_json')
+    .select('profile_json, notification_settings')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -93,11 +107,15 @@ export async function save_notification_settings(input: {
   }
 
   const current_row = current.data as { profile_json?: unknown } | null
+  const settings_row = current.data as {
+    notification_settings?: unknown
+  } | null
   const profile_json = current_row?.profile_json
   const source =
-    profile_json && typeof profile_json === 'object'
+    settings_row?.notification_settings ??
+    (profile_json && typeof profile_json === 'object'
       ? (profile_json as Record<string, unknown>).notification_preferences
-      : null
+      : null)
   const previous = normalize_notification_preferences(source)
   const incoming = input.preferences ?? {}
   const incoming_kinds =
@@ -106,18 +124,24 @@ export async function save_notification_settings(input: {
       : {}
   const preferences: notification_preferences = {
     pwa_push_enabled: boolean_value(
-      incoming.pwa_push_enabled,
+      (incoming as Record<string, unknown>).push_enabled ??
+        incoming.pwa_push_enabled,
       previous.pwa_push_enabled,
     ),
     line_enabled: boolean_value(incoming.line_enabled, previous.line_enabled),
     kinds: {
-      chat: boolean_value(incoming_kinds.chat, previous.kinds.chat),
+      chat: boolean_value(
+        (incoming as Record<string, unknown>).new_chat ?? incoming_kinds.chat,
+        previous.kinds.chat,
+      ),
       reservation: boolean_value(
-        incoming_kinds.reservation,
+        (incoming as Record<string, unknown>).reservation ??
+          incoming_kinds.reservation,
         previous.kinds.reservation,
       ),
       announcement: boolean_value(
-        incoming_kinds.announcement,
+        (incoming as Record<string, unknown>).announcement ??
+          incoming_kinds.announcement,
         previous.kinds.announcement,
       ),
     },
@@ -127,6 +151,7 @@ export async function save_notification_settings(input: {
     .from('users')
     .update({
       profile_json: merge_profile_json(profile_json, preferences),
+      notification_settings: to_settings_json(preferences),
     })
     .eq('user_uuid', user_uuid)
 

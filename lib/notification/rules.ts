@@ -39,7 +39,7 @@ export function normalize_notification_preferences(
 
   return {
     pwa_push_enabled: boolean_value(
-      source.pwa_push_enabled,
+      source.push_enabled ?? source.pwa_push_enabled,
       default_notification_preferences.pwa_push_enabled,
     ),
     line_enabled: boolean_value(
@@ -48,15 +48,15 @@ export function normalize_notification_preferences(
     ),
     kinds: {
       chat: boolean_value(
-        kinds.chat,
+        source.new_chat ?? kinds.chat,
         default_notification_preferences.kinds.chat,
       ),
       reservation: boolean_value(
-        kinds.reservation,
+        source.reservation ?? kinds.reservation,
         default_notification_preferences.kinds.reservation,
       ),
       announcement: boolean_value(
-        kinds.announcement,
+        source.announcement ?? kinds.announcement,
         default_notification_preferences.kinds.announcement,
       ),
     },
@@ -76,7 +76,7 @@ export async function user_allows_notification(input: {
 
   const result = await supabase
     .from('users')
-    .select('profile_json')
+    .select('profile_json, notification_settings')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -85,11 +85,15 @@ export async function user_allows_notification(input: {
   }
 
   const row = result.data as { profile_json?: unknown } | null
+  const settings_row = result.data as {
+    notification_settings?: unknown
+  } | null
   const profile_json = row?.profile_json
   const source =
-    profile_json && typeof profile_json === 'object'
+    settings_row?.notification_settings ??
+    (profile_json && typeof profile_json === 'object'
       ? (profile_json as Record<string, unknown>).notification_preferences
-      : null
+      : null)
   const preferences = normalize_notification_preferences(source)
 
   if (!preferences.kinds[input.kind]) {
