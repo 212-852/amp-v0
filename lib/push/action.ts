@@ -89,9 +89,9 @@ export async function load_user_pwa_installed(
 ): Promise<boolean> {
   const result = await supabase
     .from('push_subscriptions')
-    .select('is_active, is_pwa')
+    .select('enabled, is_pwa')
     .eq('user_uuid', user_uuid)
-    .eq('is_active', true)
+    .eq('enabled', true)
 
   if (result.error) {
     return false
@@ -107,7 +107,7 @@ export async function list_active_push_subscriptions(user_uuid: string) {
     .from('push_subscriptions')
     .select('*')
     .eq('user_uuid', user_uuid)
-    .eq('is_active', true)
+    .eq('enabled', true)
     .order('updated_at', { ascending: false })
 
   if (result.error) {
@@ -136,7 +136,6 @@ export async function deactivate_push_subscription(input: {
   const result = await supabase
     .from('push_subscriptions')
     .update({
-      is_active: false,
       enabled: false,
       updated_at: new Date().toISOString(),
     })
@@ -225,7 +224,6 @@ export async function save_push_subscription(
     browser: normalized.browser,
     os: normalized.os,
     is_pwa: normalized.is_pwa,
-    is_active: true,
     enabled: true,
     last_seen_at: now,
     updated_at: now,

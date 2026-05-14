@@ -98,8 +98,30 @@ function build_disabled_reason(input: {
 }
 
 /**
+ * notify/rules: `push_subscription_enabled` is true when a row exists for the user
+ * with `enabled = true`, non-null non-empty `endpoint`, using the latest `updated_at`
+ * (see push_gate lookup: order updated_at desc, limit 1).
+ */
+export function resolve_push_subscription_enabled_for_notify(
+  row: {
+    endpoint?: string | null | undefined
+    enabled?: boolean | null | undefined
+  } | null,
+): boolean {
+  if (!row) {
+    return false
+  }
+
+  return (
+    row.enabled === true &&
+    typeof row.endpoint === 'string' &&
+    row.endpoint.trim().length > 0
+  )
+}
+
+/**
  * Push delivery gate for user-targeted notifications.
- * Reads public.settings.notification_preferences and push_subscriptions.is_active
+ * Reads public.settings.notification_preferences and public.push_subscriptions.enabled
  * (exposed as push_subscription_enabled in payloads).
  */
 export async function evaluate_push_chat_delivery_allowed(input: {
@@ -214,11 +236,11 @@ export async function evaluate_push_chat_delivery_allowed(input: {
           updated_at?: string | null
         } | undefined)
       : undefined
-  const push_subscription_enabled = Boolean(
+  const push_subscription_enabled =
     !sub_result.error &&
-      latest_subscription?.endpoint &&
-      latest_subscription.enabled === true,
-  )
+    resolve_push_subscription_enabled_for_notify(
+      latest_subscription ?? null,
+    )
 
   if (!sub_result.error) {
     await emit_push_subscription_lookup_debug('push_subscription_lookup_result', {

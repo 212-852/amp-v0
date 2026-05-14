@@ -119,6 +119,13 @@ export function resolve_concierge_targets(input: {
   return ['owner', 'core']
 }
 
+/**
+ * Push subscription policy for notify (see `resolve_push_subscription_enabled_for_notify`):
+ * `push_subscription_enabled` means a `push_subscriptions` row exists for the user with
+ * `enabled = true`, a non-empty `endpoint`, using the latest row (`updated_at` desc, limit 1).
+ * Unsubscribe sets `enabled = false` (row retained). Delivery queries match the same filter.
+ */
+
 export function should_send_notify(event: notify_event) {
   if (event.event === 'new_user_created') {
     return control.notify.new_user_created
@@ -254,4 +261,7 @@ export function format_support_started_notify_content(
 
 export type { push_chat_gate_result } from './push_gate'
 
-export { evaluate_push_chat_delivery_allowed } from './push_gate'
+export {
+  evaluate_push_chat_delivery_allowed,
+  resolve_push_subscription_enabled_for_notify,
+} from './push_gate'

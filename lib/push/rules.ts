@@ -8,7 +8,7 @@ export type push_session_slice = {
 }
 
 export type push_subscription_row = {
-  is_active?: boolean | null
+  enabled?: boolean | null
   is_pwa?: boolean | null
 }
 
@@ -23,16 +23,16 @@ export function can_save_push_subscription(session: push_session_slice): boolean
 }
 
 /**
- * PWA installed for product rules: active row with is_pwa true for this user.
+ * PWA installed for product rules: enabled row with is_pwa true for this user.
  */
 export function resolve_push_status(rows: push_subscription_row[]): {
   pwa_installed: boolean
   has_active_subscription: boolean
 } {
-  const has_active_subscription = rows.some((row) => row.is_active === true)
+  const has_active_subscription = rows.some((row) => row.enabled === true)
 
   const pwa_installed = rows.some(
-    (row) => row.is_active === true && row.is_pwa === true,
+    (row) => row.enabled === true && row.is_pwa === true,
   )
 
   return { pwa_installed, has_active_subscription }
