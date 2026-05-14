@@ -74,15 +74,17 @@ export function resolve_debug_rule(input: {
     return {
       category: input.category,
       level: is_error ? 'error' : 'info',
-      channels: debug_control.message_send_trace_enabled ? ['discord'] : [],
+      channels: is_error ? ['discord'] : [],
     }
   }
 
   if (input.category === 'notification') {
+    const is_failed = input.event.endsWith('_failed')
+
     return {
       category: 'notification',
-      level: 'info',
-      channels: [],
+      level: is_failed ? 'error' : 'info',
+      channels: is_failed ? ['discord'] : [],
     }
   }
 
@@ -336,6 +338,8 @@ export function resolve_debug_rule(input: {
     'session_channel_mismatch_detected',
     'user_uuid_missing_after_link',
     'push_subscription_save_failed',
+    'push_subscription_failed',
+    'push_permission_denied',
   ])
 
   const pwa_discord_lifecycle_events = new Set([
@@ -418,6 +422,10 @@ export function resolve_debug_rule(input: {
     'restore_from_identity_succeeded',
     'restore_from_one_time_pass_succeeded',
     'chat_state_room_applied',
+    'notification_modal_opened',
+    'push_permission_requested',
+    'push_permission_granted',
+    'push_subscription_saved',
   ])
 
   if (input.category === 'pwa' && pwa_problem_events.has(input.event)) {
@@ -432,7 +440,7 @@ export function resolve_debug_rule(input: {
     return {
       category: 'pwa',
       level: 'info',
-      channels: ['discord'],
+      channels: [],
     }
   }
 
@@ -447,10 +455,7 @@ export function resolve_debug_rule(input: {
     return {
       category: 'chat_message',
       level: is_failed ? 'error' : 'info',
-      channels:
-        is_failed || debug_control.chat_message_debug_enabled
-          ? ['discord']
-          : [],
+      channels: is_failed ? ['discord'] : [],
     }
   }
 
@@ -594,14 +599,28 @@ export function resolve_debug_rule(input: {
     chat_room_lifecycle.has(input.event)
   ) {
     const is_failed = input.event.endsWith('_failed')
-    const is_fetch = input.event.startsWith('chat_messages_fetch_')
-    const allow_discord =
-      is_fetch && debug_control.chat_messages_fetch_discord_enabled
 
     return {
       category: 'chat_room',
       level: is_failed ? 'error' : 'info',
-      channels: allow_discord ? ['discord'] : [],
+      channels: is_failed ? ['discord'] : [],
+    }
+  }
+
+  if (
+    input.category === 'chat_room' ||
+    input.category === 'chat_message' ||
+    input.category === 'user_message' ||
+    input.category === 'pwa'
+  ) {
+    const is_failed =
+      input.event.endsWith('_failed') ||
+      input.event.endsWith('_blocked')
+
+    return {
+      category: input.category,
+      level: is_failed ? 'error' : 'info',
+      channels: is_failed ? ['discord'] : [],
     }
   }
 

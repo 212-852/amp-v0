@@ -42,6 +42,14 @@ export type notify_event =
       message: string
     }
   | {
+      event: 'new_chat'
+      user_uuid: string
+      room_uuid: string
+      message_uuid?: string | null
+      message: string
+      source_channel: string
+    }
+  | {
       event: 'admin_internal_name_updated'
       admin_user_uuid: string
       old_internal_name: string | null
@@ -129,6 +137,10 @@ export function should_send_notify(event: notify_event) {
     return true
   }
 
+  if (event.event === 'new_chat') {
+    return true
+  }
+
   if (event.event === 'admin_internal_name_updated') {
     return true
   }
@@ -183,6 +195,13 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
   if (event.event === 'line_push') {
     return {
       channels: ['line'],
+    }
+  }
+
+  if (event.event === 'new_chat') {
+    return {
+      priority: 'normal',
+      channels: ['push'],
     }
   }
 

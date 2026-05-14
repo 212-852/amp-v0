@@ -1533,6 +1533,7 @@ export type admin_reception_send_resolve_error =
 export type admin_reception_send_resolve_ok = {
   room_uuid: string
   user_participant_uuid: string
+  user_uuid: string | null
   bot_participant_uuid: string
   staff_participant_uuid: string
   staff_sender_role: 'admin' | 'concierge'
@@ -1651,7 +1652,7 @@ export async function resolve_admin_reception_send_context(input: {
   const [user_result, bot_result, staff_result] = await Promise.all([
     supabase
       .from('participants')
-      .select('participant_uuid')
+      .select('participant_uuid, user_uuid')
       .eq('room_uuid', room_uuid)
       .eq('role', 'user')
       .order('created_at', { ascending: true })
@@ -1690,6 +1691,10 @@ export async function resolve_admin_reception_send_context(input: {
     (user_result.data as { participant_uuid?: string } | null)
       ?.participant_uuid ?? null,
   )
+  const user_uuid = clean_uuid(
+    (user_result.data as { user_uuid?: string | null } | null)?.user_uuid ??
+      null,
+  )
   const bot_participant_uuid = clean_uuid(
     (bot_result.data as { participant_uuid?: string } | null)
       ?.participant_uuid ?? null,
@@ -1720,6 +1725,7 @@ export async function resolve_admin_reception_send_context(input: {
     data: {
       room_uuid,
       user_participant_uuid,
+      user_uuid,
       bot_participant_uuid,
       staff_participant_uuid: ensured_staff_participant_uuid,
       staff_sender_role,

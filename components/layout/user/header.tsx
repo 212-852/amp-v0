@@ -12,6 +12,7 @@ import { usePathname } from 'next/navigation'
 
 import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
+import NotificationSettings from '@/components/notification/settings'
 import OverlayRoot from '@/components/overlay/root'
 import { use_pwa_boot_gate } from '@/components/pwa/boot_gate'
 import Breadcrumb from '@/components/shared/breadcrumb'
@@ -25,6 +26,7 @@ import {
   set_locale as set_locale_state,
   subscribe_locale,
 } from '@/lib/locale/state'
+import { post_pwa_debug } from '@/lib/pwa/client'
 
 const content = {
   guest: {
@@ -72,6 +74,7 @@ export default function UserHeader() {
   const [locale, set_locale] = useState<locale_key>('ja')
   const [connect_open, set_connect_open] = useState(false)
   const [locale_open, set_locale_open] = useState(false)
+  const [notification_open, set_notification_open] = useState(false)
   const render_locale = mounted ? locale : 'ja'
 
   const tier = session?.tier ?? 'guest'
@@ -103,6 +106,25 @@ export default function UserHeader() {
   function handle_locale_select(next_locale: locale_key) {
     set_locale_state(next_locale)
     set_locale_open(false)
+  }
+
+  function open_notification_modal() {
+    post_pwa_debug({
+      event: 'notification_modal_opened',
+      user_uuid: session?.user_uuid ?? null,
+      participant_uuid:
+        session?.participant_uuid ?? session?.chat?.participant_uuid ?? null,
+      room_uuid: session?.room_uuid ?? session?.chat?.room_uuid ?? null,
+      role: session?.role ?? null,
+      tier: session?.tier ?? null,
+      source_channel: session?.source_channel ?? null,
+      is_standalone:
+        typeof window !== 'undefined' &&
+        (window.matchMedia('(display-mode: standalone)').matches ||
+          (navigator as Navigator & { standalone?: boolean }).standalone === true),
+      phase: 'user_header',
+    })
+    set_notification_open(true)
   }
 
   useEffect(() => {
@@ -164,6 +186,7 @@ export default function UserHeader() {
 
               <button
                 type="button"
+                onClick={open_notification_modal}
                 className="flex h-8 w-8 items-center justify-center"
                 aria-label="Notification"
               >
@@ -226,6 +249,25 @@ export default function UserHeader() {
           locale={render_locale}
           on_select={handle_locale_select}
           on_close={() => set_locale_open(false)}
+        />
+      </OverlayRoot>
+
+      <OverlayRoot
+        open={notification_open}
+        on_close={() => set_notification_open(false)}
+        variant="center"
+      >
+        <NotificationSettings
+          locale={render_locale}
+          user_uuid={session?.user_uuid ?? null}
+          participant_uuid={
+            session?.participant_uuid ?? session?.chat?.participant_uuid ?? null
+          }
+          room_uuid={session?.room_uuid ?? session?.chat?.room_uuid ?? null}
+          role={session?.role ?? null}
+          tier={session?.tier ?? null}
+          source_channel={session?.source_channel ?? null}
+          on_close={() => set_notification_open(false)}
         />
       </OverlayRoot>
     </>

@@ -2743,6 +2743,19 @@ export async function handle_chat_message_request(
       },
     })
 
+    if (resolved.data.user_uuid) {
+      after(() =>
+        notify({
+          event: 'new_chat',
+          user_uuid: resolved.data.user_uuid ?? '',
+          room_uuid: resolved.data.room_uuid,
+          message_uuid: archived_messages[0]?.archive_uuid ?? null,
+          message: text_value,
+          source_channel: 'web',
+        }),
+      )
+    }
+
     return {
       status: 200,
       body: {

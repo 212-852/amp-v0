@@ -468,7 +468,10 @@ export async function register_push_subscription(input: {
   })
 
   try {
-    const permission = await Notification.requestPermission()
+    const permission =
+      Notification.permission === 'default'
+        ? await Notification.requestPermission()
+        : Notification.permission
 
     if (permission !== 'granted') {
       throw new Error(`notification_permission_${permission}`)
@@ -515,6 +518,15 @@ export async function register_push_subscription(input: {
       phase: 'push_subscription_saved',
     })
 
+    post_pwa_debug({
+      event: 'push_subscription_saved',
+      ...input,
+      source_channel: 'pwa',
+      has_push_subscription: true,
+      app_visibility_state: document.visibilityState,
+      phase: 'push_subscription_saved',
+    })
+
     return true
   } catch (error) {
     post_pwa_debug({
@@ -525,6 +537,16 @@ export async function register_push_subscription(input: {
       app_visibility_state: document.visibilityState,
       error_message: error instanceof Error ? error.message : String(error),
       phase: 'push_subscription_save_failed',
+    })
+
+    post_pwa_debug({
+      event: 'push_subscription_failed',
+      ...input,
+      source_channel: 'pwa',
+      has_push_subscription: false,
+      app_visibility_state: document.visibilityState,
+      error_message: error instanceof Error ? error.message : String(error),
+      phase: 'push_subscription_failed',
     })
 
     return false
