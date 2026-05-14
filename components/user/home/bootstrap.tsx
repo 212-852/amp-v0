@@ -6,11 +6,13 @@ import { WebChat } from '@/components/chat/web'
 import type { archived_message } from '@/lib/chat/archive'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
+import { post_pwa_debug } from '@/lib/pwa/client'
 import { build_session_restore_headers } from '@/lib/visitor/client'
 
 type session_response = {
   locale?: chat_locale
   source_channel?: string | null
+  user_uuid?: string | null
   chat?: {
     room_uuid?: string | null
     participant_uuid?: string | null
@@ -19,6 +21,7 @@ type session_response = {
   session?: {
     locale?: chat_locale
     source_channel?: string | null
+    user_uuid?: string | null
     chat?: {
       room_uuid?: string | null
       participant_uuid?: string | null
@@ -93,6 +96,16 @@ export default function UserHomeChatBootstrap() {
         return
       }
 
+      post_pwa_debug({
+        event: 'chat_state_room_applied',
+        phase: 'user_home_chat_bootstrap',
+        room_uuid,
+        participant_uuid,
+        user_uuid: session.user_uuid ?? null,
+        source_channel: session.source_channel ?? null,
+        message_count: payload.messages?.length ?? 0,
+      })
+
       set_chat({
         room_uuid,
         participant_uuid,
@@ -146,4 +159,3 @@ export default function UserHomeChatBootstrap() {
 
   return null
 }
-

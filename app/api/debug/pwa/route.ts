@@ -10,6 +10,7 @@ type pwa_debug_body = {
   tier?: unknown
   source_channel?: unknown
   room_uuid?: unknown
+  message_count?: unknown
   message_uuid?: unknown
   notification_route?: unknown
   has_push_subscription?: unknown
@@ -88,6 +89,8 @@ export async function POST(request: Request) {
       tier: string_or_null(body?.tier),
       source_channel: string_or_null(body?.source_channel),
       room_uuid: string_or_null(body?.room_uuid),
+      message_count:
+        typeof body?.message_count === 'number' ? body.message_count : null,
       message_uuid: string_or_null(body?.message_uuid),
       notification_route: string_or_null(body?.notification_route),
       has_push_subscription:

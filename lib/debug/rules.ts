@@ -384,6 +384,7 @@ export function resolve_debug_rule(input: {
     'restore_from_participant_succeeded',
     'restore_from_identity_succeeded',
     'restore_from_one_time_pass_succeeded',
+    'chat_state_room_applied',
   ])
 
   if (input.category === 'pwa' && pwa_problem_events.has(input.event)) {
@@ -549,35 +550,17 @@ export function resolve_debug_rule(input: {
   }
 
   const chat_room_lifecycle = new Set([
-    'chat_room_resolve_started',
-    'chat_room_participant_lookup_started',
-    'chat_room_participant_lookup_failed',
-    'chat_room_participant_lookup_succeeded',
-    'chat_room_create_started',
-    'chat_room_create_failed',
-    'chat_room_create_succeeded',
-    'chat_room_participant_create_started',
-    'chat_room_participant_create_failed',
-    'chat_room_participant_create_succeeded',
-    'chat_room_created',
-    'chat_room_participant_created',
-    'chat_room_user_attached',
-    'chat_room_resolve_succeeded',
-    'chat_room_resolve_failed',
     'chat_messages_fetch_started',
     'chat_messages_fetch_succeeded',
     'chat_messages_fetch_failed',
-    'participant_linked_to_user',
-    'room_uuid_restored',
+    'chat_state_room_applied',
   ])
 
   if (
     input.category === 'chat_room' &&
     chat_room_lifecycle.has(input.event)
   ) {
-    const is_failed =
-      input.event === 'chat_room_resolve_failed' ||
-      input.event.endsWith('_failed')
+    const is_failed = input.event.endsWith('_failed')
 
     return {
       category: 'chat_room',

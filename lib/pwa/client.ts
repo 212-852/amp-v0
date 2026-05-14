@@ -12,6 +12,7 @@ type pwa_debug_payload = {
   tier?: string | null
   source_channel?: string | null
   room_uuid?: string | null
+  message_count?: number | null
   message_uuid?: string | null
   notification_route?: string | null
   has_push_subscription?: boolean | null
