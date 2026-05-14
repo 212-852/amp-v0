@@ -2,8 +2,7 @@ import 'server-only'
 
 import { resolve_initial_chat } from '@/lib/chat/action'
 import {
-  ensure_direct_room_for_visitor,
-  resolve_chat_room,
+  resolve_user_room,
   type chat_channel,
 } from '@/lib/chat/room'
 import { debug_event } from '@/lib/debug'
@@ -44,114 +43,30 @@ function base_debug_payload(input: resolve_browser_session_chat_room_input) {
   }
 }
 
-function alternate_browser_channel(channel: chat_channel): chat_channel | null {
-  if (channel === 'pwa') {
-    return 'web'
-  }
-
-  if (channel === 'web') {
-    return 'pwa'
-  }
-
-  return null
-}
-
-async function resolve_room_with_retry(
-  input: resolve_browser_session_chat_room_input,
-  channel: chat_channel,
-) {
-  const max_attempts = 5
-  let last: Awaited<ReturnType<typeof resolve_chat_room>> | null = null
-
-  for (let attempt = 1; attempt <= max_attempts; attempt += 1) {
-    await ensure_direct_room_for_visitor({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
-      channel,
-    })
-
-    last = await resolve_chat_room({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
-      channel,
-    })
-
-    if (last.ok && last.room.room_uuid && last.room.participant_uuid) {
-      return last
-    }
-
-    await debug_event({
-      category: 'chat_room',
-      event: 'chat_room_resolve_failed',
-      payload: {
-        ...base_debug_payload(input),
-        room_ok: last.ok,
-        participant_uuid: last.room.participant_uuid || null,
-        room_uuid: last.room.room_uuid || null,
-        source_channel: channel,
-        reason: 'resolve_chat_room_attempt_failed',
-        error_code: 'room_or_participant_missing',
-        error_message: `attempt_${attempt}`,
-      },
-    })
-
-    if (attempt < max_attempts) {
-      await new Promise((resolve) => setTimeout(resolve, 120 * attempt))
-    }
-  }
-
-  return last
-}
-
 /**
- * Browser session: ensure direct room exists, resolve participant/room, then
- * load/seed messages via resolve_initial_chat (single chat core path).
+ * Browser session: resolve_user_room (lib/chat/room.ts) then
+ * resolve_initial_chat (messages). No polling or timed retries.
  */
 export async function run_browser_session_chat_room_resolve(
   input: resolve_browser_session_chat_room_input,
 ): Promise<browser_session_chat_snapshot | null> {
   const base = base_debug_payload(input)
 
-  await debug_event({
-    category: 'chat_room',
-    event: 'chat_room_resolve_started',
-    payload: {
-      ...base,
-      reason: 'browser_session',
-    },
-  })
-
   try {
-    let resolved_channel = input.channel
-    let room_probe = await resolve_room_with_retry(input, resolved_channel)
+    const room_core = await resolve_user_room({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid,
+      channel: input.channel,
+      source_channel: input.source_channel,
+      role: input.role,
+      tier: input.tier,
+    })
 
-    if (!room_probe?.ok || !room_probe.room.room_uuid) {
-      const alternate = alternate_browser_channel(input.channel)
-
-      if (alternate) {
-        resolved_channel = alternate
-        room_probe = await resolve_room_with_retry(input, resolved_channel)
-      }
-    }
-
-    if (!room_probe || !room_probe.ok || !room_probe.room.room_uuid) {
-      await debug_event({
-        category: 'chat_room',
-        event: 'chat_room_resolve_failed',
-        payload: {
-          ...base,
-          room_ok: room_probe?.ok ?? false,
-          participant_uuid: room_probe?.room.participant_uuid || null,
-          room_uuid: room_probe?.room.room_uuid || null,
-          source_channel: resolved_channel,
-          reason: 'resolve_chat_room_failed_after_retries',
-          error_code: 'room_or_participant_missing',
-          error_message: 'resolve_chat_room returned no room_uuid',
-        },
-      })
-
+    if (!room_core.ok) {
       return null
     }
+
+    const resolved_channel = room_core.channel
 
     const initial_chat = await resolve_initial_chat({
       visitor_uuid: input.visitor_uuid,
@@ -175,31 +90,14 @@ export async function run_browser_session_chat_room_resolve(
         },
       })
 
-      const snapshot: browser_session_chat_snapshot = {
-        room_uuid: room_probe.room.room_uuid,
-        participant_uuid: room_probe.room.participant_uuid,
-        mode: room_probe.room.mode,
+      return {
+        room_uuid: room_core.room_uuid,
+        participant_uuid: room_core.participant_uuid,
+        mode: room_core.mode,
         is_seeded: false,
         message_count: 0,
         initial_carousel_card_count: 0,
       }
-
-      await debug_event({
-        category: 'chat_room',
-        event: 'chat_room_resolve_succeeded',
-        payload: {
-          visitor_uuid: input.visitor_uuid,
-          user_uuid: input.user_uuid,
-          participant_uuid: room_probe.room.participant_uuid,
-          room_uuid: room_probe.room.room_uuid,
-          source_channel: resolved_channel,
-          role: input.role,
-          tier: input.tier,
-          reason: 'resolve_chat_room_ok_initial_chat_missing',
-        },
-      })
-
-      return snapshot
     }
 
     const initial_carousel_card_count = initial_chat.messages.reduce(
@@ -221,21 +119,6 @@ export async function run_browser_session_chat_room_resolve(
       message_count: initial_chat.messages.length,
       initial_carousel_card_count,
     }
-
-    await debug_event({
-      category: 'chat_room',
-      event: 'chat_room_resolve_succeeded',
-      payload: {
-        visitor_uuid: input.visitor_uuid,
-        user_uuid: input.user_uuid,
-        participant_uuid: initial_chat.room.participant_uuid,
-        room_uuid: initial_chat.room.room_uuid,
-        source_channel: resolved_channel,
-        role: input.role,
-        tier: input.tier,
-        reason: 'resolve_initial_chat_ok',
-      },
-    })
 
     if (input.session_restored && input.user_uuid) {
       await debug_event({

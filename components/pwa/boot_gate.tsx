@@ -59,6 +59,16 @@ function merge_session_json(
   return { ...raw, ...nested } as merged_session
 }
 
+function needs_member_room(session: merged_session | null) {
+  if (!session?.user_uuid) {
+    return false
+  }
+
+  const tier = session.tier
+
+  return tier === 'member' || tier === 'vip'
+}
+
 export function PwaBootProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const [overlay_visible, set_overlay_visible] = useState(false)
@@ -103,6 +113,28 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
         return merge_session_json(raw)
       }
 
+      async function post_resolve_user_room(): Promise<{
+        ok: boolean
+        room_uuid?: string | null
+        participant_uuid?: string | null
+      } | null> {
+        const response = await fetch('/api/chat/room/resolve', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            ...build_session_restore_headers(),
+            'content-type': 'application/json',
+          },
+          body: '{}',
+        })
+
+        return (await response.json().catch(() => null)) as {
+          ok: boolean
+          room_uuid?: string | null
+          participant_uuid?: string | null
+        } | null
+      }
+
       function room_ready(session: merged_session | null) {
         return Boolean(
           session?.chat?.room_uuid && session.chat.participant_uuid,
@@ -120,34 +152,46 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      let boot_ready = false
-
       try {
         let session = await fetch_session()
 
         write_local_visitor_uuid(session?.visitor_uuid ?? null)
 
-        const started_at = Date.now()
+        if (
+          !cancelled &&
+          needs_member_room(session) &&
+          !room_ready(session)
+        ) {
+          const core = await post_resolve_user_room()
 
-        while (!cancelled && !room_ready(session)) {
-          if (Date.now() - started_at >= 20_000) {
+          if (core?.ok && core.room_uuid && core.participant_uuid) {
+            session = await fetch_session()
+            write_local_visitor_uuid(session?.visitor_uuid ?? null)
+          } else if (!cancelled) {
             post_pwa_debug({
               event: 'chat_room_resolve_failed',
               phase: 'pwa_boot_gate',
-              reason: 'boot_gate_timeout',
-              error_code: 'room_or_participant_missing',
-              error_message:
-                'room_uuid and participant_uuid were not restored before timeout',
+              reason: 'post_room_resolve_failed',
+              error_code: 'resolve_user_room_api_failed',
               ...room_payload(session),
               ...build_pwa_diagnostic_payload({}),
             })
-
-            return
           }
+        }
 
-          await new Promise((resolve) => setTimeout(resolve, 500))
-          session = await fetch_session()
-          write_local_visitor_uuid(session?.visitor_uuid ?? null)
+        if (
+          !cancelled &&
+          needs_member_room(session) &&
+          !room_ready(session)
+        ) {
+          post_pwa_debug({
+            event: 'chat_room_resolve_failed',
+            phase: 'pwa_boot_gate',
+            reason: 'room_missing_after_session_and_resolve',
+            error_code: 'room_or_participant_missing',
+            ...room_payload(session),
+            ...build_pwa_diagnostic_payload({}),
+          })
         }
 
         if (!cancelled) {
@@ -155,12 +199,12 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
           await new Promise((resolve) => setTimeout(resolve, 300))
         }
 
-        boot_ready = true
-
         post_pwa_debug({
           event: 'pwa_boot_loading_finished',
           phase: 'pwa_boot_gate',
-          reason: 'room_and_participant_ready',
+          reason: room_ready(session)
+            ? 'room_and_participant_ready'
+            : 'boot_finished_without_member_room',
           ...room_payload(session),
           ...base_diag,
         })
@@ -174,7 +218,7 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
           ...build_pwa_diagnostic_payload({}),
         })
       } finally {
-        if (!cancelled && boot_ready) {
+        if (!cancelled) {
           set_overlay_visible(false)
         }
       }

@@ -1501,3 +1501,174 @@ export async function resolve_admin_reception_send_context(input: {
     },
   }
 }
+
+async function emit_chat_room_resolve_event(
+  event: string,
+  payload: Record<string, unknown>,
+) {
+  await debug_event({
+    category: 'chat_room',
+    event,
+    payload,
+  })
+}
+
+export type resolve_user_room_ok = {
+  ok: true
+  room_uuid: string
+  participant_uuid: string
+  mode: room_mode
+  channel: chat_channel
+  is_new_room: boolean
+}
+
+export type resolve_user_room_outcome =
+  | resolve_user_room_ok
+  | {
+      ok: false
+      reason: string
+      room_uuid: null
+      participant_uuid: null
+    }
+
+/**
+ * Single core: direct user room + participant (visitor/user merge via existing
+ * ensure_direct_room_for_visitor + resolve_chat_room). No polling; no UI.
+ */
+export async function resolve_user_room(input: {
+  visitor_uuid: string | null
+  user_uuid: string | null
+  channel: chat_channel
+  source_channel?: string | null
+  role?: string | null
+  tier?: string | null
+}): Promise<resolve_user_room_outcome> {
+  const visitor_uuid = clean_uuid(input.visitor_uuid)
+  const user_uuid = clean_uuid(input.user_uuid)
+  const source_channel = input.source_channel ?? input.channel
+
+  const base = {
+    visitor_uuid,
+    user_uuid,
+    source_channel,
+    role: input.role ?? null,
+    tier: input.tier ?? null,
+    reason: 'resolve_user_room',
+  }
+
+  if (!visitor_uuid) {
+    await emit_chat_room_resolve_event('chat_room_resolve_failed', {
+      ...base,
+      error_message: 'missing_visitor_uuid',
+    })
+
+    return {
+      ok: false,
+      reason: 'missing_visitor_uuid',
+      room_uuid: null,
+      participant_uuid: null,
+    }
+  }
+
+  await emit_chat_room_resolve_event('chat_room_resolve_started', base)
+  await emit_chat_room_resolve_event(
+    'chat_room_participant_lookup_started',
+    base,
+  )
+
+  const channel_plan: chat_channel[] = [input.channel]
+
+  if (input.channel === 'web') {
+    channel_plan.push('pwa')
+  } else if (input.channel === 'pwa') {
+    channel_plan.push('web')
+  }
+
+  let last_reason = 'resolve_not_ok'
+
+  for (const channel of channel_plan) {
+    await ensure_direct_room_for_visitor({
+      visitor_uuid,
+      user_uuid,
+      channel,
+    })
+
+    const room_result = await resolve_chat_room({
+      visitor_uuid,
+      user_uuid,
+      channel,
+    })
+
+    if (
+      room_result.ok &&
+      room_result.room.room_uuid &&
+      room_result.room.participant_uuid
+    ) {
+      await emit_chat_room_resolve_event(
+        'chat_room_participant_lookup_succeeded',
+        {
+          ...base,
+          channel,
+          room_uuid: room_result.room.room_uuid,
+          participant_uuid: room_result.room.participant_uuid,
+        },
+      )
+
+      if (room_result.is_new_room) {
+        await emit_chat_room_resolve_event('chat_room_created', {
+          ...base,
+          channel,
+          room_uuid: room_result.room.room_uuid,
+        })
+        await emit_chat_room_resolve_event('chat_room_participant_created', {
+          ...base,
+          channel,
+          participant_uuid: room_result.room.participant_uuid,
+        })
+      }
+
+      if (user_uuid) {
+        await emit_chat_room_resolve_event('chat_room_user_attached', {
+          ...base,
+          channel,
+          room_uuid: room_result.room.room_uuid,
+          participant_uuid: room_result.room.participant_uuid,
+        })
+      }
+
+      await emit_chat_room_resolve_event('chat_room_resolve_succeeded', {
+        ...base,
+        channel,
+        room_uuid: room_result.room.room_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+      })
+
+      return {
+        ok: true,
+        room_uuid: room_result.room.room_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+        mode: room_result.room.mode,
+        channel,
+        is_new_room: room_result.is_new_room,
+      }
+    }
+
+    last_reason = room_result.ok
+      ? 'missing_room_or_participant_uuid'
+      : 'resolve_chat_room_not_ok'
+  }
+
+  await emit_chat_room_resolve_event('chat_room_resolve_failed', {
+    ...base,
+    reason: last_reason,
+    room_uuid: null,
+    participant_uuid: null,
+  })
+
+  return {
+    ok: false,
+    reason: last_reason,
+    room_uuid: null,
+    participant_uuid: null,
+  }
+}

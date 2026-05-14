@@ -12,6 +12,28 @@ type debug_payload = {
 }
 
 function allow_discord_debug_category(category: string, event?: string) {
+  const chat_room_resolve_pipeline = new Set([
+    'chat_room_resolve_started',
+    'chat_room_participant_lookup_started',
+    'chat_room_participant_lookup_succeeded',
+    'chat_room_created',
+    'chat_room_participant_created',
+    'chat_room_user_attached',
+    'chat_room_resolve_succeeded',
+    'chat_room_resolve_failed',
+    'participant_linked_to_user',
+    'room_uuid_restored',
+  ])
+
+  if (
+    category === 'chat_room' &&
+    event &&
+    chat_room_resolve_pipeline.has(event) &&
+    control.notify.debug_trace
+  ) {
+    return true
+  }
+
   if (
     category === 'admin_chat' &&
     event === 'support_started_notify_failed'
