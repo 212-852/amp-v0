@@ -67,6 +67,7 @@ import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name, client_source_channel_header_name } from '@/lib/visitor/cookie'
 import { get_session_user } from '@/lib/auth/route'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
+import { mark_participant_last_channel } from '@/lib/chat/presence/action'
 import { resolve_room_subject } from '@/lib/admin/reception/room'
 import {
   create_handoff_memo as create_handoff_memo_core,
@@ -1642,6 +1643,24 @@ async function execute_room_mode_switch(input: {
       ? [confirmation_bundle]
       : [input.incoming_bundle, confirmation_bundle],
   })
+
+  try {
+    await mark_participant_last_channel({
+      room_uuid: chat_room_after_mode.room_uuid,
+      participant_uuid: chat_room_after_mode.participant_uuid,
+      last_channel: chat_room_after_mode.channel,
+    })
+  } catch (persist_error) {
+    console.error('[execute_room_mode_switch] last_channel_update_failed', {
+      room_uuid: chat_room_after_mode.room_uuid,
+      participant_uuid: chat_room_after_mode.participant_uuid,
+      error:
+        persist_error instanceof Error
+          ? persist_error.message
+          : String(persist_error),
+    })
+  }
+
   const archived_messages = [
     ...(archived_incoming?.archived_message
       ? [archived_incoming.archived_message]
@@ -3216,6 +3235,23 @@ export async function handle_chat_message_request(
       phase: 'archive_message_bundles_ok',
     },
   })
+
+  try {
+    await mark_participant_last_channel({
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      last_channel: chat_room.channel,
+    })
+  } catch (persist_error) {
+    console.error('[handle_chat_message_request] last_channel_update_failed', {
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      error:
+        persist_error instanceof Error
+          ? persist_error.message
+          : String(persist_error),
+    })
+  }
 
   await emit_message_send_diagnostic_pair({
     chat_event: 'chat_message_send_finished',

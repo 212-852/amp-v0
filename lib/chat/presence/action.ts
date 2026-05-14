@@ -10,6 +10,7 @@ import {
   is_participant_role,
   resolve_chat_room_list_preview_text,
   type participant_role,
+  type participant_surface_channel,
   type presence_participant,
   type reception_room_card,
   typing_timestamp_is_fresh,
@@ -156,12 +157,35 @@ async function update_participant_presence(input: {
 export async function mark_room_entered(input: {
   room_uuid: string
   participant_uuid: string
+  last_channel?: participant_surface_channel | null
+}) {
+  const patch: Record<string, unknown> = {
+    is_active: true,
+    last_seen_at: new Date().toISOString(),
+  }
+
+  if (input.last_channel) {
+    patch.last_channel = input.last_channel
+  }
+
+  await update_participant_presence({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    patch,
+  })
+}
+
+export async function mark_participant_last_channel(input: {
+  room_uuid: string
+  participant_uuid: string
+  last_channel: participant_surface_channel
 }) {
   await update_participant_presence({
-    ...input,
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
     patch: {
-      is_active: true,
-      last_seen_at: new Date().toISOString(),
+      last_channel: input.last_channel,
+      updated_at: new Date().toISOString(),
     },
   })
 }

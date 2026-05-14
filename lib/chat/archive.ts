@@ -5,6 +5,7 @@ import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import { emit_message_send_diagnostic_pair } from '@/lib/debug/message_send_diagnostic'
+import { mark_participant_last_channel } from '@/lib/chat/presence/action'
 import type { chat_channel } from './room'
 import type { bundle_sender, message_bundle } from './message'
 
@@ -332,6 +333,20 @@ export async function archive_incoming_line_text(
       inserted_room_uuid: row.room_uuid,
       channel: 'line',
     })
+
+    try {
+      await mark_participant_last_channel({
+        room_uuid: sanitized_room_uuid,
+        participant_uuid: sanitized_participant_uuid,
+        last_channel: 'line',
+      })
+    } catch (persist_error) {
+      console.error(
+        '[archive_incoming_line_text] last_channel_update_failed',
+        debug_incoming_line_archive_payload(input, row.message_uuid),
+        persist_error,
+      )
+    }
 
     if (control.debug.chat_room) {
       await debug_event({

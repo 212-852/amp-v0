@@ -12,6 +12,7 @@ type presence_request_body = {
   room_uuid?: unknown
   participant_uuid?: unknown
   action?: unknown
+  last_channel?: unknown
 }
 
 export async function POST(request: Request) {
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
   const context = resolve_presence_mutation_context({
     room_uuid: body?.room_uuid,
     participant_uuid: body?.participant_uuid,
+    last_channel: body?.last_channel,
   })
 
   if (!context.ok) {
@@ -32,7 +34,11 @@ export async function POST(request: Request) {
 
   try {
     if (body?.action === 'enter') {
-      await mark_room_entered(context)
+      await mark_room_entered({
+        room_uuid: context.room_uuid,
+        participant_uuid: context.participant_uuid,
+        last_channel: context.last_channel ?? undefined,
+      })
     } else if (body?.action === 'leave') {
       await mark_room_left(context)
     } else if (body?.action === 'typing_start') {

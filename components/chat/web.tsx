@@ -38,6 +38,7 @@ function post_presence(input: {
   room_uuid: string
   participant_uuid: string
   action: 'enter' | 'leave'
+  last_channel?: 'web' | 'liff' | 'pwa' | 'line'
 }) {
   void fetch('/api/chat/presence', {
     method: 'POST',
@@ -498,6 +499,7 @@ export function WebChat({
       room_uuid,
       participant_uuid,
       action: 'enter',
+      last_channel: session?.source_channel ?? 'web',
     })
 
     return () => {
@@ -507,7 +509,7 @@ export function WebChat({
         action: 'leave',
       })
     }
-  }, [participant_uuid, room_uuid])
+  }, [participant_uuid, room_uuid, session?.source_channel])
 
   useEffect(() => {
     if (!room_uuid) {

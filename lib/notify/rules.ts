@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { control } from '@/lib/config/control'
+import type { notification_primary_channel } from '@/lib/notification/rules'
 
 export type notify_event =
   | {
@@ -289,6 +290,99 @@ export function resolve_push_notification_title(input: {
   }
 
   return { title: '\u904b\u55b6', source: 'fallback' }
+}
+
+export type line_notify_last_channel = 'line' | 'liff' | 'pwa' | 'web' | null
+
+export function normalize_line_notify_last_channel(
+  raw: string | null | undefined,
+): line_notify_last_channel {
+  const t = trim_nonempty(raw)
+
+  if (t === 'line' || t === 'liff' || t === 'pwa' || t === 'web') {
+    return t
+  }
+
+  return null
+}
+
+export function resolve_line_new_chat_should_include_body(input: {
+  primary_channel: notification_primary_channel
+  last_channel: line_notify_last_channel
+}): boolean {
+  if (input.primary_channel !== 'line') {
+    return false
+  }
+
+  return input.last_channel === 'line' || input.last_channel === 'liff'
+}
+
+function trim_line_push_body(value: string, max: number): string {
+  const cleaned = value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+
+  return cleaned.length > max ? `${cleaned.slice(0, max - 1)}\u2026` : cleaned
+}
+
+const line_notify_default_title =
+  '\u65b0\u3057\u3044\u30e1\u30c3\u30bb\u30fc\u30b8\u304c\u3042\u308a\u307e\u3059'
+const line_notify_default_body =
+  '\u30e1\u30c3\u30bb\u30fc\u30b8\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044'
+
+export function resolve_line_new_chat_display_copy(input: {
+  primary_channel: notification_primary_channel
+  last_channel: line_notify_last_channel
+  message_text: string
+}): { title: string; body: string; should_include_body: boolean } {
+  const should = resolve_line_new_chat_should_include_body({
+    primary_channel: input.primary_channel,
+    last_channel: input.last_channel,
+  })
+  const snippet = trim_nonempty(input.message_text)
+
+  if (should && snippet) {
+    return {
+      title: line_notify_default_title,
+      body: trim_line_push_body(snippet, 900),
+      should_include_body: true,
+    }
+  }
+
+  return {
+    title: line_notify_default_title,
+    body: line_notify_default_body,
+    should_include_body: false,
+  }
+}
+
+function trim_trailing_slash(origin: string): string {
+  return origin.replace(/\/+$/, '')
+}
+
+export function resolve_line_new_chat_open_url(input: {
+  last_channel: line_notify_last_channel
+  room_uuid: string | null | undefined
+  app_origin: string
+  liff_id: string
+}): string {
+  const base_raw = trim_nonempty(input.app_origin)
+  const base = trim_trailing_slash(base_raw ?? 'https://app.da-nya.com')
+  const room = trim_nonempty(input.room_uuid ?? null)
+  const user_with_room = room
+    ? `${base}/user?room_uuid=${encodeURIComponent(room)}`
+    : `${base}/user`
+  const liff = trim_nonempty(input.liff_id)
+
+  if (input.last_channel === 'line' || input.last_channel === 'liff') {
+    if (!liff) {
+      return user_with_room
+    }
+
+    return room
+      ? `https://liff.line.me/${liff}?room_uuid=${encodeURIComponent(room)}`
+      : `https://liff.line.me/${liff}`
+  }
+
+  return user_with_room
 }
 
 export function format_support_started_notify_content(

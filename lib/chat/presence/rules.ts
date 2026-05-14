@@ -1,5 +1,23 @@
 export const typing_timeout_ms = 3_000
 
+export type participant_surface_channel = 'web' | 'pwa' | 'liff' | 'line'
+
+export function normalize_participant_surface_channel(
+  raw: unknown,
+): participant_surface_channel | null {
+  if (typeof raw !== 'string') {
+    return null
+  }
+
+  const t = raw.trim().toLowerCase()
+
+  if (t === 'web' || t === 'pwa' || t === 'liff' || t === 'line') {
+    return t
+  }
+
+  return null
+}
+
 export type participant_role =
   | 'user'
   | 'driver'

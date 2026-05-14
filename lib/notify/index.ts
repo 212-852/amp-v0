@@ -11,17 +11,23 @@ import {
 } from './discord'
 import { send_line_push_notify } from './line'
 import { send_push_notify } from './push'
+import { env } from '@/lib/config/env'
+import { next_public_liff_id } from '@/lib/config/line/env'
 import { resolve_chat_external_notification_decision } from '@/lib/notification/rules'
 import {
   load_concierge_recipients,
   load_line_provider_id_for_user,
+  load_participant_last_channel,
   read_requester_display_name,
   type concierge_recipients,
   type notify_recipient,
 } from './recipients'
 import {
   format_support_started_notify_content,
+  normalize_line_notify_last_channel,
   resolve_concierge_targets,
+  resolve_line_new_chat_display_copy,
+  resolve_line_new_chat_open_url,
   resolve_notify_rule,
   should_send_notify,
   type notify_event,
@@ -179,10 +185,36 @@ export async function notify(
       return { deliveries: [] }
     }
 
+    const last_channel_raw = await load_participant_last_channel(
+      event.participant_uuid ?? null,
+    )
+    const last_channel = normalize_line_notify_last_channel(last_channel_raw)
+    const primary = route_decision.primary_channel
+    const display = resolve_line_new_chat_display_copy({
+      primary_channel: primary,
+      last_channel,
+      message_text: event.message,
+    })
+    const app_origin = env.app_url.trim() || 'https://app.da-nya.com'
+    const open_url = resolve_line_new_chat_open_url({
+      last_channel,
+      room_uuid: event.room_uuid,
+      app_origin,
+      liff_id: next_public_liff_id(),
+    })
+
     try {
       await send_line_push_notify({
         line_user_id,
-        message: event.message,
+        user_uuid: event.user_uuid,
+        room_uuid: event.room_uuid,
+        message_uuid: event.message_uuid ?? null,
+        last_channel,
+        open_url,
+        title: display.title,
+        body: display.body,
+        should_include_body: display.should_include_body,
+        selected_route: route,
       })
 
       await notification_route_trace('notification_line_sent', {
@@ -198,6 +230,9 @@ export async function notify(
         skipped_reason: null,
         source_channel: event.source_channel,
         phase: 'new_chat_line',
+        last_channel,
+        should_include_body: display.should_include_body,
+        open_url_exists: open_url.length > 0,
       })
 
       return { deliveries: [{ channel: 'line' }] }
@@ -217,6 +252,9 @@ export async function notify(
         error_message:
           error instanceof Error ? error.message : 'line_push_failed',
         phase: 'new_chat_line',
+        last_channel,
+        should_include_body: display.should_include_body,
+        open_url_exists: open_url.length > 0,
       })
 
       return { deliveries: [] }

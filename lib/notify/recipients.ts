@@ -2,6 +2,7 @@ import 'server-only'
 
 import { is_reception_state } from '@/lib/admin/reception/rules'
 import { supabase } from '@/lib/db/supabase'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 
 export type notify_recipient = {
   user_uuid: string
@@ -53,6 +54,31 @@ export async function load_line_provider_id_for_user(
   return typeof row.provider_id === 'string' && row.provider_id.trim()
     ? row.provider_id.trim()
     : null
+}
+
+export async function load_participant_last_channel(
+  participant_uuid: string | null | undefined,
+): Promise<string | null> {
+  const uuid = clean_uuid(participant_uuid)
+
+  if (!uuid) {
+    return null
+  }
+
+  const result = await supabase
+    .from('participants')
+    .select('last_channel')
+    .eq('participant_uuid', uuid)
+    .maybeSingle()
+
+  if (result.error || !result.data) {
+    return null
+  }
+
+  const row = result.data as { last_channel?: unknown }
+  const raw = row.last_channel
+
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
 }
 
 /**
