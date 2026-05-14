@@ -333,6 +333,8 @@ export function resolve_debug_rule(input: {
     'pwa_beforeinstallprompt_missing',
     'pwa_session_restore_started',
     'pwa_session_restore_succeeded',
+    'pwa_boot_loading_started',
+    'pwa_boot_loading_finished',
     'pwa_user_restore_started',
     'pwa_user_restore_succeeded',
     'pwa_identity_link_started',

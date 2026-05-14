@@ -1026,15 +1026,15 @@ export async function load_user_home_chat() {
   await emit_user_page_debug('render_started', {})
 
   try {
-    const home_chat_channel = await resolve_home_page_browser_chat_channel()
+    let home_chat_channel = await resolve_home_page_browser_chat_channel()
 
-    const chat_context = await resolve_chat_context({
+    let chat_context = await resolve_chat_context({
       channel: home_chat_channel,
     })
-    const visitor_uuid = chat_context.visitor_uuid
-    const user_uuid = chat_context.user_uuid ?? null
-    const source_channel = chat_context.channel
-    const locale = chat_context.locale
+    let visitor_uuid = chat_context.visitor_uuid
+    let user_uuid = chat_context.user_uuid ?? null
+    let source_channel = chat_context.channel
+    let locale = chat_context.locale
 
     await emit_user_page_debug('session_resolved', {
       user_uuid,
@@ -1057,26 +1057,77 @@ export async function load_user_home_chat() {
       return fallback_result
     }
 
-    if (visitor_uuid) {
+    async function ensure_and_resolve_room(): Promise<
+      Awaited<ReturnType<typeof resolve_chat_room>>
+    > {
       await ensure_direct_room_for_visitor({
+        visitor_uuid: visitor_uuid!,
+        user_uuid,
+        channel: source_channel,
+      })
+
+      await emit_user_page_debug('room_resolve_started', {
+        user_uuid,
         visitor_uuid,
+        source_channel,
+        locale,
+      })
+
+      return resolve_chat_room({
+        visitor_uuid: visitor_uuid!,
         user_uuid,
         channel: source_channel,
       })
     }
 
-    await emit_user_page_debug('room_resolve_started', {
-      user_uuid,
-      visitor_uuid,
-      source_channel,
-      locale,
-    })
+    let room_result = await ensure_and_resolve_room()
 
-    const room_result = await resolve_chat_room({
-      visitor_uuid,
-      user_uuid,
-      channel: source_channel,
-    })
+    if (
+      (!room_result.ok || !room_result.room.room_uuid) &&
+      user_uuid &&
+      home_chat_channel === 'web'
+    ) {
+      await emit_user_page_debug('room_resolve_retry_channel', {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: null,
+        participant_uuid: null,
+        source_channel: 'pwa',
+        locale,
+        message_count: 0,
+        has_initial_messages: null,
+        error: {
+          message: 'retry_after_web_channel_room_failed',
+          from_channel: home_chat_channel,
+          to_channel: 'pwa',
+        },
+      })
+
+      home_chat_channel = 'pwa'
+      chat_context = await resolve_chat_context({
+        channel: 'pwa',
+      })
+      visitor_uuid = chat_context.visitor_uuid
+      user_uuid = chat_context.user_uuid ?? null
+      source_channel = chat_context.channel
+      locale = chat_context.locale
+
+      if (!visitor_uuid) {
+        await emit_user_page_debug('render_failed', {
+          user_uuid,
+          visitor_uuid: null,
+          source_channel,
+          locale,
+          error: {
+            message: 'visitor_uuid_missing_after_pwa_retry',
+          },
+        })
+
+        return fallback_result
+      }
+
+      room_result = await ensure_and_resolve_room()
+    }
 
     if (!room_result.ok || !room_result.room.room_uuid) {
       await emit_user_page_debug('render_failed', {

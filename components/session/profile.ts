@@ -26,6 +26,11 @@ export type session_profile_snapshot = {
   user_uuid?: string | null
   source_channel?: 'web' | 'liff' | 'pwa' | 'line'
   pwa_installed?: boolean
+  chat?: {
+    room_uuid?: string | null
+    mode?: string | null
+    message_count?: number | null
+  } | null
 }
 
 export function use_session_profile() {

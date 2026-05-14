@@ -8,9 +8,22 @@ import {
 } from '@/lib/auth/session'
 import { env } from '@/lib/config/env'
 import {
+  client_visitor_header_name,
   resolved_visitor_request_header_name,
   visitor_cookie_name,
 } from '@/lib/visitor/cookie'
+
+function is_valid_visitor_uuid(value: string | null | undefined): value is string {
+  if (!value || typeof value !== 'string') {
+    return false
+  }
+
+  const trimmed = value.trim().toLowerCase()
+
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+    trimmed,
+  )
+}
 
 function read_browser_session_cookie_values(
   visitor_cookie: string | null | undefined,
@@ -50,13 +63,20 @@ function create_response(
   const existing = read_browser_session_cookie_values(
     request.cookies.get(visitor_cookie_name)?.value,
   )
+  const pathname = request.nextUrl.pathname
   const should_create_guest_visitor =
-    !existing.visitor_uuid &&
-    (request.nextUrl.pathname === '/' ||
-      request.nextUrl.pathname === '/user')
+    !existing.visitor_uuid && (pathname === '/' || pathname === '/user')
+  const client_visitor_header =
+    request.headers.get(client_visitor_header_name)?.trim() ?? null
+  const client_visitor_uuid =
+    should_create_guest_visitor && is_valid_visitor_uuid(client_visitor_header)
+      ? client_visitor_header.toLowerCase()
+      : null
   const visitor_uuid =
     existing.visitor_uuid ??
-    (should_create_guest_visitor ? mint_visitor_uuid() : null)
+    (should_create_guest_visitor
+      ? (client_visitor_uuid ?? mint_visitor_uuid())
+      : null)
 
   if (visitor_uuid) {
     request_headers.set(resolved_visitor_request_header_name, visitor_uuid)
@@ -67,7 +87,7 @@ function create_response(
     )
   }
 
-  if (should_create_guest_visitor) {
+  if (should_create_guest_visitor && visitor_uuid) {
     request_headers.set('x-amp-visitor-cookie-created', '1')
   }
 

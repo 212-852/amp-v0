@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { is_standalone_pwa } from '@/lib/pwa/client'
 import {
   build_session_restore_headers,
   write_local_visitor_uuid,
@@ -17,6 +18,10 @@ export default function SessionBootstrap({
 
   useEffect(() => {
     if (!enabled) {
+      return
+    }
+
+    if (is_standalone_pwa()) {
       return
     }
 

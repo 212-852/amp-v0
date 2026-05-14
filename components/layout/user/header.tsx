@@ -13,6 +13,7 @@ import { usePathname } from 'next/navigation'
 import ConnectModal from '@/components/modal/connect'
 import LocaleModal from '@/components/modal/locale'
 import OverlayRoot from '@/components/overlay/root'
+import { use_pwa_boot_gate } from '@/components/pwa/boot_gate'
 import Breadcrumb from '@/components/shared/breadcrumb'
 import { use_session_profile } from '@/components/session/profile'
 import { build_breadcrumb } from '@/lib/breadcrumb'
@@ -51,11 +52,22 @@ const content = {
     en: 'EN',
     es: 'ES',
   },
+  boot_status: {
+    ja: '読み込み中',
+    en: 'Loading',
+    es: 'Cargando',
+  },
+  boot_connect: {
+    ja: '準備中',
+    en: 'Preparing',
+    es: 'Preparando',
+  },
 }
 
 export default function UserHeader() {
   const pathname = usePathname()
   const { session } = use_session_profile()
+  const { is_boot_overlay_visible } = use_pwa_boot_gate()
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [connect_open, set_connect_open] = useState(false)
@@ -64,9 +76,11 @@ export default function UserHeader() {
 
   const tier = session?.tier ?? 'guest'
   const is_member = tier === 'member'
-  const status_label = is_member
-    ? content.member[render_locale]
-    : content.guest[render_locale]
+  const status_label = is_boot_overlay_visible
+    ? content.boot_status[render_locale]
+    : is_member
+      ? content.member[render_locale]
+      : content.guest[render_locale]
 
   const connected_for_modal =
     (session?.connected_providers?.length ?? 0) > 0
@@ -76,9 +90,11 @@ export default function UserHeader() {
         : []
   const has_linked_provider =
     connected_for_modal.length > 0
-  const connect_label = has_linked_provider
-    ? content.connected[render_locale]
-    : content.connect[render_locale]
+  const connect_label = is_boot_overlay_visible
+    ? content.boot_connect[render_locale]
+    : has_linked_provider
+      ? content.connected[render_locale]
+      : content.connect[render_locale]
   const breadcrumb_items = useMemo(
     () => build_breadcrumb(pathname ?? '/', render_locale),
     [pathname, render_locale],
@@ -139,8 +155,9 @@ export default function UserHeader() {
 
               <button
                 type="button"
+                disabled={is_boot_overlay_visible}
                 onClick={() => set_connect_open(true)}
-                className="rounded-full border border-[#d3c4b8] bg-white px-[11px] py-1 text-[11px] font-medium leading-[1.35] shadow-[0_1px_3px_rgba(42,29,24,0.06)]"
+                className="rounded-full border border-[#d3c4b8] bg-white px-[11px] py-1 text-[11px] font-medium leading-[1.35] shadow-[0_1px_3px_rgba(42,29,24,0.06)] disabled:opacity-50"
               >
                 {connect_label}
               </button>
