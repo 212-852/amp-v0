@@ -273,6 +273,7 @@ async function resolve_session_chat(input: {
   channel: chat_channel
   locale: locale_key
   is_new_visitor: boolean
+  session_restored: boolean
 }): Promise<session_chat_state> {
   try {
     if (input.is_new_visitor) {
@@ -283,7 +284,13 @@ async function resolve_session_chat(input: {
       })
     }
 
-    const initial_chat = await resolve_initial_chat(input)
+    const initial_chat = await resolve_initial_chat({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid,
+      channel: input.channel,
+      locale: input.locale,
+      session_restored: input.session_restored,
+    })
     const initial_carousel_card_count = initial_chat.messages.reduce(
       (count, message) => {
         if (message.bundle.bundle_type !== 'initial_carousel') {
@@ -446,12 +453,14 @@ async function resolve_session_payload() {
     normalized_session.locale ?? locale,
   )
   const chat_channel = session_source_to_chat_channel(session_src)
+  const session_restored = Boolean(session_state.user_uuid)
   const chat = await resolve_session_chat({
     visitor_uuid: visitor.visitor_uuid,
     user_uuid: session_state.user_uuid,
     channel: chat_channel,
     locale: resolved_locale,
     is_new_visitor: visitor.is_new_visitor,
+    session_restored,
   })
   const role = normalized_session.role
   const tier = normalized_session.tier
@@ -467,8 +476,6 @@ async function resolve_session_payload() {
   if (session_state.user_uuid) {
     pwa_installed = await load_user_pwa_installed(session_state.user_uuid)
   }
-
-  const session_restored = Boolean(session_state.user_uuid)
 
   await debug_event({
     category: 'pwa',

@@ -2,10 +2,14 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
+import {
+  fetch_user_profile_json,
+  fetch_users_profile_json_map,
+} from '@/lib/users/profile_json'
 
 /**
- * Single core for operator-facing labels from `admin_profiles` + `users`.
- * Uses `admin_profiles.internal_name` only (never real_name / birth_date).
+ * Single core for operator-facing labels from `users.profile_json` + `users`.
+ * Uses `profile_json.internal_name` only (never real_name / birth_date for display policy paths that require it).
  */
 
 export type admin_operator_display_policy =
@@ -16,11 +20,6 @@ export type admin_operator_display_policy =
 type users_embed_row = {
   user_uuid: string
   display_name: string | null
-}
-
-type admin_profile_row = {
-  user_uuid: string
-  internal_name: string | null
 }
 
 function string_value(value: unknown): string | null {
@@ -81,7 +80,7 @@ function compose_admin_display_label(input: {
 }
 
 /**
- * One saved_by snapshot for handoff memo insert (admin_profiles first).
+ * One saved_by snapshot for handoff memo insert (`users.profile_json.internal_name` first).
  */
 export async function resolve_handoff_memo_saved_by_name(
   user_uuid_raw: string | null | undefined,
@@ -92,18 +91,8 @@ export async function resolve_handoff_memo_saved_by_name(
     return 'Admin'
   }
 
-  const profile_result = await supabase
-    .from('admin_profiles')
-    .select('internal_name')
-    .eq('user_uuid', user_uuid)
-    .maybeSingle()
-
-  const internal =
-    !profile_result.error && profile_result.data
-      ? string_value(
-          (profile_result.data as { internal_name?: unknown }).internal_name,
-        )
-      : null
+  const profile = await fetch_user_profile_json(user_uuid)
+  const internal = string_value(profile.internal_name ?? null)
 
   if (internal) {
     return internal
@@ -129,8 +118,8 @@ export async function resolve_handoff_memo_saved_by_name(
 }
 
 /**
- * Batch resolve for list views: `admin_profiles` then `users`, one pass each.
- * Map keys are lower-case UUIDs (see `clean_uuid`).
+ * Batch resolve for list views: reads `users.profile_json.internal_name` and
+ * falls back to `users.display_name`. Map keys are lower-case UUIDs (see `clean_uuid`).
  */
 export async function batch_resolve_admin_operator_display(
   user_uuids: ReadonlyArray<string | null | undefined>,
@@ -153,21 +142,14 @@ export async function batch_resolve_admin_operator_display(
     return map
   }
 
+  const profile_map = await fetch_users_profile_json_map(cleaned)
   const internal_by_user = new Map<string, string | null>()
 
-  const profile_result = await supabase
-    .from('admin_profiles')
-    .select('user_uuid, internal_name')
-    .in('user_uuid', cleaned)
-
-  if (!profile_result.error) {
-    for (const raw of (profile_result.data ?? []) as admin_profile_row[]) {
-      const uuid = clean_uuid(raw.user_uuid)
-
-      if (uuid) {
-        internal_by_user.set(uuid, string_value(raw.internal_name))
-      }
-    }
+  for (const uuid of cleaned) {
+    internal_by_user.set(
+      uuid,
+      string_value(profile_map.get(uuid)?.internal_name ?? null),
+    )
   }
 
   const users_result = await supabase

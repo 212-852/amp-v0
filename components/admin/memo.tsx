@@ -131,27 +131,41 @@ export default function AdminHandoffMemo({
           <div className="max-h-[32svh] overflow-y-auto pr-1">
             {memos.length > 0 ? (
               <ol className="flex flex-col gap-2">
-                {memos.map((memo_item) => {
+                {memos.map((memo_item, index) => {
                   const item_saved_by = memo_actor_line(memo_item)
                   const item_time = format_time(memo_item.created_at)
+                  const is_latest = index === 0
 
                   return (
-                    <li
-                      key={memo_item.memo_uuid}
-                      className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2"
-                    >
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-neutral-500">
-                        <span>{item_saved_by}</span>
-                        {item_time ? (
-                          <>
-                            <span aria-hidden>{'/'}</span>
-                            <span>{item_time}</span>
-                          </>
-                        ) : null}
-                      </div>
-                      <div className="mt-2 max-h-[22svh] overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-black">
-                        {memo_item.body}
-                      </div>
+                    <li key={memo_item.memo_uuid}>
+                      <details
+                        className="group rounded-lg border border-neutral-200 bg-neutral-50"
+                        open={is_latest}
+                      >
+                        <summary className="cursor-pointer list-none px-3 py-2 [&::-webkit-details-marker]:hidden">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-neutral-500">
+                            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                              <span>{item_saved_by}</span>
+                              {item_time ? (
+                                <>
+                                  <span aria-hidden>{'/'}</span>
+                                  <span>{item_time}</span>
+                                </>
+                              ) : null}
+                            </div>
+                            <ChevronDown
+                              className="h-3.5 w-3.5 shrink-0 text-neutral-500 transition-transform group-open:rotate-180"
+                              strokeWidth={2}
+                              aria-hidden
+                            />
+                          </div>
+                        </summary>
+                        <div className="border-t border-neutral-200 px-3 pb-3 pt-2">
+                          <div className="max-h-[22svh] overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-black">
+                            {memo_item.body}
+                          </div>
+                        </div>
+                      </details>
                     </li>
                   )
                 })}

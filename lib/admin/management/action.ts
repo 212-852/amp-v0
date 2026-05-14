@@ -5,6 +5,7 @@ import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import { deliver_admin_internal_name_updated } from '@/lib/notify'
+import { fetch_user_profile_json, fetch_users_profile_json_map, merge_user_profile_json } from '@/lib/users/profile_json'
 import {
   can_update_admin_profile,
   validate_admin_profile_input,
@@ -35,7 +36,7 @@ export type admin_user_summary = {
 export type admin_profile = {
   real_name: string | null
   birth_date: string | null
-  /** UI-facing internal display name. Stored as admin_profiles.internal_name. */
+  /** UI-facing internal display name. Stored as users.profile_json.internal_name. */
   work_name: string | null
   updated_at: string | null
 }
@@ -52,7 +53,6 @@ export type admin_user_detail = admin_user_summary & {
 type users_row = Record<string, unknown>
 type receptions_row = Record<string, unknown>
 type identities_row = Record<string, unknown>
-type admin_profiles_row = Record<string, unknown>
 
 function string_value(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
@@ -108,6 +108,7 @@ async function fetch_identities_by_user(
     .from('identities')
     .select('provider, provider_id')
     .eq('user_uuid', user_uuid)
+    .neq('provider', 'line_oauth_pending')
 
   if (result.error) {
     return []
@@ -140,27 +141,22 @@ async function fetch_admin_profiles_by_user(
     return map
   }
 
-  const result = await supabase
-    .from('admin_profiles')
-    .select('user_uuid, real_name, birth_date, internal_name, updated_at')
-    .in('user_uuid', user_uuids)
+  const profile_map = await fetch_users_profile_json_map(user_uuids)
 
-  if (result.error) {
-    return map
-  }
+  for (const user_uuid of user_uuids) {
+    const uuid = clean_uuid(user_uuid)
 
-  for (const row of (result.data ?? []) as admin_profiles_row[]) {
-    const user_uuid = row_user_uuid(row)
-
-    if (!user_uuid) {
+    if (!uuid) {
       continue
     }
 
-    map.set(user_uuid, {
-      real_name: string_value(row['real_name']),
-      birth_date: string_value(row['birth_date']),
-      work_name: string_value(row['internal_name']),
-      updated_at: string_value(row['updated_at']),
+    const profile = profile_map.get(uuid) ?? {}
+
+    map.set(uuid, {
+      real_name: profile.real_name ?? null,
+      birth_date: profile.birth_date ?? null,
+      work_name: profile.internal_name ?? null,
+      updated_at: null,
     })
   }
 
@@ -314,8 +310,8 @@ export type update_admin_profile_result =
     }
 
 /**
- * admin_profiles stores real_name, birth_date, and internal_name.
- * users has no internal_name column. Writes use the service-role client.
+ * Admin operator profile fields live in `users.profile_json`
+ * (real_name, birth_date, internal_name). Writes use the service-role client.
  */
 type admin_profile_debug_row = {
   target_user_uuid: string
@@ -592,35 +588,12 @@ export async function update_admin_profile(input: {
     return { ok: false, error: 'admin_not_found' }
   }
 
-  const current_profile_result = await supabase
-    .from('admin_profiles')
-    .select('real_name, birth_date, internal_name')
-    .eq('user_uuid', user_uuid)
-    .maybeSingle()
+  const current_profile = await fetch_user_profile_json(user_uuid)
 
-  if (current_profile_result.error) {
-    const serialized = serialize_service_error(current_profile_result.error)
-
-    await emit_admin_management_debug({
-      event: 'admin_profile_save_failed',
-      base: {
-        ...base_debug({
-          phase: 'load_profile',
-          changed_fields: [],
-        }),
-        ...serialized,
-      },
-    })
-
-    return { ok: false, error: 'target_load_failed' }
-  }
-
-  const current_row =
-    (current_profile_result.data as admin_profiles_row | null) ?? null
   const before = {
-    real_name: string_value(current_row?.['real_name']),
-    birth_date: string_value(current_row?.['birth_date']),
-    work_name: string_value(current_row?.['internal_name']),
+    real_name: string_value(current_profile.real_name ?? null),
+    birth_date: string_value(current_profile.birth_date ?? null),
+    work_name: string_value(current_profile.internal_name ?? null),
   }
 
   const changed_fields = compute_changed_field_names({
@@ -639,21 +612,17 @@ export async function update_admin_profile(input: {
   const old_work_name = before.work_name
   const updated_at = new Date().toISOString()
 
-  const result = await supabase
-    .from('admin_profiles')
-    .upsert({
-      user_uuid,
+  const merge = await merge_user_profile_json({
+    user_uuid,
+    patch: {
       real_name: validation.value.real_name,
       birth_date: validation.value.birth_date,
       internal_name: validation.value.work_name,
-      updated_at,
-      updated_by_user_uuid,
-    })
-    .select('real_name, birth_date, internal_name, updated_at')
-    .maybeSingle()
+    },
+  })
 
-  if (result.error) {
-    const serialized = serialize_service_error(result.error)
+  if (!merge.ok) {
+    const serialized = serialize_service_error(merge.error)
 
     await emit_admin_management_debug({
       event: 'admin_profile_save_failed',
@@ -669,13 +638,12 @@ export async function update_admin_profile(input: {
     return { ok: false, error: 'persist_failed' }
   }
 
-  const row = (result.data ?? {}) as admin_profiles_row
-  const next_work_name = string_value(row['internal_name'])
+  const next_work_name = string_value(validation.value.work_name)
   const profile: admin_profile = {
-    real_name: string_value(row['real_name']),
-    birth_date: string_value(row['birth_date']),
+    real_name: string_value(validation.value.real_name),
+    birth_date: string_value(validation.value.birth_date),
     work_name: next_work_name,
-    updated_at: string_value(row['updated_at']) ?? updated_at,
+    updated_at,
   }
 
   await emit_admin_management_debug({

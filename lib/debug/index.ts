@@ -11,7 +11,14 @@ type debug_payload = {
   data?: Record<string, unknown>
 }
 
-function allow_discord_debug_category(category: string) {
+function allow_discord_debug_category(category: string, event?: string) {
+  if (
+    category === 'admin_chat' &&
+    event === 'support_started_notify_failed'
+  ) {
+    return true
+  }
+
   if (category === 'chat_room' && !control.debug.chat_room) {
     return false
   }
@@ -85,7 +92,7 @@ export async function debug_event(input: {
 
   if (
     !rule.channels.includes('discord') ||
-    !allow_discord_debug_category(rule.category)
+    !allow_discord_debug_category(rule.category, input.event)
   ) {
     return
   }
@@ -106,7 +113,7 @@ export async function debug_event(input: {
 }
 
 export async function debug(payload: debug_payload) {
-  if (!allow_discord_debug_category(payload.category)) {
+  if (!allow_discord_debug_category(payload.category, payload.event)) {
     return
   }
 

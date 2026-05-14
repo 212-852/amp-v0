@@ -32,10 +32,24 @@ export function build_start_link_context(input: {
 }
 
 export function normalize_status_context(input: {
-  link_session_uuid: unknown
+  link_session_uuid?: unknown
+  link_state?: unknown
 }) {
+  const from_state =
+    typeof input.link_state === 'string' ? input.link_state.trim() : ''
+  const from_legacy =
+    typeof input.link_session_uuid === 'string'
+      ? input.link_session_uuid.trim()
+      : ''
+  const link_session_uuid =
+    from_state.length > 0
+      ? from_state
+      : from_legacy.length > 0
+        ? from_legacy
+        : null
+
   return {
-    link_session_uuid: clean_uuid(input.link_session_uuid),
+    link_session_uuid,
   }
 }
 

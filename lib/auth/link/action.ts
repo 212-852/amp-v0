@@ -8,46 +8,32 @@ import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import {
-  normalize_link_status,
+  normalize_identity_link_status,
   validate_link_start_context,
   type auth_link_status,
 } from './rules'
 import { build_start_link_context, type start_link_context } from './context'
 
-type link_session_row = {
-  link_session_uuid: string
+const line_oauth_pending_provider = 'line_oauth_pending'
+
+type pending_line_oauth_identity_row = {
+  link_state: string
+  link_status: string
+  link_expires_at: string
+  link_return_path: string | null
+  link_source_channel: string | null
+  linked_visitor_uuid: string | null
   visitor_uuid: string | null
   user_uuid: string | null
-  source_channel: string
-  provider: string
-  status: string
-  state: string
-  return_path: string | null
-  completed_user_uuid: string | null
-  completed_at: string | null
-  expires_at: string
+  link_completed_user_uuid: string | null
 }
 
 function random_state() {
   return randomBytes(32).toString('base64url')
 }
 
-function expires_at() {
+function link_expires_at_iso() {
   return new Date(Date.now() + 10 * 60 * 1000).toISOString()
-}
-
-function payload_from_row(row: link_session_row, status?: auth_link_status) {
-  return {
-    link_session_uuid: row.link_session_uuid,
-    state_exists: Boolean(row.state),
-    visitor_uuid: row.visitor_uuid,
-    user_uuid: row.user_uuid,
-    completed_user_uuid: row.completed_user_uuid,
-    source_channel: row.source_channel,
-    provider: row.provider,
-    status: status ?? normalize_link_status(row.status, row.expires_at),
-    return_path: row.return_path,
-  }
 }
 
 function link_start_base_payload(context: start_link_context) {
@@ -84,6 +70,23 @@ function serialize_unknown_error(error: unknown): Record<string, unknown> {
   return { error_message: String(error) }
 }
 
+function debug_payload_from_identity_row(
+  row: pending_line_oauth_identity_row,
+  status: auth_link_status,
+) {
+  return {
+    link_state: row.link_state,
+    state_exists: Boolean(row.link_state),
+    visitor_uuid: row.linked_visitor_uuid ?? row.visitor_uuid,
+    user_uuid: row.user_uuid,
+    completed_user_uuid: row.link_completed_user_uuid,
+    source_channel: row.link_source_channel,
+    provider: line_oauth_pending_provider,
+    status,
+    return_path: row.link_return_path,
+  }
+}
+
 async function resolve_visitor_user_uuid_for_link_start(
   visitor_uuid: string | null,
 ): Promise<string | null> {
@@ -106,10 +109,27 @@ async function resolve_visitor_user_uuid_for_link_start(
   return clean_uuid(result.data?.user_uuid as string | undefined)
 }
 
+async function delete_stale_pending_line_oauth_identities(
+  visitor_uuid: string | null,
+) {
+  const v = clean_uuid(visitor_uuid)
+
+  if (!v) {
+    return
+  }
+
+  await supabase
+    .from('identities')
+    .delete()
+    .eq('provider', line_oauth_pending_provider)
+    .eq('linked_visitor_uuid', v)
+    .eq('link_status', 'pending')
+}
+
 export type auth_link_start_success = {
   ok: true
   auth_url: string
-  link_session_uuid: string
+  link_state: string
   status: auth_link_status
   visitor_uuid: string | null
   user_uuid: string | null
@@ -127,9 +147,6 @@ export type auth_link_start_failure = {
   source_channel?: string | null
 }
 
-/**
- * Single entry for POST /api/auth/link/start (guest and PWA allowed; user_uuid optional).
- */
 export async function run_auth_link_start(input: {
   body: Record<string, unknown> | null
   visitor_uuid: string | null
@@ -221,7 +238,7 @@ export async function run_auth_link_start(input: {
   })
 
   try {
-    const output = await create_auth_link_session(context)
+    const output = await create_pending_line_oauth_identity(context)
 
     return {
       ok: true,
@@ -254,13 +271,15 @@ export async function run_auth_link_start(input: {
   }
 }
 
-export async function create_auth_link_session(context: start_link_context) {
+export async function create_pending_line_oauth_identity(
+  context: start_link_context,
+): Promise<{ auth_url: string; link_state: string; status: auth_link_status }> {
   await debug_event({
     category: 'pwa',
     event: 'auth_link_session_insert_started',
     payload: {
       ...link_start_base_payload(context),
-      phase: 'link_session_insert',
+      phase: 'identity_link_pending_insert',
       state_exists: false,
       auth_url_exists: false,
       insert_success: null,
@@ -268,19 +287,29 @@ export async function create_auth_link_session(context: start_link_context) {
     },
   })
 
+  const state = random_state()
+  const expires = link_expires_at_iso()
+  const visitor = clean_uuid(context.visitor_uuid)
+  const placeholder_provider_id = `pending_${randomBytes(16).toString('hex')}`
+
+  await delete_stale_pending_line_oauth_identities(visitor)
+
   const created = await supabase
-    .from('auth_link_sessions')
+    .from('identities')
     .insert({
-      visitor_uuid: context.visitor_uuid,
-      user_uuid: context.user_uuid,
-      source_channel: context.source_channel,
-      provider: context.provider,
-      state: random_state(),
-      return_path: context.return_path,
-      expires_at: expires_at(),
+      user_uuid: null,
+      provider: line_oauth_pending_provider,
+      provider_id: placeholder_provider_id,
+      visitor_uuid: visitor,
+      linked_visitor_uuid: visitor,
+      link_state: state,
+      link_status: 'pending',
+      link_source_channel: context.source_channel,
+      link_return_path: context.return_path,
+      link_expires_at: expires,
     })
     .select(
-      'link_session_uuid, visitor_uuid, user_uuid, source_channel, provider, status, state, return_path, completed_user_uuid, completed_at, expires_at',
+      'link_state, link_status, link_expires_at, link_return_path, link_source_channel, linked_visitor_uuid, visitor_uuid, user_uuid, link_completed_user_uuid',
     )
     .single()
 
@@ -290,12 +319,12 @@ export async function create_auth_link_session(context: start_link_context) {
       event: 'auth_link_session_insert_failed',
       payload: {
         ...link_start_base_payload(context),
-        phase: 'link_session_insert',
+        phase: 'identity_link_pending_insert',
         state_exists: false,
         auth_url_exists: false,
         insert_success: false,
         redirect_url: null,
-        error_code: created.error.code ?? 'auth_link_insert_failed',
+        error_code: created.error.code ?? 'identity_link_insert_failed',
         error_message: created.error.message,
       },
     })
@@ -303,16 +332,20 @@ export async function create_auth_link_session(context: start_link_context) {
     throw created.error
   }
 
-  const row = created.data as link_session_row
+  const row = created.data as unknown as pending_line_oauth_identity_row
+  const status = normalize_identity_link_status(
+    row.link_status,
+    row.link_expires_at,
+  )
 
   await debug_event({
     category: 'pwa',
     event: 'auth_link_session_insert_succeeded',
     payload: {
       ...link_start_base_payload(context),
-      link_session_uuid: row.link_session_uuid,
-      phase: 'link_session_insert',
-      state_exists: Boolean(row.state),
+      link_state: row.link_state,
+      phase: 'identity_link_pending_insert',
+      state_exists: true,
       auth_url_exists: false,
       insert_success: true,
       redirect_url: null,
@@ -327,9 +360,9 @@ export async function create_auth_link_session(context: start_link_context) {
     event: 'line_auth_url_build_started',
     payload: {
       ...link_start_base_payload(context),
-      link_session_uuid: row.link_session_uuid,
+      link_state: row.link_state,
       phase: 'line_oauth_url',
-      state_exists: Boolean(row.state),
+      state_exists: true,
       auth_url_exists: false,
       insert_success: true,
       redirect_url: null,
@@ -344,9 +377,9 @@ export async function create_auth_link_session(context: start_link_context) {
       event: 'line_auth_url_build_failed',
       payload: {
         ...link_start_base_payload(context),
-        link_session_uuid: row.link_session_uuid,
+        link_state: row.link_state,
         phase: 'line_oauth_url',
-        state_exists: Boolean(row.state),
+        state_exists: true,
         auth_url_exists: false,
         insert_success: true,
         redirect_url: null,
@@ -365,7 +398,7 @@ export async function create_auth_link_session(context: start_link_context) {
     auth_url = build_line_auth_url({
       client_id,
       redirect_uri: callback_url,
-      state: row.state,
+      state: row.link_state,
     }).toString()
   } catch (url_error) {
     await debug_event({
@@ -373,9 +406,9 @@ export async function create_auth_link_session(context: start_link_context) {
       event: 'line_auth_url_build_failed',
       payload: {
         ...link_start_base_payload(context),
-        link_session_uuid: row.link_session_uuid,
+        link_state: row.link_state,
         phase: 'line_oauth_url',
-        state_exists: Boolean(row.state),
+        state_exists: true,
         auth_url_exists: false,
         insert_success: true,
         redirect_url: null,
@@ -393,9 +426,9 @@ export async function create_auth_link_session(context: start_link_context) {
     event: 'line_auth_url_build_succeeded',
     payload: {
       ...link_start_base_payload(context),
-      link_session_uuid: row.link_session_uuid,
+      link_state: row.link_state,
       phase: 'line_oauth_url',
-      state_exists: Boolean(row.state),
+      state_exists: true,
       auth_url_exists: true,
       insert_success: true,
       redirect_url: auth_url,
@@ -406,9 +439,9 @@ export async function create_auth_link_session(context: start_link_context) {
     category: 'pwa',
     event: 'auth_link_session_created',
     payload: {
-      ...payload_from_row(row),
+      ...debug_payload_from_identity_row(row, status),
       is_standalone: context.is_standalone,
-      phase: 'link_session_created',
+      phase: 'identity_link_pending_created',
       auth_url_exists: true,
       insert_success: true,
       redirect_url: auth_url,
@@ -417,58 +450,71 @@ export async function create_auth_link_session(context: start_link_context) {
 
   return {
     auth_url,
-    link_session_uuid: row.link_session_uuid,
-    status: normalize_link_status(row.status, row.expires_at),
+    link_state: row.link_state,
+    status,
   }
 }
 
-export async function find_pending_auth_link_session_by_state(state: string) {
+export async function find_pending_line_oauth_identity_by_state(
+  state: string,
+) {
+  const trimmed = state?.trim()
+
+  if (!trimmed) {
+    return null
+  }
+
   const result = await supabase
-    .from('auth_link_sessions')
+    .from('identities')
     .select(
-      'link_session_uuid, visitor_uuid, user_uuid, source_channel, provider, status, state, return_path, completed_user_uuid, completed_at, expires_at',
+      'link_state, link_status, link_expires_at, link_return_path, link_source_channel, linked_visitor_uuid, visitor_uuid, user_uuid, link_completed_user_uuid',
     )
-    .eq('state', state)
+    .eq('link_state', trimmed)
+    .eq('provider', line_oauth_pending_provider)
     .maybeSingle()
 
   if (result.error) {
     throw result.error
   }
 
-  const row = result.data as link_session_row | null
+  const row = result.data as pending_line_oauth_identity_row | null
 
   if (!row) {
     return null
   }
 
-  const status = normalize_link_status(row.status, row.expires_at)
+  const status = normalize_identity_link_status(
+    row.link_status,
+    row.link_expires_at,
+  )
 
-  if (status === 'expired' && row.status === 'pending') {
+  if (status === 'expired' && row.link_status === 'pending') {
     await supabase
-      .from('auth_link_sessions')
-      .update({ status: 'expired', updated_at: new Date().toISOString() })
-      .eq('link_session_uuid', row.link_session_uuid)
+      .from('identities')
+      .update({ link_status: 'expired', updated_at: new Date().toISOString() })
+      .eq('link_state', trimmed)
+      .eq('provider', line_oauth_pending_provider)
   }
 
   return { row, status }
 }
 
-export async function complete_auth_link_session(input: {
-  link_session_uuid: string
+export async function complete_line_oauth_identity_link(input: {
+  link_state: string
   completed_user_uuid: string
 }) {
   const updated = await supabase
-    .from('auth_link_sessions')
+    .from('identities')
     .update({
-      status: 'completed',
-      completed_user_uuid: input.completed_user_uuid,
-      completed_at: new Date().toISOString(),
+      link_status: 'completed',
+      link_completed_user_uuid: input.completed_user_uuid,
       updated_at: new Date().toISOString(),
     })
-    .eq('link_session_uuid', input.link_session_uuid)
-    .eq('status', 'pending')
+    .eq('link_state', input.link_state)
+    .eq('provider', line_oauth_pending_provider)
+    .eq('link_status', 'pending')
     .select(
-      'link_session_uuid, visitor_uuid, user_uuid, source_channel, provider, status, state, return_path, completed_user_uuid, completed_at, expires_at',
+      'link_state, link_status, link_expires_at, link_return_path, link_source_channel, linked_visitor_uuid, visitor_uuid, user_uuid, link_completed_user_uuid',
     )
     .single()
 
@@ -476,70 +522,86 @@ export async function complete_auth_link_session(input: {
     throw updated.error
   }
 
-  const row = updated.data as link_session_row
+  const row = updated.data as unknown as pending_line_oauth_identity_row
 
   await debug_event({
     category: 'pwa',
     event: 'auth_link_session_completed',
     payload: {
-      ...payload_from_row(row, 'completed'),
-      phase: 'link_session_completed',
+      ...debug_payload_from_identity_row(
+        row,
+        normalize_identity_link_status(row.link_status, row.link_expires_at),
+      ),
+      phase: 'identity_link_completed',
     },
   })
 
   return row
 }
 
-export async function fail_auth_link_session(input: {
-  link_session_uuid: string
+export async function fail_line_oauth_identity_link(input: {
+  link_state: string
   error_code: string
   error_message?: string | null
 }) {
   const updated = await supabase
-    .from('auth_link_sessions')
+    .from('identities')
     .update({
-      status: 'failed',
+      link_status: 'failed',
       updated_at: new Date().toISOString(),
     })
-    .eq('link_session_uuid', input.link_session_uuid)
-    .eq('status', 'pending')
+    .eq('link_state', input.link_state)
+    .eq('provider', line_oauth_pending_provider)
+    .eq('link_status', 'pending')
     .select(
-      'link_session_uuid, visitor_uuid, user_uuid, source_channel, provider, status, state, return_path, completed_user_uuid, completed_at, expires_at',
+      'link_state, link_status, link_expires_at, link_return_path, link_source_channel, linked_visitor_uuid, visitor_uuid, user_uuid, link_completed_user_uuid',
     )
     .maybeSingle()
 
-  const row = updated.data as link_session_row | null
+  const row = updated.data as pending_line_oauth_identity_row | null
 
   await debug_event({
     category: 'pwa',
     event: 'auth_link_session_failed',
     payload: {
       ...(row
-        ? payload_from_row(row, 'failed')
-        : { link_session_uuid: input.link_session_uuid }),
+        ? debug_payload_from_identity_row(
+            row,
+            normalize_identity_link_status(row.link_status, row.link_expires_at),
+          )
+        : { link_state: input.link_state }),
       error_code: input.error_code,
       error_message: input.error_message ?? null,
-      phase: 'link_session_failed',
+      phase: 'identity_link_failed',
     },
   })
 }
 
-export async function get_auth_link_session_status(
-  link_session_uuid: string,
-) {
+export async function get_line_oauth_link_status(link_state: string) {
+  const trimmed = link_state?.trim()
+
+  if (!trimmed) {
+    return {
+      status: 'failed' as auth_link_status,
+      completed_user_uuid: null,
+      return_path: null,
+    }
+  }
+
   const result = await supabase
-    .from('auth_link_sessions')
+    .from('identities')
     .select(
-      'link_session_uuid, visitor_uuid, user_uuid, source_channel, provider, status, state, return_path, completed_user_uuid, completed_at, expires_at',
+      'link_state, link_status, link_expires_at, link_return_path, link_source_channel, linked_visitor_uuid, visitor_uuid, user_uuid, link_completed_user_uuid',
     )
-    .eq('link_session_uuid', link_session_uuid)
+    .eq('link_state', trimmed)
+    .eq('provider', line_oauth_pending_provider)
     .maybeSingle()
 
   if (result.error) {
     throw result.error
   }
 
-  const row = result.data as link_session_row | null
+  const row = result.data as pending_line_oauth_identity_row | null
 
   if (!row) {
     return {
@@ -549,19 +611,97 @@ export async function get_auth_link_session_status(
     }
   }
 
-  const status = normalize_link_status(row.status, row.expires_at)
+  const status = normalize_identity_link_status(
+    row.link_status,
+    row.link_expires_at,
+  )
 
-  if (status === 'expired' && row.status === 'pending') {
+  if (status === 'expired' && row.link_status === 'pending') {
     await supabase
-      .from('auth_link_sessions')
-      .update({ status: 'expired', updated_at: new Date().toISOString() })
-      .eq('link_session_uuid', row.link_session_uuid)
+      .from('identities')
+      .update({ link_status: 'expired', updated_at: new Date().toISOString() })
+      .eq('link_state', trimmed)
+      .eq('provider', line_oauth_pending_provider)
   }
 
   return {
-    status,
-    completed_user_uuid: row.completed_user_uuid,
-    return_path: row.return_path,
+    status: normalize_identity_link_status(
+      row.link_status,
+      row.link_expires_at,
+    ),
+    completed_user_uuid: row.link_completed_user_uuid,
+    return_path: row.link_return_path,
   }
 }
 
+/** @deprecated use create_pending_line_oauth_identity */
+export async function create_auth_link_session(context: start_link_context) {
+  const out = await create_pending_line_oauth_identity(context)
+
+  return {
+    auth_url: out.auth_url,
+    link_session_uuid: out.link_state,
+    status: out.status,
+  }
+}
+
+/** @deprecated */
+export async function find_pending_auth_link_session_by_state(
+  state: string,
+) {
+  const found = await find_pending_line_oauth_identity_by_state(state)
+
+  if (!found) {
+    return null
+  }
+
+  const { row, status } = found
+
+  return {
+    row: {
+      link_session_uuid: row.link_state,
+      visitor_uuid: row.linked_visitor_uuid ?? row.visitor_uuid,
+      user_uuid: row.user_uuid,
+      source_channel: row.link_source_channel ?? 'web',
+      provider: 'line',
+      status: row.link_status,
+      state: row.link_state,
+      return_path: row.link_return_path,
+      completed_user_uuid: row.link_completed_user_uuid,
+      completed_at: null,
+      expires_at: row.link_expires_at,
+    },
+    status,
+  }
+}
+
+/** @deprecated */
+export async function complete_auth_link_session(input: {
+  link_session_uuid: string
+  completed_user_uuid: string
+}) {
+  return complete_line_oauth_identity_link({
+    link_state: input.link_session_uuid,
+    completed_user_uuid: input.completed_user_uuid,
+  })
+}
+
+/** @deprecated */
+export async function fail_auth_link_session(input: {
+  link_session_uuid: string
+  error_code: string
+  error_message?: string | null
+}) {
+  return fail_line_oauth_identity_link({
+    link_state: input.link_session_uuid,
+    error_code: input.error_code,
+    error_message: input.error_message,
+  })
+}
+
+/** @deprecated */
+export async function get_auth_link_session_status(
+  link_session_uuid: string,
+) {
+  return get_line_oauth_link_status(link_session_uuid)
+}

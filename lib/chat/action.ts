@@ -38,7 +38,7 @@ import {
 } from './message'
 import { deliver_line_text_reply } from '@/lib/output/line'
 import type { chat_locale } from './message'
-import { insert_support_started_action } from '@/lib/actions/support_started'
+import { insert_support_started_action, merge_support_started_notify_meta_into_chat_action } from '@/lib/actions/support_started'
 import { public_actions_table_name } from '@/lib/actions/table'
 import { notify } from '@/lib/notify'
 import {
@@ -46,6 +46,7 @@ import {
   normalize_discord_thread_action_id,
 } from '@/lib/notify/discord'
 import { normalize_locale } from '@/lib/locale/action'
+import { fetch_user_profile_json } from '@/lib/users/profile_json'
 import {
   ensure_direct_room_for_visitor,
   parse_room_mode,
@@ -90,6 +91,8 @@ type resolve_initial_chat_input = {
   user_uuid?: string | null
   channel: chat_channel
   locale: chat_locale
+  /** PWA session GET: false when visitor has no user_uuid (do not seed welcome). */
+  session_restored?: boolean | null
   external_room_id?: string | null
   line_reply_token?: string | null
   line_user_id?: string | null
@@ -136,6 +139,42 @@ function make_initial_chat_result(input: {
     messages: input.messages,
     locale: input.locale,
   }
+}
+
+function room_has_duplicate_welcome_body(
+  archived_messages: archived_message[],
+  locale: chat_locale,
+): boolean {
+  const bundles = build_initial_chat_bundles({ locale })
+  const welcome = bundles.find((b) => b.bundle_type === 'welcome')
+
+  if (!welcome || welcome.bundle_type !== 'welcome') {
+    return false
+  }
+
+  const target = welcome.payload.text.trim()
+
+  if (!target) {
+    return false
+  }
+
+  return archived_messages.some((row) => {
+    const bundle = row.bundle
+
+    if (bundle.bundle_type !== 'welcome') {
+      return false
+    }
+
+    if (!('payload' in bundle) || !bundle.payload) {
+      return false
+    }
+
+    const payload = bundle.payload as { text?: unknown }
+    const text =
+      typeof payload.text === 'string' ? payload.text.trim() : ''
+
+    return text === target
+  })
 }
 
 async function chat_action_log(
@@ -482,20 +521,34 @@ export async function resolve_initial_chat(
     const skip_welcome_guest_pwa =
       input.channel === 'pwa' && !input.user_uuid
 
+    const skip_session_restore_failed_pwa =
+      input.channel === 'pwa' && input.session_restored === false
+
+    const duplicate_welcome_body = room_has_duplicate_welcome_body(
+      archived_messages,
+      input.locale,
+    )
+
     const should_seed =
       !room_has_initial_messages &&
       should_seed_initial_messages(archived_messages) &&
       !reopen_guard &&
-      !skip_welcome_guest_pwa
+      !skip_welcome_guest_pwa &&
+      !skip_session_restore_failed_pwa &&
+      !duplicate_welcome_body
 
     if (!should_seed && should_seed_initial_messages(archived_messages)) {
       const skip_reason = skip_welcome_guest_pwa
         ? 'user_uuid_missing'
-        : room_has_initial_messages
-          ? 'room_has_initial_messages'
-          : reopen_guard
-            ? 'reopen_existing_room_with_message_history'
-            : null
+        : skip_session_restore_failed_pwa
+          ? 'session_restore_failed'
+          : duplicate_welcome_body
+            ? 'duplicate_welcome_body'
+            : room_has_initial_messages
+              ? 'room_has_initial_messages'
+              : reopen_guard
+                ? 'reopen_existing_room_with_message_history'
+                : null
 
       if (skip_reason) {
         await debug_event({
@@ -1234,7 +1287,7 @@ async function notify_room_mode_switch(input: {
       action_id: input.action_id,
     })
 
-    const results = await notify(
+    const notify_out = await notify(
       input.mode === 'concierge'
         ? {
             event: 'concierge_requested',
@@ -1258,8 +1311,8 @@ async function notify_room_mode_switch(input: {
       room_uuid: input.room_uuid,
       mode: input.mode,
       category: notify_category,
-      delivery_count: results.length,
-      deliveries: results.map((item) => ({
+      delivery_count: notify_out.deliveries.length,
+      deliveries: notify_out.deliveries.map((item) => ({
         channel: item.channel,
         action_id: item.action_id ?? null,
       })),
@@ -1270,7 +1323,7 @@ async function notify_room_mode_switch(input: {
         ? input.action_id.trim()
         : null
 
-    const discord_delivery = results.find(
+    const discord_delivery = notify_out.deliveries.find(
       (item) => item.channel === 'discord' && item.action_id,
     )
     const next_action_id =
@@ -2097,16 +2150,9 @@ export async function handle_admin_reception_room_opened(
   const subject = await resolve_room_subject(room_uuid)
   const customer_display_name = subject.display_name
 
-  const profile_pick = await supabase
-    .from('admin_profiles')
-    .select('internal_name')
-    .eq('user_uuid', admin_uuid)
-    .maybeSingle()
-
+  const admin_profile_json = await fetch_user_profile_json(admin_uuid)
   const admin_internal_name_raw =
-    typeof profile_pick.data?.internal_name === 'string'
-      ? profile_pick.data.internal_name.trim()
-      : ''
+    admin_profile_json.internal_name?.trim() ?? ''
   const admin_internal_name =
     admin_internal_name_raw.length > 0 ? admin_internal_name_raw : null
 
@@ -2208,7 +2254,7 @@ export async function handle_admin_reception_room_opened(
       },
     })
 
-    void notify({
+    const notify_out = await notify({
       event: 'support_started',
       room_uuid,
       action_uuid,
@@ -2223,27 +2269,27 @@ export async function handle_admin_reception_room_opened(
       discord_thread_action_id,
       source_channel: 'web',
       started_at: created_at,
-    }).catch(async (error) => {
-      console.error('[admin_reception_open] support_started_notify_rejected', {
-        room_uuid,
-        error: error instanceof Error ? error.message : String(error),
-      })
-
-      await debug_event({
-        category: 'admin_chat',
-        event: 'support_started_notify_failed',
-        payload: {
-          room_uuid,
-          action_uuid,
-          ...support_started_debug_participants,
-          notification_route: 'notify_unexpected_rejection',
-          error_code: 'notify_rejected',
-          error_message:
-            error instanceof Error ? error.message : String(error),
-          phase: 'notify_support_started',
-        },
-      })
     })
+
+    const merge_meta = await merge_support_started_notify_meta_into_chat_action(
+      supabase,
+      {
+        action_uuid,
+        notify_meta:
+          notify_out.support_started_meta ?? {
+            outcome: 'skipped',
+            error_message: 'missing_support_started_meta',
+          },
+      },
+    )
+
+    if (!merge_meta.ok) {
+      console.error('[admin_reception_open] support_started_meta_merge_failed', {
+        room_uuid,
+        action_uuid,
+        error: merge_meta.error,
+      })
+    }
   }
 
   return {

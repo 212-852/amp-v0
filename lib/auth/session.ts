@@ -195,8 +195,9 @@ export type restore_visitor_user_link_outcome = {
 }
 
 /**
- * When visitors.user_uuid is null, try identities or completed auth_link_sessions
- * for this visitor_uuid, then persist user_uuid on visitors (single auth core).
+ * When visitors.user_uuid is null, try identities or a completed LINE OAuth
+ * pending link row for this visitor_uuid, then persist user_uuid on visitors
+ * (single auth core).
  */
 export async function restore_visitor_user_link(
   visitor_uuid: string,
@@ -268,6 +269,7 @@ export async function restore_visitor_user_link(
     .from('identities')
     .select('user_uuid')
     .eq('visitor_uuid', trimmed)
+    .neq('provider', 'line_oauth_pending')
     .not('user_uuid', 'is', null)
     .limit(1)
 
@@ -277,37 +279,21 @@ export async function restore_visitor_user_link(
   }
 
   if (!resolved_user) {
-    const link_result = await supabase
-      .from('auth_link_sessions')
-      .select('completed_user_uuid')
-      .eq('visitor_uuid', trimmed)
-      .eq('status', 'completed')
-      .not('completed_user_uuid', 'is', null)
-      .order('completed_at', { ascending: false })
+    const id_link = await supabase
+      .from('identities')
+      .select('link_completed_user_uuid')
+      .eq('linked_visitor_uuid', trimmed)
+      .eq('provider', 'line_oauth_pending')
+      .eq('link_status', 'completed')
+      .not('link_completed_user_uuid', 'is', null)
+      .order('updated_at', { ascending: false })
       .limit(1)
 
-    if (!link_result.error && link_result.data?.length) {
+    if (!id_link.error && id_link.data?.length) {
       resolved_user = clean_uuid(
-        link_result.data[0].completed_user_uuid as string,
+        id_link.data[0].link_completed_user_uuid as string,
       )
       restore_source = 'auth_link_completed'
-    }
-
-    if (!resolved_user) {
-      const fallback = await supabase
-        .from('auth_link_sessions')
-        .select('completed_user_uuid')
-        .eq('visitor_uuid', trimmed)
-        .eq('status', 'completed')
-        .not('completed_user_uuid', 'is', null)
-        .limit(20)
-
-      if (!fallback.error && fallback.data?.length) {
-        resolved_user = clean_uuid(
-          fallback.data[0].completed_user_uuid as string,
-        )
-        restore_source = 'auth_link_completed'
-      }
     }
   }
 

@@ -43,6 +43,14 @@ export function normalize_link_status(
   return 'pending'
 }
 
+/** Same rules as session rows; used for identities.link_status + link_expires_at. */
+export function normalize_identity_link_status(
+  link_status: unknown,
+  link_expires_at?: string | null,
+): auth_link_status {
+  return normalize_link_status(link_status, link_expires_at)
+}
+
 export function normalize_return_path(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null

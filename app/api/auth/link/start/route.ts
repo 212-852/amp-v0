@@ -95,7 +95,8 @@ export async function POST(request: Request) {
         user_uuid: result.user_uuid,
         source_channel: result.source_channel,
         provider: 'line',
-        link_session_uuid: result.link_session_uuid,
+        link_state: result.link_state,
+        link_session_uuid: result.link_state,
         state_exists: true,
         auth_url_exists: true,
         insert_success: true,
@@ -111,7 +112,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       auth_url: result.auth_url,
-      link_session_uuid: result.link_session_uuid,
+      link_state: result.link_state,
+      link_session_uuid: result.link_state,
       status: result.status,
     })
   } catch (error) {

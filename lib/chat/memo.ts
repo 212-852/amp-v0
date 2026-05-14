@@ -4,6 +4,11 @@ import { batch_resolve_admin_operator_display, resolve_handoff_memo_saved_by_nam
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
+import {
+  append_handoff_thread,
+  load_room_concierge_json,
+  save_room_concierge_json,
+} from '@/lib/rooms/concierge_json'
 
 import { can_create_handoff_memo } from './rules'
 import type { handoff_memo } from './handoff'
@@ -26,30 +31,6 @@ export type handoff_memo_debug_context = {
   tier?: string | null
   source_channel?: chat_channel | null
 }
-
-type handoff_memo_row = {
-  memo_uuid: string
-  room_uuid: string
-  body: string
-  saved_by_participant_uuid: string | null
-  saved_by_user_uuid: string | null
-  saved_by_name: string | null
-  saved_by_role: string | null
-  source_channel: string | null
-  created_at: string
-}
-
-const handoff_memo_select = [
-  'memo_uuid',
-  'room_uuid',
-  'body',
-  'saved_by_participant_uuid',
-  'saved_by_user_uuid',
-  'saved_by_name',
-  'saved_by_role',
-  'source_channel',
-  'created_at',
-].join(', ')
 
 function normalize_handoff_memo_body(value: unknown): string {
   if (typeof value !== 'string') {
@@ -146,26 +127,6 @@ async function emit_handoff_memo_debug(input: {
   })
 }
 
-function row_to_handoff_memo(
-  row: handoff_memo_row,
-  saved_by_name_override?: string | null,
-): handoff_memo {
-  return {
-    memo_uuid: row.memo_uuid,
-    room_uuid: row.room_uuid,
-    body: row.body,
-    saved_by_participant_uuid: row.saved_by_participant_uuid,
-    saved_by_user_uuid: row.saved_by_user_uuid,
-    saved_by_name:
-      saved_by_name_override !== undefined
-        ? saved_by_name_override
-        : row.saved_by_name,
-    saved_by_role: row.saved_by_role,
-    source_channel: normalize_source_channel(row.source_channel as chat_channel),
-    created_at: row.created_at,
-  }
-}
-
 async function find_handoff_memo_participant(input: {
   room_uuid: string
   user_uuid: string | null
@@ -205,23 +166,16 @@ export async function list_handoff_memos(input: {
   const phase = 'select_handoff_memos'
 
   try {
-    const result = await supabase
-      .from('chat_handoff_memos')
-      .select(handoff_memo_select)
-      .eq('room_uuid', room_uuid)
-      .order('created_at', { ascending: false })
-
-    if (result.error) {
-      throw result.error
-    }
-
-    const rows = (result.data ?? []) as unknown as handoff_memo_row[]
+    const concierge = await load_room_concierge_json(room_uuid)
+    const threads = Array.isArray(concierge.handoff_threads)
+      ? concierge.handoff_threads
+      : []
     const label_map = await batch_resolve_admin_operator_display(
-      rows.map((row) => row.saved_by_user_uuid),
+      threads.map((row) => row.saved_by_user_uuid),
       'memo_list',
     )
 
-    return rows.map((row) => {
+    return threads.map((row) => {
       const uuid = clean_uuid(row.saved_by_user_uuid)
       const stored = row.saved_by_name?.trim() ?? ''
       const stored_is_placeholder =
@@ -234,7 +188,17 @@ export async function list_handoff_memos(input: {
           ? (label_map.get(uuid) as string)
           : row.saved_by_name
 
-      return row_to_handoff_memo(row, display_saved_by)
+      return {
+        memo_uuid: row.memo_uuid,
+        room_uuid,
+        body: row.body,
+        saved_by_participant_uuid: null,
+        saved_by_user_uuid: row.saved_by_user_uuid,
+        saved_by_name: display_saved_by ?? row.saved_by_name,
+        saved_by_role: row.saved_by_role,
+        source_channel: normalize_source_channel(row.source_channel as chat_channel),
+        created_at: row.created_at,
+      }
     })
   } catch (error) {
     await emit_handoff_memo_debug({
@@ -365,27 +329,56 @@ export async function create_handoff_memo(
   }
 
   try {
-    const result = await supabase
-      .from('chat_handoff_memos')
-      .insert({
-        room_uuid,
+    const created_at = new Date().toISOString()
+    const current = await load_room_concierge_json(room_uuid)
+    const next = append_handoff_thread({
+      current,
+      entry: {
         body,
-        saved_by_participant_uuid,
         saved_by_user_uuid,
         saved_by_name: saved_by_name_for_insert,
         saved_by_role: input.saved_by_role?.trim() || null,
         source_channel,
-      })
-      .select(handoff_memo_select)
-      .single()
-
-    if (result.error) {
-      throw result.error
+        created_at,
+      },
+    })
+    const saved = await save_room_concierge_json({ room_uuid, next })
+    if (!saved.ok) {
+      throw saved.error
     }
 
-    const memo = row_to_handoff_memo(
-      result.data as unknown as handoff_memo_row,
-    )
+    const thread0 = next.handoff_threads?.[0]
+    if (!thread0) {
+      throw new Error('handoff_thread_missing')
+    }
+
+    const room_patch = await supabase
+      .from('rooms')
+      .update({
+        handoff_memo: body,
+        handoff_memo_updated_at: created_at,
+        handoff_memo_updated_by: saved_by_user_uuid,
+        updated_at: created_at,
+      })
+      .eq('room_uuid', room_uuid)
+
+    if (room_patch.error) {
+      throw room_patch.error
+    }
+
+    const memo: handoff_memo = {
+      memo_uuid: thread0.memo_uuid,
+      room_uuid,
+      body: thread0.body,
+      saved_by_participant_uuid,
+      saved_by_user_uuid: thread0.saved_by_user_uuid,
+      saved_by_name: thread0.saved_by_name,
+      saved_by_role: thread0.saved_by_role,
+      source_channel: normalize_source_channel(
+        thread0.source_channel as chat_channel,
+      ),
+      created_at: thread0.created_at,
+    }
 
     await emit_handoff_memo_debug({
       event: 'handoff_memo_save_succeeded',

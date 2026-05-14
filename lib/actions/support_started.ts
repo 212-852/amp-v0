@@ -2,7 +2,10 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { clean_uuid } from '@/lib/db/uuid/payload'
+
 import { public_actions_table_name } from './table'
+import type { support_started_notify_meta } from '@/lib/notify'
 
 export type insert_support_started_action_input = {
   room_uuid: string
@@ -176,4 +179,69 @@ export async function insert_support_started_action(
     created_at: created_at_out,
     insert_payload_keys: Object.keys(inserted_row).sort(),
   }
+}
+
+function parse_meta_json(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) }
+  }
+
+  return {}
+}
+
+/**
+ * Merges `notify/index` support_started delivery outcome into the action row
+ * `meta_json.support_started_notify` (Discord webhook / thread path results).
+ */
+export async function merge_support_started_notify_meta_into_chat_action(
+  client: SupabaseClient,
+  input: {
+    action_uuid: string
+    notify_meta: support_started_notify_meta
+  },
+): Promise<{ ok: true } | { ok: false; error: unknown }> {
+  const action_uuid = clean_uuid(input.action_uuid)
+
+  if (!action_uuid) {
+    return { ok: false, error: new Error('invalid_action_uuid') }
+  }
+
+  const table = public_actions_table_name()
+  const pick = await client
+    .from(table)
+    .select('meta_json')
+    .eq('action_uuid', action_uuid)
+    .maybeSingle()
+
+  if (pick.error) {
+    return { ok: false, error: pick.error }
+  }
+
+  const prev = parse_meta_json(pick.data?.meta_json)
+  const existing_notify =
+    typeof prev.support_started_notify === 'object' &&
+    prev.support_started_notify !== null &&
+    !Array.isArray(prev.support_started_notify)
+      ? (prev.support_started_notify as Record<string, unknown>)
+      : {}
+
+  const next_meta = {
+    ...prev,
+    support_started_notify: {
+      ...existing_notify,
+      ...input.notify_meta,
+      saved_at: new Date().toISOString(),
+    },
+  }
+
+  const updated = await client
+    .from(table)
+    .update({ meta_json: next_meta })
+    .eq('action_uuid', action_uuid)
+
+  if (updated.error) {
+    return { ok: false, error: updated.error }
+  }
+
+  return { ok: true }
 }

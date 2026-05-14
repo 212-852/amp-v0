@@ -31,6 +31,26 @@ export type notify_delivery_result = {
   action_id?: string | null
 }
 
+export type support_started_notify_meta = {
+  outcome: 'skipped' | 'delivered' | 'failed'
+  transport?: string | null
+  http_status?: number | null
+  error_code?: string | null
+  error_message?: string | null
+}
+
+export type notify_run_result = {
+  deliveries: notify_delivery_result[]
+  support_started_meta?: support_started_notify_meta
+}
+
+function support_started_notify_run(
+  deliveries: notify_delivery_result[],
+  meta: support_started_notify_meta,
+): notify_run_result {
+  return { deliveries, support_started_meta: meta }
+}
+
 type personal_delivery_outcome = {
   recipient: notify_recipient
   channel: 'push' | 'line' | 'none'
@@ -40,9 +60,10 @@ type personal_delivery_outcome = {
 
 export async function notify(
   event: notify_event,
-): Promise<notify_delivery_result[]> {
+): Promise<notify_run_result> {
   if (event.event === 'concierge_requested') {
-    return deliver_concierge_requested(event)
+    const deliveries = await deliver_concierge_requested(event)
+    return { deliveries }
   }
 
   if (event.event === 'support_started') {
@@ -68,13 +89,15 @@ export async function notify(
 
   const settled = await Promise.allSettled(deliveries)
 
-  return settled.flatMap((result) => {
+  const flat = settled.flatMap((result) => {
     if (result.status !== 'fulfilled' || !result.value) {
       return []
     }
 
     return [result.value as notify_delivery_result]
   })
+
+  return { deliveries: flat }
 }
 
 async function emit_support_started_admin_chat_debug(
@@ -104,7 +127,7 @@ async function notification_route_trace(
 
 async function deliver_support_started(
   event: Extract<notify_event, { event: 'support_started' }>,
-): Promise<notify_delivery_result[]> {
+): Promise<notify_run_result> {
   const raw_discord_id =
     typeof event.discord_thread_action_id === 'string'
       ? event.discord_thread_action_id.trim()
@@ -154,7 +177,12 @@ async function deliver_support_started(
       },
     )
 
-    return []
+    return support_started_notify_run([], {
+      outcome: 'skipped',
+      transport: 'none',
+      error_code: 'notify_rule_disabled',
+      error_message: 'support_started notify disabled or no channels',
+    })
   }
 
   const gate = await evaluate_support_started_notify_gate({
@@ -176,7 +204,12 @@ async function deliver_support_started(
       },
     )
 
-    return []
+    return support_started_notify_run([], {
+      outcome: 'skipped',
+      transport: 'none',
+      error_code: gate.skip_reason,
+      error_message: `gate:${gate.skip_reason}`,
+    })
   }
 
   const content = format_support_started_notify_content(event)
@@ -204,7 +237,10 @@ async function deliver_support_started(
           },
         )
 
-        return [{ channel: 'discord' }]
+        return support_started_notify_run([{ channel: 'discord' }], {
+          outcome: 'delivered',
+          transport: 'discord_action_webhook',
+        })
       }
 
       await emit_support_started_admin_chat_debug(
@@ -222,7 +258,20 @@ async function deliver_support_started(
         },
       )
 
-      return []
+      return support_started_notify_run([], {
+        outcome: 'failed',
+        transport: 'discord_action_webhook',
+        http_status:
+          typeof webhook_result.http_status === 'number'
+            ? webhook_result.http_status
+            : null,
+        error_code: 'discord_action_webhook_non_ok',
+        error_message:
+          webhook_result.error_text ??
+          (typeof webhook_result.http_status === 'number'
+            ? `http_${webhook_result.http_status}`
+            : 'webhook_post_failed'),
+      })
     }
 
     if (normalized_thread_action_id) {
@@ -253,7 +302,13 @@ async function deliver_support_started(
           },
         )
 
-        return []
+        return support_started_notify_run([], {
+          outcome: 'failed',
+          transport: 'discord_action_thread',
+          error_code: 'discord_thread_sync_failed',
+          error_message:
+            'sync_discord_action_context returned null (reopen or post failed)',
+        })
       }
 
       await emit_support_started_admin_chat_debug(
@@ -264,12 +319,18 @@ async function deliver_support_started(
         },
       )
 
-      return [
+      return support_started_notify_run(
+        [
+          {
+            channel: 'discord',
+            action_id: result.action_id ?? normalized_thread_action_id,
+          },
+        ],
         {
-          channel: 'discord',
-          action_id: result.action_id ?? normalized_thread_action_id,
+          outcome: 'delivered',
+          transport: 'discord_action_thread',
         },
-      ]
+      )
     }
 
     if (raw_discord_id) {
@@ -312,7 +373,10 @@ async function deliver_support_started(
           },
         )
 
-        return [{ channel: 'discord' }]
+        return support_started_notify_run([{ channel: 'discord' }], {
+          outcome: 'delivered',
+          transport: 'notify_wolf_webhook',
+        })
       }
 
       if (sent?.ok === false) {
@@ -328,6 +392,14 @@ async function deliver_support_started(
             phase: 'notify_wolf_webhook',
           },
         )
+
+        return support_started_notify_run([], {
+          outcome: 'failed',
+          transport: 'notify_wolf_webhook',
+          http_status: sent.http_status ?? null,
+          error_code: 'discord_webhook_non_ok',
+          error_message: 'DISCORD_NOTIFY_WEBHOOK_URL returned non-2xx',
+        })
       } else {
         await emit_support_started_admin_chat_debug(
           'support_started_notify_failed',
@@ -340,9 +412,15 @@ async function deliver_support_started(
             phase: 'notify_wolf_webhook',
           },
         )
-      }
 
-      return []
+        return support_started_notify_run([], {
+          outcome: 'failed',
+          transport: 'notify_wolf_webhook',
+          error_code: 'discord_webhook_skipped_or_empty',
+          error_message:
+            'send_discord_notify returned null (missing URL, empty content, or transport skip)',
+        })
+      }
     }
 
     await emit_support_started_admin_chat_debug(
@@ -357,7 +435,13 @@ async function deliver_support_started(
       },
     )
 
-    return []
+    return support_started_notify_run([], {
+      outcome: 'skipped',
+      transport: 'none',
+      error_code: 'no_discord_transport',
+      error_message:
+        'missing DISCORD_ACTION_WEBHOOK_URL, thread action id, and DISCORD_NOTIFY_WEBHOOK_URL',
+    })
   } catch (error) {
     await emit_support_started_admin_chat_debug(
       'support_started_notify_failed',
@@ -369,7 +453,13 @@ async function deliver_support_started(
         phase: 'deliver_support_started',
       },
     )
-    return []
+    return support_started_notify_run([], {
+      outcome: 'failed',
+      transport: null,
+      error_code: 'support_started_notify_exception',
+      error_message:
+        error instanceof Error ? error.message : String(error),
+    })
   }
 }
 
