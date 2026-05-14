@@ -16,6 +16,30 @@ export function resolve_debug_rule(input: {
   event: string
   payload?: Record<string, unknown>
 }): debug_rule {
+  if (input.category === 'chat_realtime') {
+    return {
+      category: 'chat_realtime',
+      level: 'info',
+      channels: [],
+    }
+  }
+
+  if (input.category === 'chat_message') {
+    return {
+      category: 'chat_message',
+      level: 'info',
+      channels: [],
+    }
+  }
+
+  if (input.category === 'notification') {
+    return {
+      category: 'notification',
+      level: 'info',
+      channels: [],
+    }
+  }
+
   if (
     input.event === 'handoff_memo_save_blocked' ||
     input.event === 'handoff_memo_save_failed' ||
@@ -272,14 +296,14 @@ export function resolve_debug_rule(input: {
     'pwa_identity_link_failed',
     'pwa_session_refresh_failed',
     'pwa_link_poll_timeout',
+    'pwa_link_start_request_failed',
+    'pwa_line_auth_redirect_failed',
     'session_channel_mismatch_detected',
     'user_uuid_missing_after_link',
     'push_subscription_save_failed',
-    'notification_push_failed',
-    'notification_line_failed',
   ])
 
-  const pwa_lifecycle_events = new Set([
+  const pwa_discord_lifecycle_events = new Set([
     'pwa_install_menu_clicked',
     'pwa_install_modal_open_started',
     'pwa_install_modal_open_failed',
@@ -314,41 +338,35 @@ export function resolve_debug_rule(input: {
     'auth_link_callback_received',
     'auth_link_session_completed',
     'pwa_line_auth_opened',
+    'pwa_line_auth_redirect_started',
     'pwa_link_poll_started',
     'pwa_link_poll_completed',
+    'pwa_link_start_clicked',
+    'pwa_link_start_request_started',
+    'pwa_link_start_request_succeeded',
     'pwa_session_refresh_started',
     'pwa_session_refresh_succeeded',
     'pwa_reload_triggered',
     'visitor_uuid_reused',
     'visitor_uuid_recreated',
     'user_uuid_restored',
-    'push_subscription_save_started',
-    'push_subscription_save_succeeded',
-    'notification_route_decided',
-    'notification_push_sent',
-    'notification_line_sent',
-    'toast_shown',
+    'welcome_message_skipped',
+    'welcome_message_created',
   ])
 
-  if (
-    (input.category === 'pwa' || input.category === 'notification') &&
-    pwa_problem_events.has(input.event)
-  ) {
+  if (input.category === 'pwa' && pwa_problem_events.has(input.event)) {
     return {
-      category: input.category,
+      category: 'pwa',
       level: 'error',
       channels: ['discord'],
     }
   }
 
-  if (
-    (input.category === 'pwa' || input.category === 'notification') &&
-    pwa_lifecycle_events.has(input.event)
-  ) {
+  if (input.category === 'pwa' && pwa_discord_lifecycle_events.has(input.event)) {
     return {
-      category: input.category,
+      category: 'pwa',
       level: 'info',
-      channels: [],
+      channels: ['discord'],
     }
   }
 

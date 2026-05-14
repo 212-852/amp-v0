@@ -386,6 +386,19 @@ function archive_body_is_outgoing_initial(
   return true
 }
 
+function row_body_suggests_welcome_or_carousel(body: string | null) {
+  if (typeof body !== 'string' || body.length < 8) {
+    return false
+  }
+
+  return (
+    body.includes('"bundle_type":"welcome"') ||
+    body.includes('"bundle_type":"initial_carousel"') ||
+    body.includes('"content_key":"initial.welcome"') ||
+    body.includes('"type":"welcome"')
+  )
+}
+
 export async function has_initial_messages(room_uuid: string) {
   const result = await supabase
     .from('messages')
@@ -396,9 +409,17 @@ export async function has_initial_messages(room_uuid: string) {
     throw result.error
   }
 
-  return ((result.data ?? []) as archive_row[]).some((row) =>
-    archive_body_is_outgoing_initial(parse_archive_body(row.body)),
-  )
+  for (const row of (result.data ?? []) as archive_row[]) {
+    if (row_body_suggests_welcome_or_carousel(row.body)) {
+      return true
+    }
+
+    if (archive_body_is_outgoing_initial(parse_archive_body(row.body))) {
+      return true
+    }
+  }
+
+  return false
 }
 
 type actor_type = 'user' | 'bot' | 'system'

@@ -3,6 +3,7 @@ import { M_PLUS_Rounded_1c } from 'next/font/google'
 import './globals.css'
 import LiffBootstrapLoader from '@/components/session/liff/loader'
 import PwaBootstrap from '@/components/pwa/bootstrap'
+import PwaLinkReturnProbe from '@/components/pwa/link_return_probe'
 
 const rounded = M_PLUS_Rounded_1c({
   subsets: ['latin'],
@@ -30,6 +31,7 @@ export default function RootLayout({
       <body className={rounded.variable}>
         <LiffBootstrapLoader />
         <PwaBootstrap />
+        <PwaLinkReturnProbe />
         {children}
       </body>
     </html>

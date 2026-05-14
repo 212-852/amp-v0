@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { is_line_in_app_browser } from '@/lib/auth/context'
 import {
   ensure_session,
-  get_browser_session_cookie_options,
+  get_visitor_cookie_options,
   infer_source_channel_from_ua,
   visitor_cookie_max_age,
   visitor_cookie_name,
@@ -550,17 +550,21 @@ async function resolve_session_payload() {
       pwa_installed,
     }),
     visitor,
+    session_source_channel: session_src,
   }
 }
 
 async function set_session_response_cookies(input: {
   response: NextResponse
   visitor: browser_session_result
+  session_source_channel: ReturnType<typeof resolve_session_source_channel>
 }) {
   input.response.cookies.set(
     visitor_cookie_name,
     input.visitor.visitor_uuid,
-    get_browser_session_cookie_options(visitor_cookie_max_age),
+    get_visitor_cookie_options(visitor_cookie_max_age, {
+      cross_site_friendly: input.session_source_channel === 'pwa',
+    }),
   )
 }
 
@@ -572,6 +576,7 @@ export async function GET() {
     await set_session_response_cookies({
       response,
       visitor: session.visitor,
+      session_source_channel: session.session_source_channel,
     })
 
     return response

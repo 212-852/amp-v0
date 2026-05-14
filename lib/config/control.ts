@@ -24,17 +24,8 @@ export const control = {
      * Temporary LINE flow trace: when true, only `discord_category_allowlist` reaches Discord.
      */
     use_discord_category_allowlist: true,
-    discord_category_allowlist: [
-      'liff',
-      'line_webhook',
-      'handoff_memo',
-      'admin_management',
-      'admin_chat',
-      'chat_message',
-      'chat_realtime',
-      'pwa',
-      'notification',
-    ],
+    /** PWA investigation: only `pwa` debug traces reach Discord (see lib/debug/rules.ts). */
+    discord_category_allowlist: ['pwa'],
   },
 
   notify: {

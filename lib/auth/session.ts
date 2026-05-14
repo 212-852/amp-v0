@@ -30,6 +30,30 @@ export function get_browser_session_cookie_options(maxAge: number) {
   }
 }
 
+/**
+ * Visitor cookie options for PWA / OAuth return paths where third-party
+ * context may require SameSite=None (production + Secure only).
+ */
+export function get_visitor_cookie_options(
+  maxAge: number,
+  input?: { cross_site_friendly?: boolean },
+) {
+  const base = get_browser_session_cookie_options(maxAge)
+
+  if (
+    input?.cross_site_friendly &&
+    process.env.NODE_ENV === 'production'
+  ) {
+    return {
+      ...base,
+      sameSite: 'none' as const,
+      secure: true,
+    }
+  }
+
+  return base
+}
+
 export type existing_browser_session_cookies = {
   visitor_uuid: string | null
 }

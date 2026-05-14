@@ -474,9 +474,38 @@ export async function resolve_initial_chat(
     const room_has_initial_messages = await has_initial_messages(
       room_result.room.room_uuid,
     )
+    const reopen_guard =
+      (input.channel === 'pwa' || input.channel === 'web') &&
+      !room_result.is_new_room &&
+      archived_messages.length > 0
+
     const should_seed =
       !room_has_initial_messages &&
-      should_seed_initial_messages(archived_messages)
+      should_seed_initial_messages(archived_messages) &&
+      !reopen_guard
+
+    if (!should_seed && should_seed_initial_messages(archived_messages)) {
+      const skip_reason = room_has_initial_messages
+        ? 'room_has_initial_messages'
+        : reopen_guard
+          ? 'reopen_existing_room_with_message_history'
+          : null
+
+      if (skip_reason) {
+        await debug_event({
+          category: 'pwa',
+          event: 'welcome_message_skipped',
+          payload: {
+            reason: skip_reason,
+            room_uuid: room_result.room.room_uuid,
+            visitor_uuid: input.visitor_uuid,
+            user_uuid: input.user_uuid ?? null,
+            source_channel: input.channel,
+            phase: 'resolve_initial_chat',
+          },
+        })
+      }
+    }
     const incoming_line_text = input.incoming_line_text
     const normalized_line_text = normalize_dispatch_text(
       incoming_line_text?.text,
@@ -834,6 +863,18 @@ export async function resolve_initial_chat(
         channel: input.channel,
         is_seeded: true,
         message_count: messages.length,
+      })
+
+      await debug_event({
+        category: 'pwa',
+        event: 'welcome_message_created',
+        payload: {
+          room_uuid: room_result.room.room_uuid,
+          visitor_uuid: input.visitor_uuid,
+          user_uuid: input.user_uuid ?? null,
+          source_channel: input.channel,
+          phase: 'resolve_initial_chat',
+        },
       })
 
       return make_initial_chat_result({

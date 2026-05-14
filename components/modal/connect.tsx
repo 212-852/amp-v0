@@ -17,6 +17,7 @@ import {
   is_standalone_pwa,
   post_pwa_debug,
 } from '@/lib/pwa/client'
+import { pending_line_link_session_storage_key } from '@/lib/pwa/link_return_client'
 import {
   build_session_restore_headers,
   write_local_visitor_uuid,
@@ -307,11 +308,18 @@ export default function ConnectModal({
   }
 
   async function open_line_login() {
+    post_pwa_debug({
+      event: 'pwa_link_start_clicked',
+      phase: 'connect_modal',
+      provider: 'line',
+      ...build_pwa_diagnostic_payload(),
+    })
+
     if (connected_providers.includes('line')) {
       return
     }
 
-    if (is_line_in_app_browser(navigator.userAgent)) {
+    if (is_line_in_app_browser(navigator.userAgent) && !is_standalone_pwa()) {
       const liff_id = process.env.NEXT_PUBLIC_LIFF_ID?.trim()
 
       if (!liff_id) {
@@ -326,10 +334,17 @@ export default function ConnectModal({
     set_line_status('checking')
     clear_poll_timer()
 
-    const auth_window = window.open('', '_blank')
+    const standalone = is_standalone_pwa()
+    const auth_window = standalone ? null : window.open('', '_blank')
+
+    post_pwa_debug({
+      event: 'pwa_link_start_request_started',
+      phase: 'connect_modal',
+      provider: 'line',
+      ...build_pwa_diagnostic_payload(),
+    })
 
     try {
-      const standalone = is_standalone_pwa()
       const session_response = await fetch('/api/session', {
         method: 'GET',
         credentials: 'include',
@@ -366,17 +381,17 @@ export default function ConnectModal({
         throw new Error('link_start_failed')
       }
 
-      set_link_session_uuid(payload.link_session_uuid)
-      poll_started_at_ref.current = Date.now()
-
       post_pwa_debug({
-        event: 'pwa_link_poll_started',
-        phase: 'link_session_poll',
+        event: 'pwa_link_start_request_succeeded',
+        phase: 'connect_modal',
         link_session_uuid: payload.link_session_uuid,
         provider: 'line',
         status: 'pending',
         ...build_pwa_diagnostic_payload(),
       })
+
+      set_link_session_uuid(payload.link_session_uuid)
+      poll_started_at_ref.current = Date.now()
 
       post_pwa_debug({
         event: 'pwa_line_auth_opened',
@@ -387,10 +402,65 @@ export default function ConnectModal({
         ...build_pwa_diagnostic_payload(),
       })
 
+      if (standalone) {
+        try {
+          sessionStorage.setItem(
+            pending_line_link_session_storage_key,
+            payload.link_session_uuid,
+          )
+        } catch (storage_error) {
+          post_pwa_debug({
+            event: 'pwa_line_auth_redirect_failed',
+            phase: 'connect_modal',
+            link_session_uuid: payload.link_session_uuid,
+            provider: 'line',
+            error_code: 'pending_link_session_storage_failed',
+            error_message:
+              storage_error instanceof Error
+                ? storage_error.message
+                : String(storage_error),
+            ...build_pwa_diagnostic_payload(),
+          })
+
+          throw storage_error
+        }
+
+        post_pwa_debug({
+          event: 'pwa_line_auth_redirect_started',
+          phase: 'connect_modal',
+          link_session_uuid: payload.link_session_uuid,
+          provider: 'line',
+          status: 'pending',
+          ...build_pwa_diagnostic_payload(),
+        })
+
+        window.location.href = payload.auth_url
+
+        return
+      }
+
+      post_pwa_debug({
+        event: 'pwa_link_poll_started',
+        phase: 'link_session_poll',
+        link_session_uuid: payload.link_session_uuid,
+        provider: 'line',
+        status: 'pending',
+        ...build_pwa_diagnostic_payload(),
+      })
+
       if (auth_window) {
         auth_window.opener = null
         auth_window.location.href = payload.auth_url
       } else {
+        post_pwa_debug({
+          event: 'pwa_line_auth_redirect_started',
+          phase: 'connect_modal',
+          link_session_uuid: payload.link_session_uuid,
+          provider: 'line',
+          status: 'pending',
+          ...build_pwa_diagnostic_payload(),
+        })
+
         window.location.href = payload.auth_url
       }
 
@@ -398,9 +468,19 @@ export default function ConnectModal({
     } catch (error) {
       auth_window?.close()
       set_line_status('failed')
+
+      post_pwa_debug({
+        event: 'pwa_link_start_request_failed',
+        phase: 'connect_modal',
+        provider: 'line',
+        error_code: 'link_start_failed',
+        error_message: error instanceof Error ? error.message : String(error),
+        ...build_pwa_diagnostic_payload(),
+      })
+
       post_pwa_debug({
         event: 'pwa_identity_link_failed',
-        phase: 'link_start_failed',
+        phase: 'connect_modal',
         provider: 'line',
         error_code: 'link_start_failed',
         error_message: error instanceof Error ? error.message : String(error),

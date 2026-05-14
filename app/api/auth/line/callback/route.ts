@@ -12,7 +12,7 @@ import {
   fetch_line_oauth_profile,
 } from '@/lib/auth/line/oauth'
 import {
-  get_browser_session_cookie_options,
+  get_visitor_cookie_options,
   visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
@@ -175,7 +175,9 @@ export async function GET(request: Request) {
       response.cookies.set(
         visitor_cookie_name,
         access.visitor_uuid,
-        get_browser_session_cookie_options(visitor_cookie_max_age),
+        get_visitor_cookie_options(visitor_cookie_max_age, {
+          cross_site_friendly: true,
+        }),
       )
 
       return response
@@ -270,7 +272,9 @@ export async function GET(request: Request) {
     response.cookies.set(
       visitor_cookie_name,
       access.visitor_uuid,
-      get_browser_session_cookie_options(visitor_cookie_max_age),
+      get_visitor_cookie_options(visitor_cookie_max_age, {
+        cross_site_friendly: true,
+      }),
     )
 
     return response
