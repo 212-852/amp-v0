@@ -539,7 +539,8 @@ async function move_participants_to_room(input: {
   }
 }
 
-async function close_duplicate_room(room_uuid: string) {  const result = await supabase
+async function close_duplicate_room(room_uuid: string) {
+  const result = await supabase
     .from('rooms')
     .update({
       status: 'inactive',
@@ -630,6 +631,29 @@ async function merge_identity_rooms(
   }
 
   if (!user_participant.room_uuid) {
+    if (
+      visitor_participant?.room_uuid &&
+      visitor_participant.participant_uuid !== user_participant.participant_uuid
+    ) {
+      const promoted = await update_user_participant_identity({
+        participant_uuid: visitor_participant.participant_uuid,
+        user_uuid,
+        visitor_uuid: input.visitor_uuid,
+        channel: input.channel,
+      })
+      const orphan_delete = await supabase
+        .from('participants')
+        .delete()
+        .eq('participant_uuid', user_participant.participant_uuid)
+        .eq('role', 'user')
+
+      if (orphan_delete.error) {
+        throw orphan_delete.error
+      }
+
+      return promoted
+    }
+
     return user_participant
   }
 
@@ -726,7 +750,9 @@ async function touch_direct_participant_and_room(
 
   if (!participant_result.data) {
     throw new Error('touch_direct_participant: update returned no row')
-  }  const room_result = await supabase
+  }
+
+  const room_result = await supabase
     .from('rooms')
     .update({
       status: 'active',
@@ -858,7 +884,8 @@ async function find_bot_participant(room_uuid: string) {
     : null
 }
 
-async function create_bot_participant(room_uuid: string) {  const result = await supabase
+async function create_bot_participant(room_uuid: string) {
+  const result = await supabase
     .from('participants')
     .insert(build_bot_participant_insert_row(room_uuid))
     .select(PARTICIPANT_DB_SELECT)

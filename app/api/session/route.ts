@@ -276,13 +276,11 @@ async function resolve_session_chat(input: {
   session_restored: boolean
 }): Promise<session_chat_state> {
   try {
-    if (input.is_new_visitor) {
-      await ensure_direct_room_for_visitor({
-        visitor_uuid: input.visitor_uuid,
-        user_uuid: input.user_uuid,
-        channel: input.channel,
-      })
-    }
+    await ensure_direct_room_for_visitor({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid,
+      channel: input.channel,
+    })
 
     const initial_chat = await resolve_initial_chat({
       visitor_uuid: input.visitor_uuid,

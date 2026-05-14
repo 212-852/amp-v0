@@ -80,11 +80,10 @@ export default async function UserHomeChat({
     <>
       <SessionBootstrap
         enabled={
-          chat_state.messages.length === 0 &&
-          !chat_state.room.room_uuid
+          !chat_state.room.room_uuid && chat_state.messages.length === 0
         }
       />
-      {chat_state.messages.length > 0 ? (
+      {chat_state.room.room_uuid ? (
         <WebChat
           messages={chat_state.messages}
           room_uuid={chat_state.room.room_uuid}

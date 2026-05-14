@@ -63,7 +63,7 @@ import {
 } from './rules'
 import { decide_bot_action } from './bot/rules'
 import { output_chat_bundles } from '@/lib/output'
-import { browser_channel_cookie_name } from '@/lib/visitor/cookie'
+import { browser_channel_cookie_name, client_source_channel_header_name } from '@/lib/visitor/cookie'
 import { get_session_user } from '@/lib/auth/route'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
 import { resolve_room_subject } from '@/lib/admin/reception/room'
@@ -980,6 +980,31 @@ export async function resolve_initial_chat(
   }
 }
 
+async function resolve_home_page_browser_chat_channel(): Promise<chat_channel> {
+  const header_store = await headers()
+  const cookie_store = await cookies()
+  const user_agent = header_store.get('user-agent')
+  const client_raw = header_store
+    .get(client_source_channel_header_name)
+    ?.trim()
+    .toLowerCase()
+
+  if (client_raw === 'liff' || client_raw === 'pwa') {
+    return client_raw === 'liff' ? 'liff' : 'pwa'
+  }
+
+  const browser_raw = cookie_store
+    .get(browser_channel_cookie_name)
+    ?.value?.trim()
+    .toLowerCase()
+
+  if (browser_raw === 'liff' || browser_raw === 'pwa') {
+    return browser_raw === 'liff' ? 'liff' : 'pwa'
+  }
+
+  return session_source_to_chat_channel(infer_source_channel_from_ua(user_agent))
+}
+
 export async function load_user_home_chat() {
   const fallback_room: chat_room = {
     room_uuid: '',
@@ -1001,8 +1026,10 @@ export async function load_user_home_chat() {
   await emit_user_page_debug('render_started', {})
 
   try {
+    const home_chat_channel = await resolve_home_page_browser_chat_channel()
+
     const chat_context = await resolve_chat_context({
-      channel: 'web',
+      channel: home_chat_channel,
     })
     const visitor_uuid = chat_context.visitor_uuid
     const user_uuid = chat_context.user_uuid ?? null
@@ -1030,7 +1057,7 @@ export async function load_user_home_chat() {
       return fallback_result
     }
 
-    if (chat_context.is_new_visitor) {
+    if (visitor_uuid) {
       await ensure_direct_room_for_visitor({
         visitor_uuid,
         user_uuid,
