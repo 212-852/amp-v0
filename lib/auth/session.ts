@@ -191,15 +191,148 @@ export type restore_visitor_user_link_outcome = {
   outcome: 'already_linked' | 'restored' | 'no_match' | 'failed'
   user_uuid: string | null
   restore_source?:
+    | 'visitors_row'
+    | 'participant_by_visitor'
     | 'identities_by_visitor'
-    | 'auth_link_completed'
     | 'one_time_pass_completed'
+    | 'auth_link_completed'
   error_message?: string | null
 }
 
 /**
- * When visitors.user_uuid is null, try identities or a completed PWA LINE
- * one_time_pass for this visitor_uuid, then persist user_uuid on visitors.
+ * User participants + identities visitor link (no visitors table write).
+ */
+async function sync_line_linked_participant_identity_rows(input: {
+  visitor_uuid: string
+  user_uuid: string
+  line_provider_id?: string | null
+}): Promise<void> {
+  const supabase = await get_supabase()
+  const { debug_event } = await import('@/lib/debug')
+  const visitor_uuid = clean_uuid(input.visitor_uuid)
+  const user_uuid = clean_uuid(input.user_uuid)
+  const now = new Date().toISOString()
+  const line_pid = input.line_provider_id?.trim() ?? null
+
+  if (!visitor_uuid || !user_uuid) {
+    return
+  }
+
+  const participant_up = await supabase
+    .from('participants')
+    .update({
+      user_uuid,
+      updated_at: now,
+    })
+    .eq('visitor_uuid', visitor_uuid)
+    .eq('role', 'user')
+
+  if (participant_up.error) {
+    throw participant_up.error
+  }
+
+  await debug_event({
+    category: 'pwa',
+    event: 'participant_user_attached',
+    payload: {
+      visitor_uuid,
+      user_uuid,
+      phase: 'line_link_sync',
+      reason: 'participants_user_uuid_set',
+    },
+  })
+
+  if (line_pid) {
+    const id_line = await supabase
+      .from('identities')
+      .update({
+        visitor_uuid,
+        user_uuid,
+        updated_at: now,
+      })
+      .eq('provider', 'line')
+      .eq('provider_id', line_pid)
+
+    if (id_line.error) {
+      console.error(
+        '[sync_line_linked_participant_identity_rows] identities_line',
+        id_line.error.message,
+      )
+    }
+  }
+
+  const id_visitor_patch = await supabase
+    .from('identities')
+    .update({
+      visitor_uuid,
+      updated_at: now,
+    })
+    .eq('user_uuid', user_uuid)
+    .is('visitor_uuid', null)
+
+  if (id_visitor_patch.error) {
+    console.error(
+      '[sync_line_linked_participant_identity_rows] identities_visitor',
+      id_visitor_patch.error.message,
+    )
+  }
+}
+
+/**
+ * After LINE OAuth success: persist user_uuid on visitors, user participants,
+ * and identities (visitor link). Not identity-only; runs after user_uuid is known.
+ */
+export async function persist_visitor_user_binding_for_line_link(input: {
+  visitor_uuid: string
+  user_uuid: string
+  line_provider_id?: string | null
+}): Promise<void> {
+  const supabase = await get_supabase()
+  const { debug_event } = await import('@/lib/debug')
+  const visitor_uuid = clean_uuid(input.visitor_uuid)
+  const user_uuid = clean_uuid(input.user_uuid)
+  const now = new Date().toISOString()
+
+  if (!visitor_uuid || !user_uuid) {
+    throw new Error('persist_visitor_user_binding_invalid')
+  }
+
+  const visitor_up = await supabase
+    .from('visitors')
+    .update({
+      user_uuid,
+      updated_at: now,
+    })
+    .eq('visitor_uuid', visitor_uuid)
+    .select('visitor_uuid, user_uuid')
+    .maybeSingle()
+
+  if (visitor_up.error) {
+    throw visitor_up.error
+  }
+
+  await debug_event({
+    category: 'pwa',
+    event: 'visitor_user_attached',
+    payload: {
+      visitor_uuid,
+      user_uuid,
+      phase: 'line_link_persist',
+      reason: 'visitors_user_uuid_set',
+    },
+  })
+
+  await sync_line_linked_participant_identity_rows({
+    visitor_uuid,
+    user_uuid,
+    line_provider_id: input.line_provider_id ?? null,
+  })
+}
+
+/**
+ * When visitors.user_uuid is null, resolve user_uuid in priority order:
+ * participants (this visitor) -> identities (this visitor) -> completed
+ * one_time_pass for this visitor, then persist on visitors and sync rows.
  */
 export async function restore_visitor_user_link(
   visitor_uuid: string,
@@ -244,9 +377,23 @@ export async function restore_visitor_user_link(
   )
 
   if (existing_user) {
+    const { debug_event } = await import('@/lib/debug')
+
+    await debug_event({
+      category: 'pwa',
+      event: 'restore_from_visitor_succeeded',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: existing_user,
+        phase: 'restore_visitor_user_link',
+        reason: 'visitors_row_user_uuid_present',
+      },
+    })
+
     return {
       outcome: 'already_linked',
       user_uuid: existing_user,
+      restore_source: 'visitors_row',
     }
   }
 
@@ -265,22 +412,38 @@ export async function restore_visitor_user_link(
 
   let resolved_user: string | null = null
   let restore_source:
+    | 'participant_by_visitor'
     | 'identities_by_visitor'
-    | 'auth_link_completed'
     | 'one_time_pass_completed'
     | null = null
 
-  const id_result = await supabase
-    .from('identities')
+  const part_result = await supabase
+    .from('participants')
     .select('user_uuid')
     .eq('visitor_uuid', trimmed)
-    .neq('provider', 'line_oauth_pending')
+    .eq('role', 'user')
     .not('user_uuid', 'is', null)
+    .order('updated_at', { ascending: false })
     .limit(1)
 
-  if (!id_result.error && id_result.data?.length) {
-    resolved_user = clean_uuid(id_result.data[0].user_uuid as string)
-    restore_source = 'identities_by_visitor'
+  if (!part_result.error && part_result.data?.length) {
+    resolved_user = clean_uuid(part_result.data[0].user_uuid as string)
+    restore_source = 'participant_by_visitor'
+  }
+
+  if (!resolved_user) {
+    const id_result = await supabase
+      .from('identities')
+      .select('user_uuid')
+      .eq('visitor_uuid', trimmed)
+      .not('user_uuid', 'is', null)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+
+    if (!id_result.error && id_result.data?.length) {
+      resolved_user = clean_uuid(id_result.data[0].user_uuid as string)
+      restore_source = 'identities_by_visitor'
+    }
   }
 
   if (!resolved_user) {
@@ -310,7 +473,7 @@ export async function restore_visitor_user_link(
         visitor_uuid: trimmed,
         user_uuid: null,
         phase: 'restore_visitor_user_link',
-        reason: 'identity_user_uuid_not_found',
+        reason: 'restore_sources_exhausted',
         restore_source: null,
       },
     })
@@ -397,6 +560,54 @@ export async function restore_visitor_user_link(
     })
 
     return { outcome: 'failed', user_uuid: null }
+  }
+
+  try {
+    await sync_line_linked_participant_identity_rows({
+      visitor_uuid: trimmed,
+      user_uuid: final_user,
+      line_provider_id: null,
+    })
+  } catch (sync_error) {
+    console.error(
+      '[restore_visitor_user_link] sync_after_restore',
+      sync_error,
+    )
+  }
+
+  if (restore_source === 'participant_by_visitor') {
+    await debug_event({
+      category: 'pwa',
+      event: 'restore_from_participant_succeeded',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: final_user,
+        phase: 'restore_visitor_user_link',
+        restore_source,
+      },
+    })
+  } else if (restore_source === 'identities_by_visitor') {
+    await debug_event({
+      category: 'pwa',
+      event: 'restore_from_identity_succeeded',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: final_user,
+        phase: 'restore_visitor_user_link',
+        restore_source,
+      },
+    })
+  } else if (restore_source === 'one_time_pass_completed') {
+    await debug_event({
+      category: 'pwa',
+      event: 'restore_from_one_time_pass_succeeded',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: final_user,
+        phase: 'restore_visitor_user_link',
+        restore_source,
+      },
+    })
   }
 
   await debug_event({

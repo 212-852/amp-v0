@@ -378,6 +378,12 @@ export function resolve_debug_rule(input: {
     'user_uuid_restored',
     'welcome_message_skipped',
     'welcome_message_created',
+    'visitor_user_attached',
+    'participant_user_attached',
+    'restore_from_visitor_succeeded',
+    'restore_from_participant_succeeded',
+    'restore_from_identity_succeeded',
+    'restore_from_one_time_pass_succeeded',
   ])
 
   if (input.category === 'pwa' && pwa_problem_events.has(input.event)) {

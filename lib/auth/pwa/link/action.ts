@@ -11,6 +11,7 @@ import {
   type auth_link_status,
 } from '@/lib/auth/link/rules'
 import { build_line_auth_url } from '@/lib/auth/line/oauth'
+import { persist_visitor_user_binding_for_line_link } from '@/lib/auth/session'
 import { line_login_channel_id } from '@/lib/config/line/env'
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
@@ -681,6 +682,7 @@ export async function fail_pwa_line_pass(input: {
 export async function complete_pwa_line_pass_after_line_access(input: {
   pass_uuid: string
   completed_user_uuid: string
+  line_provider_id?: string | null
 }) {
   const pass_uuid = clean_uuid(input.pass_uuid)
   const user_uuid = clean_uuid(input.completed_user_uuid)
@@ -719,34 +721,11 @@ export async function complete_pwa_line_pass_after_line_access(input: {
   const visitor_uuid = clean_uuid(row.visitor_uuid)
 
   if (visitor_uuid) {
-    const visitor_update = await supabase
-      .from('visitors')
-      .update({
-        user_uuid,
-        updated_at: now,
-      })
-      .eq('visitor_uuid', visitor_uuid)
-      .is('user_uuid', null)
-      .select('visitor_uuid, user_uuid')
-      .maybeSingle()
-
-    if (visitor_update.error) {
-      await debug_event({
-        category: 'pwa',
-        event: 'pwa_user_restore_failed',
-        payload: {
-          visitor_uuid,
-          user_uuid,
-          phase: 'one_time_pass_completed',
-          reason: 'visitor_user_uuid_persist_failed',
-          restore_source: 'one_time_pass_completed',
-          error_code: visitor_update.error.code ?? null,
-          error_message: visitor_update.error.message,
-        },
-      })
-
-      throw visitor_update.error
-    }
+    await persist_visitor_user_binding_for_line_link({
+      visitor_uuid,
+      user_uuid,
+      line_provider_id: input.line_provider_id ?? null,
+    })
 
     await debug_event({
       category: 'pwa',
@@ -755,7 +734,7 @@ export async function complete_pwa_line_pass_after_line_access(input: {
         visitor_uuid,
         user_uuid,
         phase: 'one_time_pass_completed',
-        reason: 'visitor_user_uuid_persisted',
+        reason: 'visitor_participant_identity_persisted',
         restore_source: 'one_time_pass_completed',
       },
     })
@@ -819,6 +798,7 @@ export async function run_line_callback_for_pwa_one_time_pass(input: {
   await complete_pwa_line_pass_after_line_access({
     pass_uuid: row.pass_uuid,
     completed_user_uuid: access.user_uuid,
+    line_provider_id: input.line_user_id,
   })
 
   return {
