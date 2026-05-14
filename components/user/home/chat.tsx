@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { WebChat } from '@/components/chat/web'
+import UserHomeChatBootstrap from '@/components/user/home/bootstrap'
 import SessionBootstrap from '@/components/session/bootstrap'
 import type { initial_chat_result } from '@/lib/chat/action'
 import { get_session_user, resolve_role_route } from '@/lib/auth/route'
@@ -92,22 +93,7 @@ export default async function UserHomeChat({
           mode={chat_state.room.mode}
         />
       ) : (
-        <section className="px-5 pt-6">
-          <div className="rounded-[20px] bg-white px-5 py-6 text-center shadow-[0_2px_14px_rgba(42,29,24,0.06)]">
-            <p className="text-[16px] font-semibold text-[#2a1d18]">
-              {page_copy.reload_title.ja}
-            </p>
-            <p className="mt-2 text-[13px] text-[#6f5b4d]">
-              {page_copy.reload_body.ja}
-            </p>
-            <a
-              href={pathname}
-              className="mt-4 inline-flex rounded-full bg-[#c9a77d] px-5 py-2 text-[13px] font-semibold text-white"
-            >
-              {page_copy.reload_label.ja}
-            </a>
-          </div>
-        </section>
+        <UserHomeChatBootstrap />
       )}
     </>
   )

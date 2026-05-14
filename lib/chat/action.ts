@@ -1203,8 +1203,33 @@ export async function load_user_home_chat() {
       source_channel,
       locale,
     })
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_messages_fetch_started',
+      payload: {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: room.room_uuid,
+        participant_uuid: room.participant_uuid,
+        source_channel,
+        reason: 'load_user_home_chat',
+      },
+    })
 
     const archived_messages = await load_archived_messages(room.room_uuid)
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_messages_fetch_succeeded',
+      payload: {
+        user_uuid,
+        visitor_uuid,
+        room_uuid: room.room_uuid,
+        participant_uuid: room.participant_uuid,
+        source_channel,
+        message_count: archived_messages.length,
+        reason: 'load_user_home_chat',
+      },
+    })
 
     await emit_user_page_message_fetch_completed(
       {

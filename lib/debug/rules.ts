@@ -564,6 +564,9 @@ export function resolve_debug_rule(input: {
     'chat_room_user_attached',
     'chat_room_resolve_succeeded',
     'chat_room_resolve_failed',
+    'chat_messages_fetch_started',
+    'chat_messages_fetch_succeeded',
+    'chat_messages_fetch_failed',
     'participant_linked_to_user',
     'room_uuid_restored',
   ])
