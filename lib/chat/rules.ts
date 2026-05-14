@@ -3,6 +3,52 @@ import type { message_bundle } from './message'
 import type { room_mode } from './room'
 import type { chat_locale } from './message'
 
+/**
+ * Snapshot fields used to decide whether concierge / human support is active.
+ * Maps product language: support_mode ~= rooms.mode, assigned admin on concierge_json.
+ */
+export type concierge_auto_reply_gate_input = {
+  room_mode: string | null | undefined
+  room_status: string | null | undefined
+  concierge_snapshot?: {
+    assigned_admin_user_uuid?: string | null
+  } | null
+}
+
+export function resolve_concierge_staff_controls_chat(
+  input: concierge_auto_reply_gate_input,
+): boolean {
+  const mode =
+    typeof input.room_mode === 'string' ? input.room_mode.trim().toLowerCase() : ''
+
+  if (mode === 'concierge') {
+    return true
+  }
+
+  const st =
+    typeof input.room_status === 'string'
+      ? input.room_status.trim().toLowerCase()
+      : ''
+
+  if (st === 'active_support') {
+    return true
+  }
+
+  const u = input.concierge_snapshot?.assigned_admin_user_uuid
+
+  if (typeof u === 'string' && u.trim().length > 0) {
+    return true
+  }
+
+  return false
+}
+
+export function should_skip_bot_auto_reply(
+  input: concierge_auto_reply_gate_input,
+): boolean {
+  return resolve_concierge_staff_controls_chat(input)
+}
+
 export function can_switch_to_concierge(input: {
   role: string | null | undefined
   tier: string | null | undefined

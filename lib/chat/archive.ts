@@ -12,6 +12,31 @@ import type { bundle_sender, message_bundle } from './message'
 /** DB table used for chat archive rows (must match Realtime `postgres_changes` table). */
 export const chat_archived_messages_table = 'public.messages'
 
+async function emit_line_inbound_archive_debug(
+  event:
+    | 'line_message_bundle_built'
+    | 'line_archive_started'
+    | 'line_archive_succeeded'
+    | 'line_archive_failed'
+    | 'admin_realtime_message_insert_seen',
+  payload: Record<string, unknown>,
+) {
+  try {
+    await debug_event({
+      category: 'pwa',
+      event,
+      payload: {
+        source_channel: 'line',
+        error_code: null,
+        error_message: null,
+        ...payload,
+      },
+    })
+  } catch {
+    /* observability only */
+  }
+}
+
 async function emit_chat_message_insert_succeeded(input: {
   inserted_table: string
   inserted_message_uuid: string
@@ -269,6 +294,18 @@ export async function archive_incoming_line_text(
       }
     }
 
+    const pre_insert_debug = {
+      ...debug_incoming_line_archive_payload(input),
+      line_user_id_exists: true,
+      message_uuid: null as string | null,
+    }
+
+    await emit_line_inbound_archive_debug('line_message_bundle_built', {
+      ...pre_insert_debug,
+      bundle_type: input.bundle.bundle_type,
+    })
+    await emit_line_inbound_archive_debug('line_archive_started', pre_insert_debug)
+
     const sanitized_user_uuid = clean_uuid(input.user_uuid)
     const sanitized_visitor_uuid = clean_uuid(input.visitor_uuid)
     const sanitized_participant_uuid = clean_uuid(input.participant_uuid)
@@ -327,6 +364,18 @@ export async function archive_incoming_line_text(
 
     const row = result.data as archive_row
 
+    const inserted_debug = {
+      ...debug_incoming_line_archive_payload(input, row.message_uuid),
+      line_user_id_exists: true,
+      message_uuid: row.message_uuid,
+    }
+
+    await emit_line_inbound_archive_debug('line_archive_succeeded', inserted_debug)
+    await emit_line_inbound_archive_debug(
+      'admin_realtime_message_insert_seen',
+      inserted_debug,
+    )
+
     await emit_chat_message_insert_succeeded({
       inserted_table: chat_archived_messages_table,
       inserted_message_uuid: row.message_uuid,
@@ -365,6 +414,16 @@ export async function archive_incoming_line_text(
       message_uuid: row.message_uuid,
     }
   } catch (error) {
+    const e = error as { code?: string; message?: string }
+
+    await emit_line_inbound_archive_debug('line_archive_failed', {
+      ...debug_incoming_line_archive_payload(input),
+      line_user_id_exists: true,
+      message_uuid: null,
+      error_code: e.code ?? null,
+      error_message: e.message ?? null,
+    })
+
     console.error(
       '[archive_incoming_line_text]',
       debug_incoming_line_archive_payload(input),

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
+import { debug_event } from '@/lib/debug'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import {
   resolve_dispatch_locale,
@@ -191,6 +192,25 @@ export async function POST(request: Request) {
         webhook_event_id: event.webhookEventId ?? null,
         delivery_context_redelivery:
           event.deliveryContext?.isRedelivery ?? null,
+      }
+
+      try {
+        await debug_event({
+          category: 'pwa',
+          event: 'line_message_received',
+          payload: {
+            room_uuid: null,
+            participant_uuid: null,
+            user_uuid: null,
+            line_user_id_exists: Boolean(line_user_id),
+            message_uuid: event.message.id,
+            source_channel: 'line',
+            error_code: null,
+            error_message: null,
+          },
+        })
+      } catch {
+        /* observability only */
       }
 
       const dispatch_context = await resolve_line_dispatch_identity({

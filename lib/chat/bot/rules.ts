@@ -104,10 +104,12 @@ function unknown_decision(reason: string): bot_decision {
  * Pure deterministic chatbot decision function.
  *
  * Order:
- *   1. switch_mode keyword (single source via detect_switch_mode)
+ *   1. switch_mode keyword (single source via detect_switch_mode); allowed during concierge
  *   2. exact-match intent words (handoff > cancel > booking > availability > ...)
  *   3. anchored intent phrase patterns
  *   4. unknown (let upstream optionally fall back to AI)
+ *
+ * When concierge_staff_active, deterministic auto-replies (2-3) are skipped; switch_mode (1) still applies.
  *
  * Pure: no DB, no fetch, no archive, no AI, no logging.
  */
@@ -131,6 +133,10 @@ export function decide_bot_action(
       content_key: `room.mode.switch.${switch_mode}`,
       reason: 'switch_mode_keyword',
     }
+  }
+
+  if (input.concierge_staff_active === true) {
+    return unknown_decision('concierge_staff_active')
   }
 
   const normalized = normalize_input_text(text)

@@ -53,4 +53,6 @@ export type bot_decision_input = {
   locale: string
   current_mode: room_mode
   source_channel: chat_channel
+  /** When concierge or human support is active, deterministic bot replies are off. */
+  concierge_staff_active?: boolean
 }

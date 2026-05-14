@@ -66,6 +66,27 @@ export async function resolve_line_dispatch_identity(input: {
         })
         resolved_room = room_result
 
+        if (room_result.ok && room_result.room.room_uuid) {
+          try {
+            await debug_event({
+              category: 'pwa',
+              event: 'line_room_resolved',
+              payload: {
+                room_uuid: room_result.room.room_uuid,
+                participant_uuid: room_result.room.participant_uuid,
+                user_uuid,
+                line_user_id_exists: true,
+                message_uuid: null,
+                source_channel: 'line',
+                error_code: null,
+                error_message: null,
+              },
+            })
+          } catch {
+            /* observability only */
+          }
+        }
+
         if (!room_result.ok) {
           console.error('[line_room_resolve_failed]', {
             user_uuid,

@@ -18,6 +18,7 @@ import {
   has_initial_messages,
   load_archived_messages,
   type archived_message,
+  type archive_incoming_line_text_result,
 } from './archive'
 import {
   web_chat_timeline_visibility,
@@ -47,8 +48,10 @@ import {
   normalize_discord_thread_action_id,
 } from '@/lib/notify/discord'
 import { normalize_locale } from '@/lib/locale/action'
+import { load_room_concierge_json } from '@/lib/rooms/concierge_json'
 import {
   ensure_direct_room_for_visitor,
+  load_room_row,
   parse_room_mode,
   resolve_admin_reception_send_context,
   resolve_chat_room,
@@ -61,6 +64,7 @@ import {
   can_switch_to_concierge,
   resolve_chat_message_action,
   should_seed_initial_messages,
+  should_skip_bot_auto_reply,
 } from './rules'
 import { decide_bot_action } from './bot/rules'
 import { output_chat_bundles } from '@/lib/output'
@@ -86,6 +90,53 @@ export async function list_handoff_memos(input: {
 
 export async function create_handoff_memo(input: create_handoff_memo_input) {
   return create_handoff_memo_core(input)
+}
+
+async function emit_line_flow_debug(
+  event:
+    | 'line_participant_resolved'
+    | 'chat_auto_reply_rule_checked'
+    | 'chat_auto_reply_skipped'
+    | 'concierge_mode_detected',
+  payload: Record<string, unknown>,
+) {
+  try {
+    await debug_event({
+      category: 'pwa',
+      event,
+      payload: {
+        source_channel: 'line',
+        error_code: null,
+        error_message: null,
+        ...payload,
+      },
+    })
+  } catch {
+    /* observability only */
+  }
+}
+
+async function resolve_live_room_staff_gate(room_uuid: string) {
+  try {
+    const room_row = await load_room_row(room_uuid)
+    const concierge_snapshot = await load_room_concierge_json(room_uuid)
+
+    return {
+      staff_controls_chat: should_skip_bot_auto_reply({
+        room_mode: room_row?.mode ?? null,
+        room_status: room_row?.status ?? null,
+        concierge_snapshot,
+      }),
+      room_row,
+      concierge_snapshot,
+    }
+  } catch {
+    return {
+      staff_controls_chat: false,
+      room_row: null,
+      concierge_snapshot: {},
+    }
+  }
 }
 
 type resolve_initial_chat_input = {
@@ -518,6 +569,58 @@ export async function resolve_initial_chat(
       return fallback
     }
 
+    const live_gate = await resolve_live_room_staff_gate(
+      room_result.room.room_uuid,
+    )
+    const mode_for_bot = live_gate.room_row
+      ? parse_room_mode(live_gate.room_row.mode)
+      : room_result.room.mode
+
+    if (input.channel === 'line') {
+      await emit_line_flow_debug('line_participant_resolved', {
+        room_uuid: room_result.room.room_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+        user_uuid: room_result.room.user_uuid,
+        line_user_id_exists: Boolean(input.line_user_id),
+        message_uuid: null,
+      })
+      await emit_line_flow_debug('chat_auto_reply_rule_checked', {
+        room_uuid: room_result.room.room_uuid,
+        participant_uuid: room_result.room.participant_uuid,
+        user_uuid: room_result.room.user_uuid,
+        line_user_id_exists: Boolean(input.line_user_id),
+        message_uuid: null,
+        support_mode: mode_for_bot,
+        assigned_admin_participant_uuid: null,
+        should_auto_reply: !live_gate.staff_controls_chat,
+        skipped_reason: null,
+      })
+      if (live_gate.staff_controls_chat) {
+        await emit_line_flow_debug('chat_auto_reply_skipped', {
+          room_uuid: room_result.room.room_uuid,
+          participant_uuid: room_result.room.participant_uuid,
+          user_uuid: room_result.room.user_uuid,
+          line_user_id_exists: Boolean(input.line_user_id),
+          message_uuid: null,
+          support_mode: mode_for_bot,
+          assigned_admin_participant_uuid: null,
+          should_auto_reply: false,
+          skipped_reason: 'concierge_staff_active',
+        })
+        await emit_line_flow_debug('concierge_mode_detected', {
+          room_uuid: room_result.room.room_uuid,
+          participant_uuid: room_result.room.participant_uuid,
+          user_uuid: room_result.room.user_uuid,
+          line_user_id_exists: Boolean(input.line_user_id),
+          message_uuid: null,
+          support_mode: mode_for_bot,
+          assigned_admin_participant_uuid: null,
+          assigned_admin_user_uuid:
+            live_gate.concierge_snapshot.assigned_admin_user_uuid ?? null,
+        })
+      }
+    }
+
     let archived_messages: archived_message[]
 
     try {
@@ -616,8 +719,9 @@ export async function resolve_initial_chat(
         ? decide_bot_action({
             text: normalized_line_text,
             locale: input.locale,
-            current_mode: room_result.room.mode,
+            current_mode: mode_for_bot,
             source_channel: room_result.room.channel,
+            concierge_staff_active: live_gate.staff_controls_chat,
           })
         : null
     const line_switch_mode =
@@ -647,6 +751,38 @@ export async function resolve_initial_chat(
         )
 
         if (!eligibility.allowed) {
+          if (live_gate.staff_controls_chat) {
+            await archive_input_line_text_for_room({
+              room: room_result.room,
+              locale: input.locale,
+              line_user_id: input.line_user_id,
+              incoming_line_text,
+            })
+            const messages = await load_archived_messages(
+              room_result.room.room_uuid,
+            )
+
+            await emit_chat_action_completed({
+              reason: 'line_link_required_suppressed_concierge',
+              room: room_result.room,
+              channel: input.channel,
+              is_seeded: false,
+              message_count: messages.length,
+              extra: {
+                switch_mode: line_switch_mode,
+                deferred: false,
+              },
+            })
+
+            return make_initial_chat_result({
+              room: room_result.room,
+              is_new_room: room_result.is_new_room,
+              is_seeded: false,
+              messages,
+              locale: input.locale,
+            })
+          }
+
           let reply_status: number | null = null
 
           try {
@@ -707,6 +843,40 @@ export async function resolve_initial_chat(
         mode: line_switch_mode,
         locale: input.locale,
       })
+      const pre_archived = await archive_input_line_text_for_room({
+        room: room_result.room,
+        locale: input.locale,
+        line_user_id: input.line_user_id,
+        incoming_line_text,
+        bundle: incoming_bundle,
+      })
+
+      if (pre_archived?.is_duplicate) {
+        const messages = await load_archived_messages(
+          room_result.room.room_uuid,
+        )
+
+        await emit_chat_action_completed({
+          reason: 'line_duplicate_incoming_skipped_mode_switch',
+          room: room_result.room,
+          channel: input.channel,
+          is_seeded: false,
+          message_count: messages.length,
+          extra: {
+            switch_mode: line_switch_mode,
+            deferred: false,
+          },
+        })
+
+        return make_initial_chat_result({
+          room: room_result.room,
+          is_new_room: room_result.is_new_room,
+          is_seeded: false,
+          messages,
+          locale: input.locale,
+        })
+      }
+
       const confirmation_text = pick_room_mode_notice_text({
         notice:
           line_switch_mode === 'concierge'
@@ -738,6 +908,7 @@ export async function resolve_initial_chat(
         switch_mode: line_switch_mode,
         incoming_bundle,
         incoming_line_text,
+        pre_archived: pre_archived ?? null,
       } as const
 
       schedule_post_reply_switch_mode(post_reply_input)
@@ -805,31 +976,35 @@ export async function resolve_initial_chat(
           })
         }
 
-        const ack_bundles = [
-          build_line_followup_ack_bundle({ locale: input.locale }),
-        ]
-        const outgoing = await archive_message_bundles({
-          room_uuid: room_result.room.room_uuid,
-          participant_uuid: room_result.room.participant_uuid,
-          bot_participant_uuid: room_result.room.bot_participant_uuid,
-          channel: 'line',
-          bundles: ack_bundles,
-        })
+        if (!live_gate.staff_controls_chat) {
+          const ack_bundles = [
+            build_line_followup_ack_bundle({ locale: input.locale }),
+          ]
+          const outgoing = await archive_message_bundles({
+            room_uuid: room_result.room.room_uuid,
+            participant_uuid: room_result.room.participant_uuid,
+            bot_participant_uuid: room_result.room.bot_participant_uuid,
+            channel: 'line',
+            bundles: ack_bundles,
+          })
 
-        await output_chat_bundles({
-          room: room_result.room,
-          channel: 'line',
-          messages: outgoing,
-          line_reply_token: input.line_reply_token,
-          line_user_id: input.line_user_id ?? null,
-        })
+          await output_chat_bundles({
+            room: room_result.room,
+            channel: 'line',
+            messages: outgoing,
+            line_reply_token: input.line_reply_token,
+            line_user_id: input.line_user_id ?? null,
+          })
+        }
 
         const messages = await load_archived_messages(
           room_result.room.room_uuid,
         )
 
         await emit_chat_action_completed({
-          reason: 'line_followup_ack',
+          reason: live_gate.staff_controls_chat
+            ? 'line_concierge_incoming_archived'
+            : 'line_followup_ack',
           room: room_result.room,
           channel: input.channel,
           is_seeded: false,
@@ -853,9 +1028,9 @@ export async function resolve_initial_chat(
         await archive_input_line_text_for_room({
           room: room_result.room,
           locale: input.locale,
-              line_user_id: input.line_user_id,
-              incoming_line_text: input.incoming_line_text,
-            })
+          line_user_id: input.line_user_id,
+          incoming_line_text: input.incoming_line_text,
+        })
       }
 
       const messages = await load_archived_messages(
@@ -882,6 +1057,37 @@ export async function resolve_initial_chat(
     }
 
     try {
+      if (input.channel === 'line' && live_gate.staff_controls_chat) {
+        const archived_incoming_staff = await archive_input_line_text_for_room({
+          room: room_result.room,
+          locale: input.locale,
+          line_user_id: input.line_user_id,
+          incoming_line_text: input.incoming_line_text,
+        })
+        const messages_after_staff = await load_archived_messages(
+          room_result.room.room_uuid,
+        )
+
+        await emit_chat_action_completed({
+          reason: 'line_concierge_seed_suppressed',
+          room: room_result.room,
+          channel: input.channel,
+          is_seeded: false,
+          message_count: messages_after_staff.length,
+          extra: {
+            archived_incoming: Boolean(archived_incoming_staff?.archived_message),
+          },
+        })
+
+        return make_initial_chat_result({
+          room: room_result.room,
+          is_new_room: room_result.is_new_room,
+          is_seeded: false,
+          messages: messages_after_staff,
+          locale: input.locale,
+        })
+      }
+
       if (input.channel === 'line' && !input.line_reply_token?.trim()) {
         await emit_chat_action_completed({
           reason: 'line_seed_skipped_missing_reply_token',
@@ -1514,6 +1720,7 @@ type post_reply_switch_mode_input = {
   incoming_line_text: NonNullable<
     resolve_initial_chat_input['incoming_line_text']
   >
+  pre_archived?: archive_incoming_line_text_result | null
 }
 
 function schedule_post_reply_switch_mode(
@@ -1533,19 +1740,26 @@ async function run_post_reply_switch_mode(
 ): Promise<void> {
   const started_at = Date.now()
 
+  const archived_incoming =
+    input.pre_archived ??
+    (await archive_input_line_text_for_room({
+      room: input.room,
+      locale: input.locale,
+      line_user_id: input.line_user_id,
+      incoming_line_text: input.incoming_line_text,
+      bundle: input.incoming_bundle,
+    }))
+
+  if (!archived_incoming || archived_incoming.is_duplicate) {
+    return
+  }
+
   try {
     await execute_room_mode_switch({
       room: input.room,
       locale: input.locale,
       incoming_bundle: input.incoming_bundle,
-      archive_incoming: () =>
-        archive_input_line_text_for_room({
-          room: input.room,
-          locale: input.locale,
-          line_user_id: input.line_user_id,
-          incoming_line_text: input.incoming_line_text,
-          bundle: input.incoming_bundle,
-        }),
+      archive_incoming: async () => archived_incoming,
       line_reply_token: null,
       line_user_id: input.line_user_id,
       skip_output: true,
@@ -2916,11 +3130,23 @@ export async function handle_chat_message_request(
   }
 
   const locale = normalize_locale(body.locale) as chat_locale
+
+  const web_gate = room_uuid_in
+    ? await resolve_live_room_staff_gate(room_uuid_in)
+    : {
+        staff_controls_chat: false,
+        room_row: null,
+        concierge_snapshot: {},
+      }
+  const web_mode_for_bot = web_gate.room_row
+    ? parse_room_mode(web_gate.room_row.mode)
+    : 'bot'
   const web_bot_decision = decide_bot_action({
     text: text_value,
     locale,
-    current_mode: 'bot',
+    current_mode: web_mode_for_bot,
     source_channel: 'web',
+    concierge_staff_active: web_gate.staff_controls_chat,
   })
   const detected_switch_mode =
     web_bot_decision.action === 'switch_mode'

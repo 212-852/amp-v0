@@ -488,6 +488,17 @@ export function resolve_debug_rule(input: {
     'sw_notification_clicked',
     'sw_notifications_clear_requested',
     'sw_notifications_cleared',
+    'line_message_received',
+    'line_room_resolved',
+    'line_participant_resolved',
+    'line_message_bundle_built',
+    'line_archive_started',
+    'line_archive_succeeded',
+    'line_archive_failed',
+    'admin_realtime_message_insert_seen',
+    'chat_auto_reply_rule_checked',
+    'chat_auto_reply_skipped',
+    'concierge_mode_detected',
   ])
 
   if (
