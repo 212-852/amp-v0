@@ -24,6 +24,8 @@ export type session_profile_snapshot = {
   line_auth_method?: string | null
   visitor_uuid?: string | null
   user_uuid?: string | null
+  room_uuid?: string | null
+  participant_uuid?: string | null
   source_channel?: 'web' | 'liff' | 'pwa' | 'line'
   pwa_installed?: boolean
   chat?: {

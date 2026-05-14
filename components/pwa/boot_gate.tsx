@@ -38,6 +38,8 @@ type merged_session = {
   tier?: string | null
   role?: string | null
   visitor_uuid?: string | null
+  room_uuid?: string | null
+  participant_uuid?: string | null
   chat?: {
     room_uuid?: string | null
     participant_uuid?: string | null
@@ -142,19 +144,27 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
       }
 
       function room_ready(session: merged_session | null) {
-        return Boolean(
-          session?.chat?.room_uuid && session.chat.participant_uuid,
-        )
+        const room_uuid =
+          session?.room_uuid ?? session?.chat?.room_uuid ?? null
+        const participant_uuid =
+          session?.participant_uuid ?? session?.chat?.participant_uuid ?? null
+
+        return Boolean(room_uuid && participant_uuid)
       }
 
       function room_payload(session: merged_session | null) {
+        const room_uuid =
+          session?.room_uuid ?? session?.chat?.room_uuid ?? null
+        const participant_uuid =
+          session?.participant_uuid ?? session?.chat?.participant_uuid ?? null
+
         return {
           visitor_uuid: session?.visitor_uuid ?? read_local_visitor_uuid(),
           user_uuid: session?.user_uuid ?? null,
           role: session?.role ?? null,
           tier: session?.tier ?? null,
-          room_uuid: session?.chat?.room_uuid ?? null,
-          participant_uuid: session?.chat?.participant_uuid ?? null,
+          room_uuid,
+          participant_uuid,
         }
       }
 

@@ -173,6 +173,9 @@ function create_session_payload(input: {
   source_channel: browser_session_source_channel
   pwa_installed: boolean
 }) {
+  const room_uuid = input.chat?.room_uuid ?? null
+  const participant_uuid = input.chat?.participant_uuid ?? null
+
   const session = input.visitor_uuid
     ? {
         visitor_uuid: input.visitor_uuid,
@@ -185,6 +188,8 @@ function create_session_payload(input: {
         line_connected: input.line_connected,
         connected_providers: input.connected_providers,
         chat: input.chat,
+        room_uuid,
+        participant_uuid,
         source_channel: input.source_channel,
         pwa_installed: input.pwa_installed,
       }
@@ -205,6 +210,8 @@ function create_session_payload(input: {
     line_connected: input.line_connected,
     connected_providers: input.connected_providers,
     chat: input.chat,
+    room_uuid,
+    participant_uuid,
     is_line_webview: input.is_line_webview,
     requires_line_auth: input.requires_line_auth,
     line_auth_method: input.line_auth_method,

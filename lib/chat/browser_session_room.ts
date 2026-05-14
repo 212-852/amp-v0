@@ -1,6 +1,9 @@
 import 'server-only'
 
-import { resolve_initial_chat } from '@/lib/chat/action'
+import {
+  resolve_initial_chat,
+  type initial_chat_result,
+} from '@/lib/chat/action'
 import {
   resolve_user_room,
   type chat_channel,
@@ -119,13 +122,41 @@ export async function run_browser_session_chat_room_resolve(
 
     const resolved_channel = room_core.channel
 
-    const initial_chat = await resolve_initial_chat({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
-      channel: resolved_channel,
-      locale: input.locale,
-      session_restored: input.session_restored,
+    const snapshot_from_room_core = (): browser_session_chat_snapshot => ({
+      room_uuid: room_core.room_uuid,
+      participant_uuid: room_core.participant_uuid,
+      mode: room_core.mode,
+      is_seeded: false,
+      message_count: 0,
+      initial_carousel_card_count: 0,
     })
+
+    let initial_chat: initial_chat_result
+
+    try {
+      initial_chat = await resolve_initial_chat({
+        visitor_uuid: input.visitor_uuid,
+        user_uuid: input.user_uuid,
+        channel: resolved_channel,
+        locale: input.locale,
+        session_restored: input.session_restored,
+      })
+    } catch (inner) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'chat_room_resolve_failed',
+        payload: {
+          ...base,
+          participant_uuid: room_core.participant_uuid,
+          room_uuid: room_core.room_uuid,
+          source_channel: resolved_channel,
+          reason: 'resolve_initial_chat_exception',
+          ...normalized_error_fields(inner),
+        },
+      })
+
+      return snapshot_from_room_core()
+    }
 
     if (!initial_chat.room.room_uuid) {
       await debug_event({
@@ -141,14 +172,7 @@ export async function run_browser_session_chat_room_resolve(
         },
       })
 
-      return {
-        room_uuid: room_core.room_uuid,
-        participant_uuid: room_core.participant_uuid,
-        mode: room_core.mode,
-        is_seeded: false,
-        message_count: 0,
-        initial_carousel_card_count: 0,
-      }
+      return snapshot_from_room_core()
     }
 
     const initial_carousel_card_count = initial_chat.messages.reduce(
