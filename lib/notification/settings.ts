@@ -81,6 +81,18 @@ export async function save_notification_settings(input: {
     request_body: input.request_body ?? null,
     parsed_json: input.preferences ?? null,
     enabled_flags: input.preferences ?? null,
+    primary_channel: input.preferences?.primary_channel ?? null,
+    push_enabled: input.preferences?.pwa_push_enabled ?? false,
+    line_enabled: input.preferences?.line_enabled ?? false,
+    selected_route:
+      input.preferences?.primary_channel === 'push' ||
+      input.preferences?.primary_channel === 'line'
+        ? input.preferences.primary_channel
+        : null,
+    skipped_reason:
+      input.preferences?.primary_channel === 'none'
+        ? 'primary_channel_none'
+        : null,
     phase: 'save_notification_settings',
   })
 
@@ -90,6 +102,18 @@ export async function save_notification_settings(input: {
       request_body: input.request_body ?? null,
       parsed_json: input.preferences ?? null,
       enabled_flags: input.preferences ?? null,
+      primary_channel: input.preferences?.primary_channel ?? null,
+      push_enabled: input.preferences?.pwa_push_enabled ?? false,
+      line_enabled: input.preferences?.line_enabled ?? false,
+      selected_route:
+        input.preferences?.primary_channel === 'push' ||
+        input.preferences?.primary_channel === 'line'
+          ? input.preferences.primary_channel
+          : null,
+      skipped_reason:
+        input.preferences?.primary_channel === 'none'
+          ? 'primary_channel_none'
+          : null,
       error_code: 'session_required',
       error_message: 'user_uuid_missing',
       phase: 'validate_session',
@@ -191,6 +215,18 @@ export async function save_notification_settings(input: {
     request_body: input.request_body ?? null,
     parsed_json: input.preferences ?? null,
     enabled_flags: preferences_json,
+    primary_channel: preferences.primary_channel,
+    push_enabled: preferences.pwa_push_enabled,
+    line_enabled: preferences.line_enabled,
+    selected_route:
+      preferences.primary_channel === 'push' ||
+      preferences.primary_channel === 'line'
+        ? preferences.primary_channel
+        : null,
+    skipped_reason:
+      preferences.primary_channel === 'none'
+        ? 'primary_channel_none'
+        : null,
     phase: 'upsert_notification_settings',
   })
 
@@ -208,6 +244,18 @@ export async function save_notification_settings(input: {
       request_body: input.request_body ?? null,
       parsed_json: input.preferences ?? null,
       enabled_flags: preferences_json,
+      primary_channel: preferences.primary_channel,
+      push_enabled: preferences.pwa_push_enabled,
+      line_enabled: preferences.line_enabled,
+      selected_route:
+        preferences.primary_channel === 'push' ||
+        preferences.primary_channel === 'line'
+          ? preferences.primary_channel
+          : null,
+      skipped_reason:
+        preferences.primary_channel === 'none'
+          ? 'primary_channel_none'
+          : null,
       error_code: update.error.code,
       error_message: update.error.message,
       error_details: error_field(update.error, 'details'),
@@ -227,6 +275,18 @@ export async function save_notification_settings(input: {
     request_body: input.request_body ?? null,
     parsed_json: input.preferences ?? null,
     enabled_flags: preferences_json,
+    primary_channel: preferences.primary_channel,
+    push_enabled: preferences.pwa_push_enabled,
+    line_enabled: preferences.line_enabled,
+    selected_route:
+      preferences.primary_channel === 'push' ||
+      preferences.primary_channel === 'line'
+        ? preferences.primary_channel
+        : null,
+    skipped_reason:
+      preferences.primary_channel === 'none'
+        ? 'primary_channel_none'
+        : null,
     error_code: null,
     error_message: null,
     error_details: null,

@@ -201,6 +201,7 @@ export async function evaluate_push_chat_delivery_allowed(input: {
       .select('subscription_uuid, endpoint, enabled, updated_at')
       .eq('user_uuid', user_uuid)
       .eq('enabled', true)
+      .eq('is_pwa', true)
       .not('endpoint', 'is', null)
       .order('updated_at', { ascending: false })
       .limit(1),

@@ -122,7 +122,7 @@ export function resolve_concierge_targets(input: {
 }
 
 /**
- * User `settings.notification_preferences` uses `primary_channel` (`push` | `line` | `none`):
+ * User `settings.notification_preferences` uses `primary_channel` (`push` | `line` | null):
  * at most one external channel is active; chat delivery follows
  * `resolve_chat_external_notification_route` in `lib/notification/rules.ts`.
  */

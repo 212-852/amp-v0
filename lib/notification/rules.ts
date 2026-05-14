@@ -91,36 +91,55 @@ export function normalize_notification_preferences(
   )
   const declared = parse_primary_channel(source.primary_channel)
 
-  if (pwa && line) {
-    if (declared === 'push') {
-      line = false
-    } else if (declared === 'line') {
-      pwa = false
-    } else if (declared === 'none') {
-      pwa = false
-      line = false
-    } else {
-      line = false
+  if (Object.prototype.hasOwnProperty.call(source, 'primary_channel')) {
+    if (declared === 'push' && pwa) {
+      return {
+        primary_channel: 'push',
+        pwa_push_enabled: true,
+        line_enabled: false,
+        kinds,
+      }
+    }
+
+    if (declared === 'line' && line) {
+      return {
+        primary_channel: 'line',
+        pwa_push_enabled: false,
+        line_enabled: true,
+        kinds,
+      }
+    }
+
+    return {
+      primary_channel: 'none',
+      pwa_push_enabled: false,
+      line_enabled: false,
+      kinds,
     }
   }
 
-  let primary_channel: notification_primary_channel
   if (pwa) {
-    primary_channel = 'push'
-    line = false
-  } else if (line) {
-    primary_channel = 'line'
-    pwa = false
-  } else {
-    primary_channel = 'none'
-    pwa = false
-    line = false
+    return {
+      primary_channel: 'push',
+      pwa_push_enabled: true,
+      line_enabled: false,
+      kinds,
+    }
+  }
+
+  if (line) {
+    return {
+      primary_channel: 'line',
+      pwa_push_enabled: false,
+      line_enabled: true,
+      kinds,
+    }
   }
 
   return {
-    primary_channel,
-    pwa_push_enabled: pwa,
-    line_enabled: line,
+    primary_channel: 'none',
+    pwa_push_enabled: false,
+    line_enabled: false,
     kinds,
   }
 }
@@ -153,14 +172,235 @@ export async function load_notification_preferences_for_user(
 
 export async function resolve_chat_external_notification_route(input: {
   user_uuid: string | null
-}): Promise<notification_primary_channel> {
+  participant_uuid?: string | null
+  source_channel?: string | null
+}): Promise<'push' | 'line' | null> {
+  const decision = await resolve_chat_external_notification_decision(input)
+
+  return decision.selected_route
+}
+
+export async function resolve_chat_external_notification_decision(input: {
+  user_uuid: string | null
+  participant_uuid?: string | null
+  source_channel?: string | null
+}): Promise<{
+  primary_channel: notification_primary_channel
+  push_enabled: boolean
+  line_enabled: boolean
+  is_standalone: boolean
+  push_subscription_exists: boolean
+  line_identity_exists: boolean
+  selected_route: 'push' | 'line' | null
+  skipped_reason: string | null
+}> {
+  const user_uuid = clean_uuid(input.user_uuid)
+  const participant_uuid = clean_uuid(input.participant_uuid ?? null)
+  const source_channel =
+    typeof input.source_channel === 'string' ? input.source_channel : null
   const prefs = await load_notification_preferences_for_user(input.user_uuid)
 
   if (!prefs || !prefs.kinds.chat) {
-    return 'none'
+    return {
+      primary_channel: prefs?.primary_channel ?? 'none',
+      push_enabled: prefs?.pwa_push_enabled ?? false,
+      line_enabled: prefs?.line_enabled ?? false,
+      is_standalone: false,
+      push_subscription_exists: false,
+      line_identity_exists: false,
+      selected_route: null,
+      skipped_reason: prefs ? 'chat_notifications_disabled' : 'settings_missing',
+    }
   }
 
-  return prefs.primary_channel
+  const [foreground_open, push_subscription_exists, line_identity_exists] =
+    await Promise.all([
+      resolve_foreground_app_open(participant_uuid),
+      resolve_active_pwa_push_subscription_exists(user_uuid),
+      resolve_line_identity_exists(user_uuid),
+    ])
+  const is_standalone = push_subscription_exists
+
+  if (foreground_open) {
+    return {
+      primary_channel: prefs.primary_channel,
+      push_enabled: prefs.pwa_push_enabled,
+      line_enabled: prefs.line_enabled,
+      is_standalone,
+      push_subscription_exists,
+      line_identity_exists,
+      selected_route: null,
+      skipped_reason: 'foreground_app_open',
+    }
+  }
+
+  if (prefs.primary_channel === 'push') {
+    if (!prefs.pwa_push_enabled) {
+      return {
+        primary_channel: 'push',
+        push_enabled: false,
+        line_enabled: false,
+        is_standalone,
+        push_subscription_exists,
+        line_identity_exists,
+        selected_route: null,
+        skipped_reason: 'push_disabled',
+      }
+    }
+
+    if (!push_subscription_exists) {
+      return {
+        primary_channel: 'push',
+        push_enabled: true,
+        line_enabled: false,
+        is_standalone,
+        push_subscription_exists,
+        line_identity_exists,
+        selected_route: null,
+        skipped_reason:
+          source_channel === 'line' || source_channel === 'liff'
+            ? 'pwa_push_not_available_in_line_browser'
+            : 'push_subscription_missing',
+      }
+    }
+
+    return {
+      primary_channel: 'push',
+      push_enabled: true,
+      line_enabled: false,
+      is_standalone,
+      push_subscription_exists,
+      line_identity_exists,
+      selected_route: 'push',
+      skipped_reason: null,
+    }
+  }
+
+  if (prefs.primary_channel === 'line') {
+    if (!prefs.line_enabled) {
+      return {
+        primary_channel: 'line',
+        push_enabled: false,
+        line_enabled: false,
+        is_standalone,
+        push_subscription_exists,
+        line_identity_exists,
+        selected_route: null,
+        skipped_reason: 'line_disabled',
+      }
+    }
+
+    if (!line_identity_exists) {
+      return {
+        primary_channel: 'line',
+        push_enabled: false,
+        line_enabled: true,
+        is_standalone,
+        push_subscription_exists,
+        line_identity_exists,
+        selected_route: null,
+        skipped_reason: 'line_identity_missing',
+      }
+    }
+
+    return {
+      primary_channel: 'line',
+      push_enabled: false,
+      line_enabled: true,
+      is_standalone,
+      push_subscription_exists,
+      line_identity_exists,
+      selected_route: 'line',
+      skipped_reason: null,
+    }
+  }
+
+  return {
+    primary_channel: 'none',
+    push_enabled: false,
+    line_enabled: false,
+    is_standalone,
+    push_subscription_exists,
+    line_identity_exists,
+    selected_route: null,
+    skipped_reason: 'primary_channel_none',
+  }
+}
+
+async function resolve_active_pwa_push_subscription_exists(
+  user_uuid: string | null,
+): Promise<boolean> {
+  if (!user_uuid) {
+    return false
+  }
+
+  const result = await supabase
+    .from('push_subscriptions')
+    .select('subscription_uuid')
+    .eq('user_uuid', user_uuid)
+    .eq('enabled', true)
+    .eq('is_pwa', true)
+    .not('endpoint', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+
+  return !result.error && (result.data?.length ?? 0) > 0
+}
+
+async function resolve_line_identity_exists(
+  user_uuid: string | null,
+): Promise<boolean> {
+  if (!user_uuid) {
+    return false
+  }
+
+  const result = await supabase
+    .from('identities')
+    .select('identity_uuid')
+    .eq('user_uuid', user_uuid)
+    .eq('provider', 'line')
+    .limit(1)
+
+  return !result.error && (result.data?.length ?? 0) > 0
+}
+
+async function resolve_foreground_app_open(
+  participant_uuid: string | null,
+): Promise<boolean> {
+  if (!participant_uuid) {
+    return false
+  }
+
+  const result = await supabase
+    .from('participants')
+    .select('is_active, last_seen_at')
+    .eq('participant_uuid', participant_uuid)
+    .maybeSingle()
+
+  if (result.error || !result.data) {
+    return false
+  }
+
+  const row = result.data as {
+    is_active?: boolean | null
+    last_seen_at?: string | null
+  }
+
+  if (row.is_active !== true) {
+    return false
+  }
+
+  if (!row.last_seen_at) {
+    return true
+  }
+
+  const last_seen = new Date(row.last_seen_at).getTime()
+
+  if (Number.isNaN(last_seen)) {
+    return true
+  }
+
+  return Date.now() - last_seen < 5 * 60 * 1000
 }
 
 export async function user_allows_notification(input: {

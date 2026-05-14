@@ -14,6 +14,10 @@ type pwa_debug_body = {
   message_uuid?: unknown
   notification_route?: unknown
   primary_channel?: unknown
+  push_enabled?: unknown
+  line_enabled?: unknown
+  selected_route?: unknown
+  skipped_reason?: unknown
   from_primary_channel?: unknown
   to_primary_channel?: unknown
   has_push_subscription?: unknown
@@ -99,6 +103,12 @@ export async function POST(request: Request) {
       message_uuid: string_or_null(body?.message_uuid),
       notification_route: string_or_null(body?.notification_route),
       primary_channel: string_or_null(body?.primary_channel),
+      push_enabled:
+        typeof body?.push_enabled === 'boolean' ? body.push_enabled : null,
+      line_enabled:
+        typeof body?.line_enabled === 'boolean' ? body.line_enabled : null,
+      selected_route: string_or_null(body?.selected_route),
+      skipped_reason: string_or_null(body?.skipped_reason),
       from_primary_channel: string_or_null(body?.from_primary_channel),
       to_primary_channel: string_or_null(body?.to_primary_channel),
       has_push_subscription:

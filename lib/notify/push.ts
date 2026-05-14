@@ -515,6 +515,7 @@ export async function send_push_notify(
     .select('endpoint, p256dh, auth')
     .eq('user_uuid', input.user_uuid)
     .eq('enabled', true)
+    .eq('is_pwa', true)
     .not('endpoint', 'is', null)
     .order('updated_at', { ascending: false })
     .limit(1)

@@ -11,7 +11,7 @@ import {
 } from './discord'
 import { send_line_push_notify } from './line'
 import { send_push_notify } from './push'
-import { resolve_chat_external_notification_route } from '@/lib/notification/rules'
+import { resolve_chat_external_notification_decision } from '@/lib/notification/rules'
 import {
   load_concierge_recipients,
   load_line_provider_id_for_user,
@@ -64,21 +64,42 @@ export async function notify(
   event: notify_event,
 ): Promise<notify_run_result> {
   if (event.event === 'new_chat') {
-    const route = await resolve_chat_external_notification_route({
+    const route_decision = await resolve_chat_external_notification_decision({
       user_uuid: event.user_uuid,
+      participant_uuid: event.participant_uuid ?? null,
+      source_channel: event.source_channel,
     })
+    const route = route_decision.selected_route
 
-    await notification_route_trace('notify_route_decided', {
+    const route_debug_payload = {
       user_uuid: event.user_uuid,
       room_uuid: event.room_uuid,
       message_uuid: event.message_uuid ?? null,
-      primary_channel: route,
-      notification_route: route,
+      primary_channel: route_decision.primary_channel,
       source_channel: event.source_channel,
+      is_standalone: route_decision.is_standalone,
+      push_subscription_exists: route_decision.push_subscription_exists,
+      line_identity_exists: route_decision.line_identity_exists,
+      push_enabled: route_decision.push_enabled,
+      line_enabled: route_decision.line_enabled,
+      selected_route: route_decision.selected_route,
+      skipped_reason: route_decision.skipped_reason,
+      notification_route: route,
       phase: 'new_chat',
-    })
+    }
 
-    if (route === 'none') {
+    await notification_route_trace(
+      'notify_primary_channel_resolved',
+      route_debug_payload,
+    )
+    await notification_route_trace('notify_route_decided', route_debug_payload)
+
+    if (route === null) {
+      await notification_route_trace('notify_route_skipped', {
+        ...route_debug_payload,
+        phase: 'new_chat_skip',
+      })
+
       return { deliveries: [] }
     }
 
@@ -105,6 +126,11 @@ export async function notify(
           message_uuid: event.message_uuid ?? null,
           notification_route: 'push',
           primary_channel: route,
+          is_standalone: route_decision.is_standalone,
+          push_subscription_exists: route_decision.push_subscription_exists,
+          line_identity_exists: route_decision.line_identity_exists,
+          selected_route: 'push',
+          skipped_reason: null,
           source_channel: event.source_channel,
           phase: 'new_chat_push',
         })
@@ -118,6 +144,11 @@ export async function notify(
         message_uuid: event.message_uuid ?? null,
         notification_route: 'push',
         primary_channel: route,
+        is_standalone: route_decision.is_standalone,
+        push_subscription_exists: route_decision.push_subscription_exists,
+        line_identity_exists: route_decision.line_identity_exists,
+        selected_route: 'push',
+        skipped_reason: push.reason ?? 'push_failed',
         source_channel: event.source_channel,
         error_message: push.reason ?? 'push_failed',
         phase: 'new_chat_push',
@@ -135,6 +166,11 @@ export async function notify(
         message_uuid: event.message_uuid ?? null,
         notification_route: 'line',
         primary_channel: route,
+        is_standalone: route_decision.is_standalone,
+        push_subscription_exists: route_decision.push_subscription_exists,
+        line_identity_exists: false,
+        selected_route: 'line',
+        skipped_reason: 'line_identity_missing',
         source_channel: event.source_channel,
         error_message: 'line_user_missing',
         phase: 'new_chat_line',
@@ -155,6 +191,11 @@ export async function notify(
         message_uuid: event.message_uuid ?? null,
         notification_route: 'line',
         primary_channel: route,
+        is_standalone: route_decision.is_standalone,
+        push_subscription_exists: route_decision.push_subscription_exists,
+        line_identity_exists: true,
+        selected_route: 'line',
+        skipped_reason: null,
         source_channel: event.source_channel,
         phase: 'new_chat_line',
       })
@@ -167,6 +208,11 @@ export async function notify(
         message_uuid: event.message_uuid ?? null,
         notification_route: 'line',
         primary_channel: route,
+        is_standalone: route_decision.is_standalone,
+        push_subscription_exists: route_decision.push_subscription_exists,
+        line_identity_exists: true,
+        selected_route: 'line',
+        skipped_reason: 'line_push_failed',
         source_channel: event.source_channel,
         error_message:
           error instanceof Error ? error.message : 'line_push_failed',
@@ -728,19 +774,40 @@ async function deliver_personal_to_recipient(input: {
   recipient: notify_recipient
   message: string
 }): Promise<personal_delivery_outcome> {
-  const route = await resolve_chat_external_notification_route({
+  const route_decision = await resolve_chat_external_notification_decision({
     user_uuid: input.recipient.user_uuid,
+    source_channel: 'system',
   })
+  const route = route_decision.selected_route
 
-  await notification_route_trace('notify_route_decided', {
+  const route_debug_payload = {
     user_uuid: input.recipient.user_uuid,
-    primary_channel: route,
+    primary_channel: route_decision.primary_channel,
+    source_channel: 'system',
+    is_standalone: route_decision.is_standalone,
+    push_subscription_exists: route_decision.push_subscription_exists,
+    line_identity_exists: route_decision.line_identity_exists,
+    push_enabled: route_decision.push_enabled,
+    line_enabled: route_decision.line_enabled,
+    selected_route: route_decision.selected_route,
+    skipped_reason: route_decision.skipped_reason,
     notification_route: route,
     has_line_identity: Boolean(input.recipient.line_user_id),
     phase: 'personal_delivery_start',
-  })
+  }
 
-  if (route === 'none') {
+  await notification_route_trace(
+    'notify_primary_channel_resolved',
+    route_debug_payload,
+  )
+  await notification_route_trace('notify_route_decided', route_debug_payload)
+
+  if (route === null) {
+    await notification_route_trace('notify_route_skipped', {
+      ...route_debug_payload,
+      phase: 'personal_delivery_skip',
+    })
+
     return {
       recipient: input.recipient,
       channel: 'none',
@@ -765,6 +832,12 @@ async function deliver_personal_to_recipient(input: {
         user_uuid: input.recipient.user_uuid,
         notification_route: 'push',
         primary_channel: route,
+        source_channel: 'system',
+        is_standalone: route_decision.is_standalone,
+        push_subscription_exists: route_decision.push_subscription_exists,
+        line_identity_exists: route_decision.line_identity_exists,
+        selected_route: 'push',
+        skipped_reason: null,
         has_push_subscription: true,
         has_line_identity: Boolean(input.recipient.line_user_id),
         phase: 'personal_delivery_push',
@@ -781,6 +854,12 @@ async function deliver_personal_to_recipient(input: {
       user_uuid: input.recipient.user_uuid,
       notification_route: 'push',
       primary_channel: route,
+      source_channel: 'system',
+      is_standalone: route_decision.is_standalone,
+      push_subscription_exists: route_decision.push_subscription_exists,
+      line_identity_exists: route_decision.line_identity_exists,
+      selected_route: 'push',
+      skipped_reason: push.reason ?? 'push_failed',
       has_push_subscription: push.available,
       has_line_identity: Boolean(input.recipient.line_user_id),
       error_message: push.reason ?? 'push_failed',
@@ -804,6 +883,12 @@ async function deliver_personal_to_recipient(input: {
       user_uuid: input.recipient.user_uuid,
       notification_route: 'line',
       primary_channel: route,
+      source_channel: 'system',
+      is_standalone: route_decision.is_standalone,
+      push_subscription_exists: route_decision.push_subscription_exists,
+      line_identity_exists: false,
+      selected_route: 'line',
+      skipped_reason: 'line_identity_missing',
       has_push_subscription: false,
       has_line_identity: false,
       error_message: 'line_user_missing',
@@ -828,6 +913,12 @@ async function deliver_personal_to_recipient(input: {
       user_uuid: input.recipient.user_uuid,
       notification_route: 'line',
       primary_channel: route,
+      source_channel: 'system',
+      is_standalone: route_decision.is_standalone,
+      push_subscription_exists: route_decision.push_subscription_exists,
+      line_identity_exists: true,
+      selected_route: 'line',
+      skipped_reason: null,
       has_push_subscription: false,
       has_line_identity: true,
       phase: 'personal_delivery_line',
@@ -843,6 +934,12 @@ async function deliver_personal_to_recipient(input: {
       user_uuid: input.recipient.user_uuid,
       notification_route: 'line',
       primary_channel: route,
+      source_channel: 'system',
+      is_standalone: route_decision.is_standalone,
+      push_subscription_exists: route_decision.push_subscription_exists,
+      line_identity_exists: true,
+      selected_route: 'line',
+      skipped_reason: 'line_push_failed',
       has_push_subscription: false,
       has_line_identity: true,
       error_message: error instanceof Error ? error.message : 'line_push_failed',

@@ -255,6 +255,17 @@ export default function NotificationSettings(props: notification_settings_props)
           ...debug_payload({
             from_primary_channel: preferences.primary_channel,
             to_primary_channel: next_preferences.primary_channel,
+            primary_channel: next_preferences.primary_channel,
+            push_enabled: next_preferences.pwa_push_enabled,
+            line_enabled: next_preferences.line_enabled,
+            selected_route:
+              next_preferences.primary_channel === 'none'
+                ? null
+                : next_preferences.primary_channel,
+            skipped_reason:
+              next_preferences.primary_channel === 'none'
+                ? 'primary_channel_none'
+                : null,
             phase: 'notification_settings',
           }),
         })
@@ -265,6 +276,16 @@ export default function NotificationSettings(props: notification_settings_props)
         ...debug_payload({
           enabled: next_preferences.pwa_push_enabled,
           primary_channel: next_preferences.primary_channel,
+          push_enabled: next_preferences.pwa_push_enabled,
+          line_enabled: next_preferences.line_enabled,
+          selected_route:
+            next_preferences.primary_channel === 'none'
+              ? null
+              : next_preferences.primary_channel,
+          skipped_reason:
+            next_preferences.primary_channel === 'none'
+              ? 'primary_channel_none'
+              : null,
           phase: 'notification_settings',
         }),
       })
@@ -283,6 +304,16 @@ export default function NotificationSettings(props: notification_settings_props)
           ...debug_payload({
             enabled: next_preferences.pwa_push_enabled,
             primary_channel: next_preferences.primary_channel,
+            push_enabled: next_preferences.pwa_push_enabled,
+            line_enabled: next_preferences.line_enabled,
+            selected_route:
+              next_preferences.primary_channel === 'none'
+                ? null
+                : next_preferences.primary_channel,
+            skipped_reason:
+              next_preferences.primary_channel === 'none'
+                ? 'primary_channel_none'
+                : null,
             error_code: `http_${response.status}`,
             error_message: 'notification_setting_save_failed',
             phase: 'notification_settings',
@@ -303,6 +334,16 @@ export default function NotificationSettings(props: notification_settings_props)
         ...debug_payload({
           enabled: saved_preferences.pwa_push_enabled,
           primary_channel: saved_preferences.primary_channel,
+          push_enabled: saved_preferences.pwa_push_enabled,
+          line_enabled: saved_preferences.line_enabled,
+          selected_route:
+            saved_preferences.primary_channel === 'none'
+              ? null
+              : saved_preferences.primary_channel,
+          skipped_reason:
+            saved_preferences.primary_channel === 'none'
+              ? 'primary_channel_none'
+              : null,
           phase: 'notification_settings',
         }),
       })
