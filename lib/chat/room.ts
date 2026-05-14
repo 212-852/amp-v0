@@ -1742,6 +1742,7 @@ export type resolve_user_room_ok = {
   ok: true
   room_uuid: string
   participant_uuid: string
+  bot_participant_uuid: string
   mode: room_mode
   channel: chat_channel
   is_new_room: boolean
@@ -1783,7 +1784,7 @@ async function complete_resolve_user_room_success(input: {
     user_uuid,
   } = input
 
-  await resolve_bot_participant(room.room_uuid)
+  const bot_participant = await resolve_bot_participant(room.room_uuid)
 
   await emit_chat_room_resolve_event(
     'chat_room_participant_lookup_succeeded',
@@ -1833,6 +1834,7 @@ async function complete_resolve_user_room_success(input: {
     ok: true,
     room_uuid: room.room_uuid,
     participant_uuid,
+    bot_participant_uuid: bot_participant.participant_uuid,
     mode: parse_room_mode(room.mode),
     channel,
     is_new_room,

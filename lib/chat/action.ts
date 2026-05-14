@@ -52,6 +52,7 @@ import {
   parse_room_mode,
   resolve_admin_reception_send_context,
   resolve_chat_room,
+  resolve_user_room,
   type chat_channel,
   type chat_room,
   type room_mode,
@@ -450,12 +451,51 @@ export async function resolve_initial_chat(
   }
 
   try {
-    const room_result = await resolve_chat_room({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid ?? null,
-      channel: input.channel,
-      external_room_id: input.external_room_id ?? null,
-    })
+    const room_result = input.external_room_id
+      ? await resolve_chat_room({
+          visitor_uuid: input.visitor_uuid,
+          user_uuid: input.user_uuid ?? null,
+          channel: input.channel,
+          external_room_id: input.external_room_id ?? null,
+        })
+      : await (async () => {
+          const resolved = await resolve_user_room({
+            visitor_uuid: input.visitor_uuid,
+            user_uuid: input.user_uuid ?? null,
+            channel: input.channel,
+            source_channel: input.channel,
+          })
+
+          if (!resolved.ok) {
+            return {
+              ok: false as const,
+              room: {
+                room_uuid: '',
+                participant_uuid: '',
+                bot_participant_uuid: '',
+                user_uuid: input.user_uuid ?? null,
+                visitor_uuid: input.visitor_uuid,
+                channel: input.channel,
+                mode: 'bot' as const,
+              },
+              is_new_room: false as const,
+            }
+          }
+
+          return {
+            ok: true as const,
+            room: {
+              room_uuid: resolved.room_uuid,
+              participant_uuid: resolved.participant_uuid,
+              bot_participant_uuid: resolved.bot_participant_uuid,
+              user_uuid: input.user_uuid ?? null,
+              visitor_uuid: input.visitor_uuid,
+              channel: resolved.channel,
+              mode: resolved.mode,
+            },
+            is_new_room: resolved.is_new_room,
+          }
+        })()
 
     if (!room_result.ok || !room_result.room.room_uuid) {
       const fallback = make_initial_chat_result({
