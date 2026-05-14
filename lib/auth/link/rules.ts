@@ -57,3 +57,40 @@ export function normalize_return_path(value: unknown): string | null {
   return trimmed.slice(0, 512)
 }
 
+export type link_start_validation_result =
+  | { ok: true }
+  | {
+      ok: false
+      error_code: string
+      error_message: string
+    }
+
+/**
+ * Guest + PWA must be allowed: user_uuid may be null.
+ * visitor_uuid is required so the link session binds to the browser visitor.
+ */
+export function validate_link_start_context(input: {
+  visitor_uuid: string | null
+  user_uuid: string | null
+  provider: string
+}): link_start_validation_result {
+  if (!input.visitor_uuid) {
+    return {
+      ok: false,
+      error_code: 'visitor_uuid_required',
+      error_message:
+        'visitor_uuid is required for LINE link start (cookie or client visitor header)',
+    }
+  }
+
+  if (input.provider !== 'line') {
+    return {
+      ok: false,
+      error_code: 'unsupported_provider',
+      error_message: 'only line provider is supported for this flow',
+    }
+  }
+
+  return { ok: true }
+}
+

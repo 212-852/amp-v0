@@ -372,13 +372,48 @@ export default function ConnectModal({
           is_standalone: standalone,
         }),
       })
-      const payload = (await response.json()) as {
+      const payload = (await response.json().catch(() => null)) as {
         auth_url?: string
         link_session_uuid?: string
+        error?: string
+        error_code?: string
+        error_message?: string
+        cause?: Record<string, unknown> | null
+      } | null
+
+      if (!payload) {
+        throw new Error('link_start_invalid_json')
       }
 
       if (!response.ok || !payload.auth_url || !payload.link_session_uuid) {
-        throw new Error('link_start_failed')
+        const error_code =
+          payload.error_code ?? `http_${response.status}`
+        const error_message =
+          payload.error_message ??
+          (typeof payload.error === 'string' ? payload.error : null) ??
+          'link_start_failed'
+
+        post_pwa_debug({
+          event: 'pwa_link_start_request_failed',
+          phase: 'connect_modal',
+          provider: 'line',
+          error_code,
+          error_message,
+          reason: payload.cause ? JSON.stringify(payload.cause) : null,
+          ...build_pwa_diagnostic_payload(),
+        })
+
+        post_pwa_debug({
+          event: 'pwa_identity_link_failed',
+          phase: 'connect_modal',
+          provider: 'line',
+          error_code,
+          error_message,
+          reason: payload.cause ? JSON.stringify(payload.cause) : null,
+          ...build_pwa_diagnostic_payload(),
+        })
+
+        throw new Error(error_message)
       }
 
       post_pwa_debug({
