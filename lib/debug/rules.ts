@@ -450,6 +450,10 @@ export function resolve_debug_rule(input: {
     'push_subscription_save_started',
     'push_subscription_save_succeeded',
     'push_subscription_save_failed',
+    'notification_setting_payload',
+    'notification_setting_request',
+    'notification_setting_response',
+    'notification_setting_validation_failed',
     'notification_setting_save_started',
     'notification_setting_save_succeeded',
     'notification_setting_save_failed',
@@ -461,7 +465,9 @@ export function resolve_debug_rule(input: {
   ) {
     const is_failed =
       input.event.endsWith('_failed') ||
-      input.event === 'push_permission_denied'
+      input.event === 'notification_setting_validation_failed' ||
+      input.event === 'push_permission_denied' ||
+      typeof input.payload?.error_code === 'string'
 
     return {
       category: 'pwa',

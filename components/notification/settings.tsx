@@ -366,11 +366,17 @@ export default function NotificationSettings(props: notification_settings_props)
     }
 
     try {
-      await save_preferences({
+      const next_preferences = {
+        ...preferences,
+        pwa_push_enabled: true,
+      }
+
+      await save_preferences(next_preferences)
+    } catch {
+      set_preferences({
         ...preferences,
         pwa_push_enabled: true,
       })
-    } catch {
       set_message(content.save_failed[props.locale])
     }
   }

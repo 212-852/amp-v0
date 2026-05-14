@@ -22,6 +22,7 @@ export async function POST(request: Request) {
     | null
   const result = await save_notification_settings({
     preferences: body?.preferences ?? null,
+    request_body: body,
   })
 
   return NextResponse.json(result, { status: result.ok ? 200 : 400 })
