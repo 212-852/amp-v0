@@ -1429,6 +1429,18 @@ export async function resolve_chat_room(
     }
 
     if (!canonical_participant) {
+      const looked_up =
+        (input.user_uuid
+          ? await find_user_participant_by_user(input.user_uuid)
+          : null) ??
+        (input.visitor_uuid
+          ? await find_user_participant_by_visitor(input.visitor_uuid)
+          : null)
+
+      if (looked_up) {
+        return handle_existing_participant(input, identity, looked_up)
+      }
+
       const created = await try_insert_participant_and_direct_room(
         input,
         identity,
@@ -1864,7 +1876,7 @@ export async function resolve_user_room(input: {
         }
       }
 
-      if (selected_participant && !selected_participant.room_uuid) {
+      if (selected_participant && !selected_room) {
         const assigned = await assign_participant_to_direct_room(
           {
             visitor_uuid,
@@ -1884,7 +1896,7 @@ export async function resolve_user_room(input: {
         is_new_room = assigned.is_new_room
       }
 
-      if (!selected_participant || !selected_room) {
+      if (!selected_participant) {
         const created = await try_insert_participant_and_direct_room(
           {
             visitor_uuid,
@@ -1911,13 +1923,55 @@ export async function resolve_user_room(input: {
           selected_room = created.room
           is_new_room = created.is_new_room
         }
+
+        if (selected_participant && !selected_room) {
+          const assigned = await assign_participant_to_direct_room(
+            {
+              visitor_uuid,
+              user_uuid,
+              channel,
+            },
+            selected_participant,
+            {
+              ...base,
+              source_channel: channel,
+              room_type: 'direct',
+            },
+          )
+
+          selected_participant = assigned.participant
+          selected_room = assigned.room
+          is_new_room = assigned.is_new_room
+        }
       }
 
-      if (
-        selected_participant?.room_uuid &&
-        selected_room?.room_uuid &&
-        selected_participant.participant_uuid
-      ) {
+      if (selected_room?.room_uuid && selected_participant?.participant_uuid) {
+        if (
+          !selected_participant.room_uuid ||
+          selected_participant.room_uuid !== selected_room.room_uuid
+        ) {
+          const reread = await supabase
+            .from('participants')
+            .select(PARTICIPANT_DB_SELECT)
+            .eq(
+              'participant_uuid',
+              selected_participant.participant_uuid,
+            )
+            .maybeSingle()
+
+          if (!reread.error && reread.data) {
+            selected_participant = reread.data as participant_row
+          }
+        }
+
+        if (
+          !selected_participant.room_uuid ||
+          selected_participant.room_uuid !== selected_room.room_uuid
+        ) {
+          last_reason = 'participant_room_mismatch'
+          continue
+        }
+
         await resolve_bot_participant(selected_room.room_uuid)
 
         await emit_chat_room_resolve_event(
