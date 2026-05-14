@@ -38,7 +38,10 @@ type merged_session = {
   tier?: string | null
   role?: string | null
   visitor_uuid?: string | null
-  chat?: { room_uuid?: string | null } | null
+  chat?: {
+    room_uuid?: string | null
+    participant_uuid?: string | null
+  } | null
 }
 
 function merge_session_json(
@@ -76,6 +79,12 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
         event: 'pwa_boot_loading_started',
         phase: 'pwa_boot_gate',
         visitor_uuid: read_local_visitor_uuid(),
+        user_uuid: null,
+        role: null,
+        tier: null,
+        room_uuid: null,
+        participant_uuid: null,
+        reason: 'standalone_pwa_boot',
         ...base_diag,
       })
 
@@ -94,22 +103,49 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
         return merge_session_json(raw)
       }
 
+      function room_ready(session: merged_session | null) {
+        return Boolean(
+          session?.chat?.room_uuid && session.chat.participant_uuid,
+        )
+      }
+
+      function room_payload(session: merged_session | null) {
+        return {
+          visitor_uuid: session?.visitor_uuid ?? read_local_visitor_uuid(),
+          user_uuid: session?.user_uuid ?? null,
+          role: session?.role ?? null,
+          tier: session?.tier ?? null,
+          room_uuid: session?.chat?.room_uuid ?? null,
+          participant_uuid: session?.chat?.participant_uuid ?? null,
+        }
+      }
+
+      let boot_ready = false
+
       try {
         let session = await fetch_session()
 
         write_local_visitor_uuid(session?.visitor_uuid ?? null)
 
-        const needs_room =
-          Boolean(session?.user_uuid) &&
-          (session?.tier === 'member' || session?.tier === 'vip')
+        const started_at = Date.now()
 
-        const room_uuid =
-          session?.chat && typeof session.chat === 'object'
-            ? session.chat.room_uuid
-            : null
+        while (!cancelled && !room_ready(session)) {
+          if (Date.now() - started_at >= 20_000) {
+            post_pwa_debug({
+              event: 'chat_room_resolve_failed',
+              phase: 'pwa_boot_gate',
+              reason: 'boot_gate_timeout',
+              error_code: 'room_or_participant_missing',
+              error_message:
+                'room_uuid and participant_uuid were not restored before timeout',
+              ...room_payload(session),
+              ...build_pwa_diagnostic_payload({}),
+            })
 
-        if (needs_room && !room_uuid && !cancelled) {
-          await new Promise((resolve) => setTimeout(resolve, 450))
+            return
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 500))
           session = await fetch_session()
           write_local_visitor_uuid(session?.visitor_uuid ?? null)
         }
@@ -119,24 +155,18 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
           await new Promise((resolve) => setTimeout(resolve, 300))
         }
 
-        const room_after =
-          session?.chat && typeof session.chat === 'object'
-            ? session.chat.room_uuid
-            : null
+        boot_ready = true
 
         post_pwa_debug({
           event: 'pwa_boot_loading_finished',
           phase: 'pwa_boot_gate',
-          visitor_uuid: session?.visitor_uuid ?? read_local_visitor_uuid(),
-          user_uuid: session?.user_uuid ?? null,
-          role: session?.role ?? null,
-          tier: session?.tier ?? null,
-          room_uuid: room_after ?? null,
+          reason: 'room_and_participant_ready',
+          ...room_payload(session),
           ...base_diag,
         })
       } catch {
         post_pwa_debug({
-          event: 'pwa_boot_loading_finished',
+          event: 'chat_room_resolve_failed',
           phase: 'pwa_boot_gate',
           error_code: 'boot_failed',
           error_message: 'session_fetch_or_refresh_failed',
@@ -144,7 +174,7 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
           ...build_pwa_diagnostic_payload({}),
         })
       } finally {
-        if (!cancelled) {
+        if (!cancelled && boot_ready) {
           set_overlay_visible(false)
         }
       }

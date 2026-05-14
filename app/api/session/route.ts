@@ -35,6 +35,7 @@ type normalized_tier = 'guest' | 'member' | 'vip'
 type connected_provider = 'line' | 'google' | 'email'
 type session_chat_state = {
   room_uuid: string
+  participant_uuid: string
   mode: 'bot' | 'concierge'
   is_seeded: boolean
   message_count: number
@@ -325,6 +326,7 @@ async function resolve_session_payload() {
       role,
       tier,
       room_uuid: chat?.room_uuid ?? null,
+      participant_uuid: chat?.participant_uuid ?? null,
       session_restored,
       reason: session_restored ? 'user_uuid_restored' : 'user_uuid_missing',
     },
@@ -342,6 +344,7 @@ async function resolve_session_payload() {
       role,
       tier,
       room_uuid: chat?.room_uuid ?? null,
+      participant_uuid: chat?.participant_uuid ?? null,
       session_restored,
       reason: visitor.is_new_visitor
         ? 'new_visitor_row'
@@ -360,6 +363,7 @@ async function resolve_session_payload() {
         role,
         tier,
         room_uuid: chat?.room_uuid ?? null,
+        participant_uuid: chat?.participant_uuid ?? null,
         session_restored: true,
         reason: 'visitor_linked_to_user',
       },

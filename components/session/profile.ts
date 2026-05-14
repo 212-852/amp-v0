@@ -28,6 +28,7 @@ export type session_profile_snapshot = {
   pwa_installed?: boolean
   chat?: {
     room_uuid?: string | null
+    participant_uuid?: string | null
     mode?: string | null
     message_count?: number | null
   } | null

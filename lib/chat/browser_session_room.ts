@@ -12,6 +12,7 @@ import type { normalized_role, normalized_tier } from '@/lib/auth/identity'
 
 export type browser_session_chat_snapshot = {
   room_uuid: string
+  participant_uuid: string
   mode: 'bot' | 'concierge'
   is_seeded: boolean
   message_count: number
@@ -110,7 +111,31 @@ export async function run_browser_session_chat_room_resolve(
         },
       })
 
-      return null
+      const snapshot: browser_session_chat_snapshot = {
+        room_uuid: room_probe.room.room_uuid,
+        participant_uuid: room_probe.room.participant_uuid,
+        mode: room_probe.room.mode,
+        is_seeded: false,
+        message_count: 0,
+        initial_carousel_card_count: 0,
+      }
+
+      await debug_event({
+        category: 'chat_room',
+        event: 'chat_room_resolve_succeeded',
+        payload: {
+          visitor_uuid: input.visitor_uuid,
+          user_uuid: input.user_uuid,
+          participant_uuid: room_probe.room.participant_uuid,
+          room_uuid: room_probe.room.room_uuid,
+          source_channel: input.source_channel,
+          role: input.role,
+          tier: input.tier,
+          reason: 'resolve_chat_room_ok_initial_chat_missing',
+        },
+      })
+
+      return snapshot
     }
 
     const initial_carousel_card_count = initial_chat.messages.reduce(
@@ -126,6 +151,7 @@ export async function run_browser_session_chat_room_resolve(
 
     const snapshot: browser_session_chat_snapshot = {
       room_uuid: initial_chat.room.room_uuid,
+      participant_uuid: initial_chat.room.participant_uuid,
       mode: initial_chat.room.mode,
       is_seeded: initial_chat.is_seeded,
       message_count: initial_chat.messages.length,
