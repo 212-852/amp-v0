@@ -1,7 +1,9 @@
 import 'server-only'
 
+import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
-import { user_allows_notification } from '@/lib/notification/rules'
+
+import { evaluate_push_chat_delivery_allowed } from './push_gate'
 
 export type push_notify_input = {
   user_uuid: string
@@ -131,19 +133,30 @@ async function send_empty_web_push(input: {
 export async function send_push_notify(
   input: push_notify_input,
 ): Promise<push_notify_result> {
-  const allowed = await user_allows_notification({
+  const gate = await evaluate_push_chat_delivery_allowed({
     user_uuid: input.user_uuid,
-    channel: 'push',
     kind: input.kind ?? 'chat',
   })
 
-  if (!allowed) {
+  if (!gate.allowed) {
     return {
       ok: false,
       available: false,
       reason: 'push_notification_disabled',
     }
   }
+
+  await debug_event({
+    category: 'pwa',
+    event: 'notify_push_send_started',
+    payload: {
+      user_uuid: input.user_uuid,
+      pwa_push_enabled: gate.pwa_push_enabled,
+      chat_enabled: gate.chat_enabled,
+      push_subscription_enabled: gate.push_subscription_enabled,
+      disabled_reason: null,
+    },
+  })
 
   const result = await supabase
     .from('push_subscriptions')

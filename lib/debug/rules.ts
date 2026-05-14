@@ -457,6 +457,10 @@ export function resolve_debug_rule(input: {
     'notification_setting_save_started',
     'notification_setting_save_succeeded',
     'notification_setting_save_failed',
+    'notify_push_preference_checked',
+    'notify_push_subscription_checked',
+    'notify_push_disabled_reason',
+    'notify_push_send_started',
   ])
 
   if (

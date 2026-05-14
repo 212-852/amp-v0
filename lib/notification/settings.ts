@@ -8,16 +8,9 @@ import {
   boolean_value,
   default_notification_preferences,
   normalize_notification_preferences,
+  notification_preferences_to_json,
   type notification_preferences,
 } from './rules'
-
-type setting_json = {
-  push_enabled: boolean
-  line_enabled: boolean
-  new_chat: boolean
-  reservation: boolean
-  announcement: boolean
-}
 
 function error_field(error: unknown, key: string): string | null {
   if (!error || typeof error !== 'object') {
@@ -38,16 +31,6 @@ async function debug_notification_setting(
     event,
     payload,
   })
-}
-
-function to_settings_json(preferences: notification_preferences): setting_json {
-  return {
-    push_enabled: preferences.pwa_push_enabled,
-    line_enabled: preferences.line_enabled,
-    new_chat: preferences.kinds.chat,
-    reservation: preferences.kinds.reservation,
-    announcement: preferences.kinds.announcement,
-  }
 }
 
 export async function load_notification_settings() {
@@ -179,13 +162,13 @@ export async function save_notification_settings(input: {
       ),
     },
   }
-  const settings_json = to_settings_json(preferences)
+  const preferences_json = notification_preferences_to_json(preferences)
 
   await debug_notification_setting('notification_setting_request', {
     user_uuid,
     request_body: input.request_body ?? null,
     parsed_json: input.preferences ?? null,
-    enabled_flags: settings_json,
+    enabled_flags: preferences_json,
     phase: 'upsert_notification_settings',
   })
 
@@ -193,7 +176,7 @@ export async function save_notification_settings(input: {
     .from('settings')
     .upsert({
       user_uuid,
-      notification_preferences: settings_json,
+      notification_preferences: preferences_json,
       updated_at: new Date().toISOString(),
     })
 
@@ -202,7 +185,7 @@ export async function save_notification_settings(input: {
       user_uuid,
       request_body: input.request_body ?? null,
       parsed_json: input.preferences ?? null,
-      enabled_flags: settings_json,
+      enabled_flags: preferences_json,
       error_code: update.error.code,
       error_message: update.error.message,
       error_details: error_field(update.error, 'details'),
@@ -221,7 +204,7 @@ export async function save_notification_settings(input: {
     user_uuid,
     request_body: input.request_body ?? null,
     parsed_json: input.preferences ?? null,
-    enabled_flags: settings_json,
+    enabled_flags: preferences_json,
     error_code: null,
     error_message: null,
     error_details: null,

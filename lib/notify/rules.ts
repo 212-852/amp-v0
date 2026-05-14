@@ -249,3 +249,7 @@ export function format_support_started_notify_content(
     `created_at: ${event.created_at}`,
   ].join('\n')
 }
+
+export type { push_chat_gate_result } from './push_gate'
+
+export { evaluate_push_chat_delivery_allowed } from './push_gate'

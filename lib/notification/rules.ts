@@ -25,6 +25,20 @@ export function boolean_value(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
 
+export function notification_preferences_to_json(
+  preferences: notification_preferences,
+): Record<string, unknown> {
+  return {
+    pwa_push_enabled: preferences.pwa_push_enabled,
+    line_enabled: preferences.line_enabled,
+    kinds: {
+      chat: preferences.kinds.chat,
+      reservation: preferences.kinds.reservation,
+      announcement: preferences.kinds.announcement,
+    },
+  }
+}
+
 export function normalize_notification_preferences(
   value: unknown,
 ): notification_preferences {
