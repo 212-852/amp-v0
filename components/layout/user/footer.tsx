@@ -34,6 +34,8 @@ import {
   subscribe_locale,
 } from '@/lib/locale/state'
 import { use_session_profile } from '@/components/session/profile'
+import { post_message_send_trace_pair } from '@/lib/chat/message_send_trace_client'
+import { read_local_visitor_uuid } from '@/lib/visitor/client'
 
 const content = {
   mypage: {
@@ -207,6 +209,11 @@ function create_optimistic_switch_message(input: {
 export default function UserFooter() {
   const chat = useUserChat()
   const { session } = use_session_profile()
+  const session_ref = useRef(session)
+
+  useEffect(() => {
+    session_ref.current = session
+  }, [session])
   const input_ref = useRef<HTMLInputElement | null>(null)
   const typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
@@ -514,6 +521,36 @@ export default function UserFooter() {
 
   async function submit_chat_text(raw_text: string) {
     const text = raw_text.trim()
+    const live_session = session_ref.current
+
+    void post_message_send_trace_pair({
+      chat_event: 'chat_message_send_started',
+      user_event: 'user_message_send_started',
+      payload: {
+        room_uuid: chat.room_uuid,
+        participant_uuid: chat.participant_uuid,
+        user_uuid: live_session?.user_uuid ?? null,
+        visitor_uuid: read_local_visitor_uuid(),
+        role: live_session?.role ?? null,
+        tier: live_session?.tier ?? null,
+        source_channel: live_session?.source_channel ?? 'web',
+        message_body_exists: text.length > 0,
+        message_body_length: text.length,
+        insert_table: null,
+        message_uuid: null,
+        error_code: null,
+        error_message: null,
+        error_details: null,
+        error_hint: null,
+        phase: 'client_submit_enter',
+      },
+    })
+
+    const tier = live_session?.tier
+    const needs_user_uuid =
+      tier === 'member' ||
+      tier === 'vip' ||
+      (live_session?.role === 'user' && tier !== 'guest')
 
     if (
       !text ||
@@ -522,8 +559,127 @@ export default function UserFooter() {
       !chat.room_uuid ||
       !chat.participant_uuid
     ) {
+      void post_message_send_trace_pair({
+        chat_event: 'chat_message_send_blocked',
+        user_event: 'user_message_send_blocked',
+        payload: {
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          user_uuid: live_session?.user_uuid ?? null,
+          visitor_uuid: read_local_visitor_uuid(),
+          role: live_session?.role ?? null,
+          tier: live_session?.tier ?? null,
+          source_channel: live_session?.source_channel ?? 'web',
+          message_body_exists: text.length > 0,
+          message_body_length: text.length,
+          insert_table: null,
+          message_uuid: null,
+          error_code: 'client_validation_failed',
+          error_message: 'missing_text_room_or_participant_or_pending',
+          error_details: null,
+          error_hint: null,
+          phase: 'client_submit_guard',
+        },
+      })
+
       return
     }
+
+    if (needs_user_uuid && !live_session?.user_uuid) {
+      void post_message_send_trace_pair({
+        chat_event: 'chat_message_send_blocked',
+        user_event: 'user_message_send_blocked',
+        payload: {
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          user_uuid: null,
+          visitor_uuid: read_local_visitor_uuid(),
+          role: live_session?.role ?? null,
+          tier: live_session?.tier ?? null,
+          source_channel: live_session?.source_channel ?? 'web',
+          message_body_exists: text.length > 0,
+          message_body_length: text.length,
+          insert_table: null,
+          message_uuid: null,
+          error_code: 'session_required',
+          error_message: 'user_uuid_required_for_member_send',
+          error_details: null,
+          error_hint: null,
+          phase: 'client_submit_guard',
+        },
+      })
+
+      return
+    }
+
+    void post_message_send_trace_pair({
+      chat_event: 'chat_message_session_loaded',
+      user_event: 'user_message_session_checked',
+      payload: {
+        room_uuid: chat.room_uuid,
+        participant_uuid: chat.participant_uuid,
+        user_uuid: live_session?.user_uuid ?? null,
+        visitor_uuid: read_local_visitor_uuid(),
+        role: live_session?.role ?? null,
+        tier: live_session?.tier ?? null,
+        source_channel: live_session?.source_channel ?? 'web',
+        message_body_exists: text.length > 0,
+        message_body_length: text.length,
+        insert_table: null,
+        message_uuid: null,
+        error_code: null,
+        error_message: null,
+        error_details: null,
+        error_hint: null,
+        phase: 'client_session_snapshot',
+      },
+    })
+
+    void post_message_send_trace_pair({
+      chat_event: 'chat_message_room_checked',
+      user_event: 'user_message_room_checked',
+      payload: {
+        room_uuid: chat.room_uuid,
+        participant_uuid: chat.participant_uuid,
+        user_uuid: live_session?.user_uuid ?? null,
+        visitor_uuid: read_local_visitor_uuid(),
+        role: live_session?.role ?? null,
+        tier: live_session?.tier ?? null,
+        source_channel: live_session?.source_channel ?? 'web',
+        message_body_exists: text.length > 0,
+        message_body_length: text.length,
+        insert_table: null,
+        message_uuid: null,
+        error_code: null,
+        error_message: null,
+        error_details: null,
+        error_hint: null,
+        phase: 'client_chat_context_ready',
+      },
+    })
+
+    void post_message_send_trace_pair({
+      chat_event: 'chat_message_participant_checked',
+      user_event: 'user_message_participant_checked',
+      payload: {
+        room_uuid: chat.room_uuid,
+        participant_uuid: chat.participant_uuid,
+        user_uuid: live_session?.user_uuid ?? null,
+        visitor_uuid: read_local_visitor_uuid(),
+        role: live_session?.role ?? null,
+        tier: live_session?.tier ?? null,
+        source_channel: live_session?.source_channel ?? 'web',
+        message_body_exists: text.length > 0,
+        message_body_length: text.length,
+        insert_table: null,
+        message_uuid: null,
+        error_code: null,
+        error_message: null,
+        error_details: null,
+        error_hint: null,
+        phase: 'client_participant_ready',
+      },
+    })
 
     const previous_mode = chat.mode
     const optimistic_message = build_optimistic_user_text_message({
@@ -538,6 +694,29 @@ export default function UserFooter() {
     post_typing_presence('typing_stop')
 
     try {
+      void post_message_send_trace_pair({
+        chat_event: 'chat_message_payload_built',
+        user_event: 'user_message_payload_built',
+        payload: {
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          user_uuid: live_session?.user_uuid ?? null,
+          visitor_uuid: read_local_visitor_uuid(),
+          role: live_session?.role ?? null,
+          tier: live_session?.tier ?? null,
+          source_channel: live_session?.source_channel ?? 'web',
+          message_body_exists: text.length > 0,
+          message_body_length: text.length,
+          insert_table: 'public.messages',
+          message_uuid: null,
+          error_code: null,
+          error_message: null,
+          error_details: null,
+          error_hint: null,
+          phase: 'client_request_body_ready',
+        },
+      })
+
       const response = await fetch('/api/chat/message', {
         method: 'POST',
         credentials: 'include',
@@ -553,6 +732,29 @@ export default function UserFooter() {
       })
 
       if (!response.ok) {
+        void post_message_send_trace_pair({
+          chat_event: 'chat_message_send_failed',
+          user_event: 'user_message_send_failed',
+          payload: {
+            room_uuid: chat.room_uuid,
+            participant_uuid: chat.participant_uuid,
+            user_uuid: live_session?.user_uuid ?? null,
+            visitor_uuid: read_local_visitor_uuid(),
+            role: live_session?.role ?? null,
+            tier: live_session?.tier ?? null,
+            source_channel: live_session?.source_channel ?? 'web',
+            message_body_exists: text.length > 0,
+            message_body_length: text.length,
+            insert_table: 'public.messages',
+            message_uuid: null,
+            error_code: `http_${response.status}`,
+            error_message: 'chat_message_http_error',
+            error_details: null,
+            error_hint: null,
+            phase: 'client_fetch_response_not_ok',
+          },
+        })
+
         if (response.status === 403) {
           const payload = (await response.json().catch(() => null)) as {
             error?: string
@@ -582,6 +784,29 @@ export default function UserFooter() {
         | { ok: false; error: string; reason?: string }
 
       if (!payload.ok) {
+        void post_message_send_trace_pair({
+          chat_event: 'chat_message_send_failed',
+          user_event: 'user_message_send_failed',
+          payload: {
+            room_uuid: chat.room_uuid,
+            participant_uuid: chat.participant_uuid,
+            user_uuid: live_session?.user_uuid ?? null,
+            visitor_uuid: read_local_visitor_uuid(),
+            role: live_session?.role ?? null,
+            tier: live_session?.tier ?? null,
+            source_channel: live_session?.source_channel ?? 'web',
+            message_body_exists: text.length > 0,
+            message_body_length: text.length,
+            insert_table: 'public.messages',
+            message_uuid: null,
+            error_code: payload.error ?? 'unknown',
+            error_message: payload.reason ?? 'payload_not_ok',
+            error_details: null,
+            error_hint: null,
+            phase: 'client_payload_not_ok',
+          },
+        })
+
         if (payload.error === 'link_required') {
           set_is_link_required_open(true)
         }
@@ -616,6 +841,29 @@ export default function UserFooter() {
         chat.append_messages(remaining_messages)
       }
 
+      void post_message_send_trace_pair({
+        chat_event: 'chat_message_send_finished',
+        user_event: 'user_message_send_finished',
+        payload: {
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          user_uuid: live_session?.user_uuid ?? null,
+          visitor_uuid: read_local_visitor_uuid(),
+          role: live_session?.role ?? null,
+          tier: live_session?.tier ?? null,
+          source_channel: live_session?.source_channel ?? 'web',
+          message_body_exists: text.length > 0,
+          message_body_length: text.length,
+          insert_table: 'public.messages',
+          message_uuid: echoed_user_message?.archive_uuid ?? null,
+          error_code: null,
+          error_message: null,
+          error_details: null,
+          error_hint: null,
+          phase: 'client_submit_ok',
+        },
+      })
+
       if (payload.kind === 'switch_mode') {
         chat.set_mode(payload.mode)
       } else if (chat.mode !== previous_mode) {
@@ -623,6 +871,29 @@ export default function UserFooter() {
       }
     } catch (error) {
       console.error('[chat] submit_chat_text_failed', error)
+      void post_message_send_trace_pair({
+        chat_event: 'chat_message_send_failed',
+        user_event: 'user_message_send_failed',
+        payload: {
+          room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          user_uuid: session_ref.current?.user_uuid ?? null,
+          visitor_uuid: read_local_visitor_uuid(),
+          role: session_ref.current?.role ?? null,
+          tier: session_ref.current?.tier ?? null,
+          source_channel: session_ref.current?.source_channel ?? 'web',
+          message_body_exists: text.length > 0,
+          message_body_length: text.length,
+          insert_table: 'public.messages',
+          message_uuid: null,
+          error_code: 'client_exception',
+          error_message:
+            error instanceof Error ? error.message : String(error),
+          error_details: null,
+          error_hint: null,
+          phase: 'client_submit_exception',
+        },
+      })
       chat.remove_message(optimistic_message.archive_uuid)
     } finally {
       set_is_sending_text(false)
@@ -645,7 +916,33 @@ export default function UserFooter() {
   }, [post_typing_presence])
 
   function handle_send_click() {
-    void submit_chat_text(input_ref.current?.value ?? '')
+    const live_session = session_ref.current
+    const draft = input_ref.current?.value ?? ''
+
+    void post_message_send_trace_pair({
+      chat_event: 'chat_message_send_clicked',
+      user_event: 'user_message_send_clicked',
+      payload: {
+        room_uuid: chat.room_uuid,
+        participant_uuid: chat.participant_uuid,
+        user_uuid: live_session?.user_uuid ?? null,
+        visitor_uuid: read_local_visitor_uuid(),
+        role: live_session?.role ?? null,
+        tier: live_session?.tier ?? null,
+        source_channel: live_session?.source_channel ?? 'web',
+        message_body_exists: draft.trim().length > 0,
+        message_body_length: draft.trim().length,
+        insert_table: null,
+        message_uuid: null,
+        error_code: null,
+        error_message: null,
+        error_details: null,
+        error_hint: null,
+        phase: 'footer_send_button_click',
+      },
+    })
+
+    void submit_chat_text(draft)
   }
 
   return (

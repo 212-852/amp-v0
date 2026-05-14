@@ -2678,7 +2678,7 @@ export async function handle_chat_message_request(
     visitor_uuid,
     role: session.role ?? null,
     tier: session.tier ?? null,
-    source_channel: session.source_channel ?? 'web',
+    source_channel: 'web',
     message_body_exists: text_value.length > 0,
     message_body_length: text_value.length,
     insert_table: null as string | null,
@@ -2915,12 +2915,159 @@ export async function handle_chat_message_request(
     locale,
   })
 
-  const archived_messages = await archive_message_bundles({
-    room_uuid: chat_room.room_uuid,
-    participant_uuid: chat_room.participant_uuid,
-    bot_participant_uuid: chat_room.bot_participant_uuid,
-    channel: chat_room.channel,
-    bundles: [incoming_bundle],
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_payload_built',
+    user_event: 'user_message_payload_built',
+    payload: {
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      user_uuid: clean_uuid(session.user_uuid),
+      visitor_uuid,
+      role: session.role ?? null,
+      tier: session.tier ?? null,
+      source_channel: chat_room.channel,
+      message_body_exists: text_value.length > 0,
+      message_body_length: text_value.length,
+      insert_table: 'public.messages',
+      message_uuid: null,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+      phase: 'user_text_bundle_ready',
+    },
+  })
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_archive_started',
+    user_event: 'user_message_archive_started',
+    payload: {
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      user_uuid: clean_uuid(session.user_uuid),
+      visitor_uuid,
+      role: session.role ?? null,
+      tier: session.tier ?? null,
+      source_channel: chat_room.channel,
+      message_body_exists: text_value.length > 0,
+      message_body_length: text_value.length,
+      insert_table: 'public.messages',
+      message_uuid: null,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+      phase: 'before_archive_message_bundles',
+    },
+  })
+
+  let archived_messages: archived_message[]
+
+  try {
+    archived_messages = await archive_message_bundles({
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      bot_participant_uuid: chat_room.bot_participant_uuid,
+      channel: chat_room.channel,
+      bundles: [incoming_bundle],
+    })
+  } catch (error) {
+    const err_fields = chat_message_error_fields(error)
+
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_archive_failed',
+      user_event: 'user_message_archive_failed',
+      payload: {
+        room_uuid: chat_room.room_uuid,
+        participant_uuid: chat_room.participant_uuid,
+        user_uuid: clean_uuid(session.user_uuid),
+        visitor_uuid,
+        role: session.role ?? null,
+        tier: session.tier ?? null,
+        source_channel: chat_room.channel,
+        message_body_exists: text_value.length > 0,
+        message_body_length: text_value.length,
+        insert_table: 'public.messages',
+        message_uuid: null,
+        ...err_fields,
+        phase: 'archive_message_bundles_exception',
+      },
+    })
+
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_send_failed',
+      user_event: 'user_message_send_failed',
+      payload: {
+        room_uuid: chat_room.room_uuid,
+        participant_uuid: chat_room.participant_uuid,
+        user_uuid: clean_uuid(session.user_uuid),
+        visitor_uuid,
+        role: session.role ?? null,
+        tier: session.tier ?? null,
+        source_channel: chat_room.channel,
+        message_body_exists: text_value.length > 0,
+        message_body_length: text_value.length,
+        insert_table: 'public.messages',
+        message_uuid: null,
+        ...err_fields,
+        phase: 'user_plain_text_send_failed',
+      },
+    })
+
+    return {
+      status: 500,
+      body: {
+        ok: false,
+        error: 'message_send_failed',
+        reason: 'archive_failed',
+      },
+    }
+  }
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_archive_succeeded',
+    user_event: 'user_message_archive_succeeded',
+    payload: {
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      user_uuid: clean_uuid(session.user_uuid),
+      visitor_uuid,
+      role: session.role ?? null,
+      tier: session.tier ?? null,
+      source_channel: chat_room.channel,
+      message_body_exists: text_value.length > 0,
+      message_body_length: text_value.length,
+      insert_table: 'public.messages',
+      message_uuid: archived_messages[0]?.archive_uuid ?? null,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+      phase: 'archive_message_bundles_ok',
+    },
+  })
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_send_finished',
+    user_event: 'user_message_send_finished',
+    payload: {
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      user_uuid: clean_uuid(session.user_uuid),
+      visitor_uuid,
+      role: session.role ?? null,
+      tier: session.tier ?? null,
+      source_channel: chat_room.channel,
+      message_body_exists: text_value.length > 0,
+      message_body_length: text_value.length,
+      insert_table: 'public.messages',
+      message_uuid: archived_messages[0]?.archive_uuid ?? null,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+      phase: 'user_plain_text_send_ok',
+    },
   })
 
   return {

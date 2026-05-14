@@ -34,6 +34,8 @@ export function resolve_debug_rule(input: {
     'chat_message_payload_built',
     'user_message_payload_built',
     'user_message_room_checked',
+    'chat_message_room_checked',
+    'chat_message_participant_checked',
     'user_message_participant_checked',
     'chat_message_send_blocked',
     'user_message_send_blocked',

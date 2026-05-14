@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { debug_control } from '@/lib/debug/control'
-import { debug_event } from '@/lib/debug'
+import { debug_event } from './index'
 
 export async function emit_message_send_diagnostic_pair(input: {
   chat_event: string
