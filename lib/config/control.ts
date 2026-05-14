@@ -25,7 +25,7 @@ export const control = {
      */
     use_discord_category_allowlist: true,
     /** PWA investigation: only `pwa` debug traces reach Discord (see lib/debug/rules.ts). */
-    discord_category_allowlist: ['pwa', 'chat_room'],
+    discord_category_allowlist: ['pwa', 'chat_message', 'user_message'],
   },
 
   notify: {

@@ -11,6 +11,7 @@ import { get_request_visitor_uuid } from '@/lib/visitor/request'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
+import { emit_message_send_diagnostic_pair } from '@/lib/debug/message_send_diagnostic'
 import {
   archive_incoming_line_text,
   archive_message_bundles,
@@ -2663,8 +2664,56 @@ export async function handle_chat_message_request(
   }
 
   const visitor_uuid = await get_request_visitor_uuid()
+  const session = await get_session_user()
+  const room_uuid_in = clean_uuid(body?.room_uuid)
+  const participant_uuid_in = clean_uuid(body?.participant_uuid)
+
+  const user_message_diag = (
+    phase: string,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    room_uuid: room_uuid_in,
+    participant_uuid: participant_uuid_in,
+    user_uuid: clean_uuid(session.user_uuid),
+    visitor_uuid,
+    role: session.role ?? null,
+    tier: session.tier ?? null,
+    source_channel: session.source_channel ?? 'web',
+    message_body_exists: text_value.length > 0,
+    message_body_length: text_value.length,
+    insert_table: null as string | null,
+    message_uuid: null as string | null,
+    error_code: null as string | null,
+    error_message: null as string | null,
+    error_details: null as string | null,
+    error_hint: null as string | null,
+    phase,
+    ...extra,
+  })
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_send_started',
+    user_event: 'user_message_send_started',
+    payload: user_message_diag('api_user_message_enter'),
+  })
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_session_loaded',
+    user_event: 'user_message_session_checked',
+    payload: user_message_diag('session_read'),
+  })
 
   if (!visitor_uuid) {
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_send_blocked',
+      user_event: 'user_message_send_blocked',
+      payload: {
+        ...user_message_diag('missing_visitor_uuid'),
+        error_code: 'missing_visitor_uuid',
+        error_message: 'missing_visitor_uuid',
+      },
+    })
+
     return {
       status: 401,
       body: { ok: false, error: 'session_required' },
@@ -2672,9 +2721,59 @@ export async function handle_chat_message_request(
   }
 
   if (!body?.room_uuid || !body.participant_uuid || text_value.length === 0) {
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_send_blocked',
+      user_event: 'user_message_send_blocked',
+      payload: {
+        ...user_message_diag('invalid_body'),
+        error_code: 'invalid_message',
+        error_message: 'room_participant_or_text_missing',
+      },
+    })
+
     return {
       status: 400,
       body: { ok: false, error: 'invalid_message' },
+    }
+  }
+
+  if (!room_uuid_in || !participant_uuid_in) {
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_send_blocked',
+      user_event: 'user_message_send_blocked',
+      payload: {
+        ...user_message_diag('invalid_uuids'),
+        error_code: 'invalid_uuid',
+        error_message: 'room_or_participant_uuid_invalid',
+      },
+    })
+
+    return {
+      status: 400,
+      body: { ok: false, error: 'invalid_message' },
+    }
+  }
+
+  const sender_user_uuid = clean_uuid(session.user_uuid)
+  const requires_authenticated_sender =
+    session.tier === 'member' ||
+    session.tier === 'vip' ||
+    (session.role === 'user' && session.tier !== 'guest')
+
+  if (requires_authenticated_sender && !sender_user_uuid) {
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_send_blocked',
+      user_event: 'user_message_send_blocked',
+      payload: {
+        ...user_message_diag('member_missing_user_uuid'),
+        error_code: 'session_required',
+        error_message: 'user_uuid_required_for_member_send',
+      },
+    })
+
+    return {
+      status: 401,
+      body: { ok: false, error: 'session_required' },
     }
   }
 
@@ -2715,10 +2814,66 @@ export async function handle_chat_message_request(
   })
 
   if (!room_resolved.ok) {
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_send_failed',
+      user_event: 'user_message_send_failed',
+      payload: {
+        ...user_message_diag('web_room_resolve_failed'),
+        error_code: 'room_resolve_failed',
+        error_message: 'resolve_web_chat_room_for_request_not_ok',
+      },
+    })
+
     return room_resolved.response
   }
 
   const chat_room = room_resolved.chat_room
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_room_checked',
+    user_event: 'user_message_room_checked',
+    payload: {
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      user_uuid: clean_uuid(session.user_uuid),
+      visitor_uuid,
+      role: session.role ?? null,
+      tier: session.tier ?? null,
+      source_channel: chat_room.channel,
+      message_body_exists: text_value.length > 0,
+      message_body_length: text_value.length,
+      insert_table: null,
+      message_uuid: null,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+      phase: 'web_room_resolve_succeeded',
+    },
+  })
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_participant_checked',
+    user_event: 'user_message_participant_checked',
+    payload: {
+      room_uuid: chat_room.room_uuid,
+      participant_uuid: chat_room.participant_uuid,
+      user_uuid: clean_uuid(session.user_uuid),
+      visitor_uuid,
+      role: session.role ?? null,
+      tier: session.tier ?? null,
+      source_channel: chat_room.channel,
+      message_body_exists: text_value.length > 0,
+      message_body_length: text_value.length,
+      insert_table: null,
+      message_uuid: null,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+      phase: 'participant_ready_for_archive',
+    },
+  })
 
   if (detected_switch_mode) {
     const incoming_bundle = build_line_mode_switch_bundle({

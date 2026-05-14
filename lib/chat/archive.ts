@@ -4,6 +4,7 @@ import { control } from '@/lib/config/control'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
+import { emit_message_send_diagnostic_pair } from '@/lib/debug/message_send_diagnostic'
 import type { chat_channel } from './room'
 import type { bundle_sender, message_bundle } from './message'
 
@@ -16,14 +17,21 @@ async function emit_chat_message_insert_succeeded(input: {
   inserted_room_uuid: string
   channel: chat_channel
 }) {
-  await debug_event({
-    category: 'chat_message',
-    event: 'chat_message_insert_succeeded',
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_insert_succeeded',
+    user_event: 'user_message_insert_succeeded',
     payload: {
-      inserted_table: input.inserted_table,
-      inserted_message_uuid: input.inserted_message_uuid,
-      inserted_room_uuid: input.inserted_room_uuid,
-      channel: input.channel,
+      insert_table: input.inserted_table,
+      message_uuid: input.inserted_message_uuid,
+      room_uuid: input.inserted_room_uuid,
+      participant_uuid: null,
+      user_uuid: null,
+      visitor_uuid: null,
+      role: null,
+      tier: null,
+      source_channel: input.channel,
+      message_body_exists: false,
+      message_body_length: 0,
       phase: 'messages_insert',
     },
   })
@@ -559,22 +567,88 @@ export async function archive_message_bundles(
     }
   })
 
+  const first_bundle = input.bundles[0]
+  const diag_body_len =
+    first_bundle &&
+    'payload' in first_bundle &&
+    first_bundle.payload &&
+    typeof (first_bundle.payload as { text?: unknown }).text === 'string'
+      ? (first_bundle.payload as { text: string }).text.length
+      : 0
+
+  await emit_message_send_diagnostic_pair({
+    chat_event: 'chat_message_insert_started',
+    user_event: 'user_message_insert_started',
+    payload: {
+      room_uuid: sanitized_room_uuid,
+      participant_uuid: sanitized_user_participant_uuid,
+      user_uuid: null,
+      visitor_uuid: null,
+      role: null,
+      tier: null,
+      source_channel: input.channel,
+      message_body_exists: diag_body_len > 0,
+      message_body_length: diag_body_len,
+      insert_table: chat_archived_messages_table,
+      message_uuid: null,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+      phase: 'archive_message_bundles_pre_insert',
+    },
+  })
+
   const result = await supabase
     .from('messages')
     .insert(rows)
     .select('message_uuid, room_uuid, body, created_at')
 
   if (result.error) {
+    const err = result.error as {
+      code?: string
+      message?: string
+      details?: string
+      hint?: string
+    }
+
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_insert_failed',
+      user_event: 'user_message_insert_failed',
+      payload: {
+        room_uuid: sanitized_room_uuid,
+        participant_uuid: sanitized_user_participant_uuid,
+        user_uuid: null,
+        visitor_uuid: null,
+        role: null,
+        tier: null,
+        source_channel: input.channel,
+        message_body_exists: diag_body_len > 0,
+        message_body_length: diag_body_len,
+        insert_table: chat_archived_messages_table,
+        message_uuid: null,
+        error_code: typeof err.code === 'string' ? err.code : null,
+        error_message:
+          typeof err.message === 'string' ? err.message : String(result.error),
+        error_details:
+          typeof err.details === 'string' ? err.details : null,
+        error_hint: typeof err.hint === 'string' ? err.hint : null,
+        phase: 'archive_message_bundles_insert',
+      },
+    })
+
     throw result.error
   }
 
   const inserted = (result.data ?? []) as archive_row[]
 
-  for (const row of inserted) {
+  const first_row = inserted[0]
+
+  if (first_row) {
     await emit_chat_message_insert_succeeded({
       inserted_table: chat_archived_messages_table,
-      inserted_message_uuid: row.message_uuid,
-      inserted_room_uuid: row.room_uuid,
+      inserted_message_uuid: first_row.message_uuid,
+      inserted_room_uuid: first_row.room_uuid,
       channel: input.channel,
     })
   }

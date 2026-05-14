@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { control } from '@/lib/config/control'
+import { debug_control } from '@/lib/debug/control'
 import { notify } from '@/lib/notify'
 import { resolve_debug_rule } from './rules'
 
@@ -12,6 +13,12 @@ type debug_payload = {
 }
 
 function allow_discord_debug_category(category: string, event?: string) {
+  const chat_messages_fetch_events = new Set([
+    'chat_messages_fetch_started',
+    'chat_messages_fetch_succeeded',
+    'chat_messages_fetch_failed',
+  ])
+
   const chat_room_resolve_pipeline = new Set([
     'chat_room_resolve_started',
     'chat_room_participant_lookup_started',
@@ -37,6 +44,15 @@ function allow_discord_debug_category(category: string, event?: string) {
   if (
     category === 'admin_chat' &&
     event === 'support_started_notify_failed'
+  ) {
+    return true
+  }
+
+  if (
+    category === 'chat_room' &&
+    event &&
+    chat_messages_fetch_events.has(event) &&
+    debug_control.chat_messages_fetch_discord_enabled
   ) {
     return true
   }

@@ -24,11 +24,49 @@ export function resolve_debug_rule(input: {
     }
   }
 
-  if (input.category === 'chat_message') {
+  const message_send_diagnostic_events = new Set([
+    'chat_message_send_clicked',
+    'user_message_send_clicked',
+    'chat_message_send_started',
+    'user_message_send_started',
+    'chat_message_session_loaded',
+    'user_message_session_checked',
+    'chat_message_payload_built',
+    'user_message_payload_built',
+    'user_message_room_checked',
+    'user_message_participant_checked',
+    'chat_message_send_blocked',
+    'user_message_send_blocked',
+    'chat_message_insert_started',
+    'user_message_insert_started',
+    'chat_message_insert_succeeded',
+    'user_message_insert_succeeded',
+    'chat_message_insert_failed',
+    'user_message_insert_failed',
+    'user_message_archive_started',
+    'chat_message_archive_started',
+    'user_message_archive_succeeded',
+    'chat_message_archive_succeeded',
+    'user_message_archive_failed',
+    'chat_message_archive_failed',
+    'chat_message_send_failed',
+    'user_message_send_failed',
+    'chat_message_send_finished',
+    'user_message_send_finished',
+  ])
+
+  if (
+    (input.category === 'chat_message' || input.category === 'user_message') &&
+    message_send_diagnostic_events.has(input.event)
+  ) {
+    const is_error =
+      input.event.endsWith('_failed') ||
+      input.event.endsWith('_blocked')
+
     return {
-      category: 'chat_message',
-      level: 'info',
-      channels: [],
+      category: input.category,
+      level: is_error ? 'error' : 'info',
+      channels: debug_control.message_send_trace_enabled ? ['discord'] : [],
     }
   }
 
@@ -95,19 +133,6 @@ export function resolve_debug_rule(input: {
         is_failed || debug_control.admin_management_debug_enabled
           ? ['discord']
           : [],
-    }
-  }
-
-  if (
-    input.category === 'chat_message' &&
-    input.event === 'chat_message_insert_succeeded'
-  ) {
-    return {
-      category: 'chat_message',
-      level: 'info',
-      channels: debug_control.realtime_verbose_debug_enabled
-        ? ['discord']
-        : [],
     }
   }
 
@@ -561,11 +586,14 @@ export function resolve_debug_rule(input: {
     chat_room_lifecycle.has(input.event)
   ) {
     const is_failed = input.event.endsWith('_failed')
+    const is_fetch = input.event.startsWith('chat_messages_fetch_')
+    const allow_discord =
+      is_fetch && debug_control.chat_messages_fetch_discord_enabled
 
     return {
       category: 'chat_room',
       level: is_failed ? 'error' : 'info',
-      channels: ['discord'],
+      channels: allow_discord ? ['discord'] : [],
     }
   }
 
