@@ -1734,12 +1734,7 @@ type web_chat_room_resolve_result =
       }
     }
 
-async function resolve_web_chat_room_for_request(input: {
-  visitor_uuid: string
-  room_uuid: string
-  participant_uuid: string
-  mode: room_mode
-}): Promise<web_chat_room_resolve_result> {
+async function resolve_request_chat_channel(): Promise<chat_channel> {
   const header_store = await headers()
   const cookie_store = await cookies()
   const user_agent = header_store.get('user-agent')
@@ -1748,7 +1743,17 @@ async function resolve_web_chat_room_for_request(input: {
     infer_source_channel_from_ua(user_agent),
     user_agent,
   )
-  const channel = session_source_to_chat_channel(source_channel)
+
+  return session_source_to_chat_channel(source_channel)
+}
+
+async function resolve_web_chat_room_for_request(input: {
+  visitor_uuid: string
+  room_uuid: string
+  participant_uuid: string
+  mode: room_mode
+}): Promise<web_chat_room_resolve_result> {
+  const channel = await resolve_request_chat_channel()
 
   const participant_result = await supabase
     .from('participants')
@@ -1807,6 +1812,90 @@ async function resolve_web_chat_room_for_request(input: {
       user_uuid: clean_uuid(participant_result.data.user_uuid),
       visitor_uuid: input.visitor_uuid,
       channel,
+      mode: input.mode,
+    },
+  }
+}
+
+async function validate_web_chat_room_from_request_body(input: {
+  session_user_uuid: string | null
+  body_user_uuid: string | null
+  visitor_uuid: string | null
+  room_uuid: string
+  participant_uuid: string
+  mode: room_mode
+}): Promise<web_chat_room_resolve_result> {
+  if (
+    !input.session_user_uuid ||
+    !input.body_user_uuid ||
+    input.session_user_uuid !== input.body_user_uuid
+  ) {
+    return {
+      ok: false,
+      response: {
+        status: 403,
+        body: { ok: false, error: 'room_mismatch' },
+      },
+    }
+  }
+
+  const participant_result = await supabase
+    .from('participants')
+    .select('participant_uuid, room_uuid, visitor_uuid, user_uuid')
+    .eq('participant_uuid', input.participant_uuid)
+    .eq('room_uuid', input.room_uuid)
+    .eq('user_uuid', input.session_user_uuid)
+    .eq('role', 'user')
+    .maybeSingle()
+
+  if (participant_result.error) {
+    throw participant_result.error
+  }
+
+  if (!participant_result.data?.participant_uuid) {
+    return {
+      ok: false,
+      response: {
+        status: 403,
+        body: { ok: false, error: 'room_mismatch' },
+      },
+    }
+  }
+
+  const bot_participant_result = await supabase
+    .from('participants')
+    .select('participant_uuid')
+    .eq('room_uuid', input.room_uuid)
+    .eq('role', 'bot')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (bot_participant_result.error) {
+    throw bot_participant_result.error
+  }
+
+  if (!bot_participant_result.data?.participant_uuid) {
+    return {
+      ok: false,
+      response: {
+        status: 404,
+        body: { ok: false, error: 'room_not_found' },
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    chat_room: {
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      bot_participant_uuid: bot_participant_result.data.participant_uuid,
+      user_uuid: input.session_user_uuid,
+      visitor_uuid:
+        clean_uuid(participant_result.data.visitor_uuid) ??
+        clean_uuid(input.visitor_uuid),
+      channel: await resolve_request_chat_channel(),
       mode: input.mode,
     },
   }
@@ -2448,6 +2537,7 @@ export async function handle_chat_message_request(
   const body = (await request.json().catch(() => null)) as {
     room_uuid?: string
     participant_uuid?: string
+    user_uuid?: string | null
     locale?: string
     text?: string
     source?: string
@@ -2667,6 +2757,8 @@ export async function handle_chat_message_request(
   const session = await get_session_user()
   const room_uuid_in = clean_uuid(body?.room_uuid)
   const participant_uuid_in = clean_uuid(body?.participant_uuid)
+  const body_user_uuid_in = clean_uuid(body?.user_uuid)
+  const session_user_uuid = clean_uuid(session.user_uuid)
 
   const user_message_diag = (
     phase: string,
@@ -2674,7 +2766,9 @@ export async function handle_chat_message_request(
   ) => ({
     room_uuid: room_uuid_in,
     participant_uuid: participant_uuid_in,
-    user_uuid: clean_uuid(session.user_uuid),
+    user_uuid: session_user_uuid,
+    session_user_uuid,
+    body_user_uuid: body_user_uuid_in,
     visitor_uuid,
     role: session.role ?? null,
     tier: session.tier ?? null,
@@ -2754,7 +2848,7 @@ export async function handle_chat_message_request(
     }
   }
 
-  const sender_user_uuid = clean_uuid(session.user_uuid)
+  const sender_user_uuid = session_user_uuid
   const requires_authenticated_sender =
     session.tier === 'member' ||
     session.tier === 'vip' ||
@@ -2813,21 +2907,72 @@ export async function handle_chat_message_request(
     mode: initial_mode,
   })
 
-  if (!room_resolved.ok) {
+  let validated_room = room_resolved
+
+  if (!validated_room.ok) {
     await emit_message_send_diagnostic_pair({
-      chat_event: 'chat_message_send_failed',
-      user_event: 'user_message_send_failed',
+      chat_event: 'chat_message_api_room_validate_started',
+      user_event: 'user_message_api_room_validate_started',
+      payload: user_message_diag('request_body_room_validate_started'),
+    })
+
+    try {
+      validated_room = await validate_web_chat_room_from_request_body({
+        session_user_uuid,
+        body_user_uuid: body_user_uuid_in,
+        visitor_uuid,
+        room_uuid: room_uuid_in,
+        participant_uuid: participant_uuid_in,
+        mode: initial_mode,
+      })
+    } catch (error) {
+      const err_fields = chat_message_error_fields(error)
+
+      await emit_message_send_diagnostic_pair({
+        chat_event: 'chat_message_api_room_validate_failed',
+        user_event: 'user_message_api_room_validate_failed',
+        payload: {
+          ...user_message_diag('request_body_room_validate_exception'),
+          ...err_fields,
+        },
+      })
+
+      return {
+        status: 500,
+        body: {
+          ok: false,
+          error: 'room_resolve_failed',
+          reason: 'room_validate_exception',
+        },
+      }
+    }
+  }
+
+  if (!validated_room.ok) {
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_api_room_validate_failed',
+      user_event: 'user_message_api_room_validate_failed',
       payload: {
-        ...user_message_diag('web_room_resolve_failed'),
+        ...user_message_diag('request_body_room_validate_failed'),
         error_code: 'room_resolve_failed',
-        error_message: 'resolve_web_chat_room_for_request_not_ok',
+        error_message: 'room_participant_user_validation_failed',
       },
     })
 
-    return room_resolved.response
+    return validated_room.response
   }
 
-  const chat_room = room_resolved.chat_room
+  const chat_room = validated_room.chat_room
+
+  if (!room_resolved.ok) {
+    await emit_message_send_diagnostic_pair({
+      chat_event: 'chat_message_api_room_validate_succeeded',
+      user_event: 'user_message_api_room_validate_succeeded',
+      payload: user_message_diag('request_body_room_validate_succeeded', {
+        source_channel: chat_room.channel,
+      }),
+    })
+  }
 
   await emit_message_send_diagnostic_pair({
     chat_event: 'chat_message_room_checked',

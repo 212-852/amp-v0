@@ -726,6 +726,7 @@ export default function UserFooter() {
         body: JSON.stringify({
           room_uuid: chat.room_uuid,
           participant_uuid: chat.participant_uuid,
+          user_uuid: live_session?.user_uuid ?? null,
           locale: render_locale,
           text,
         }),
