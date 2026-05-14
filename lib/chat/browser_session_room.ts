@@ -44,6 +44,65 @@ function base_debug_payload(input: resolve_browser_session_chat_room_input) {
   }
 }
 
+function alternate_browser_channel(channel: chat_channel): chat_channel | null {
+  if (channel === 'pwa') {
+    return 'web'
+  }
+
+  if (channel === 'web') {
+    return 'pwa'
+  }
+
+  return null
+}
+
+async function resolve_room_with_retry(
+  input: resolve_browser_session_chat_room_input,
+  channel: chat_channel,
+) {
+  const max_attempts = 5
+  let last: Awaited<ReturnType<typeof resolve_chat_room>> | null = null
+
+  for (let attempt = 1; attempt <= max_attempts; attempt += 1) {
+    await ensure_direct_room_for_visitor({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid,
+      channel,
+    })
+
+    last = await resolve_chat_room({
+      visitor_uuid: input.visitor_uuid,
+      user_uuid: input.user_uuid,
+      channel,
+    })
+
+    if (last.ok && last.room.room_uuid && last.room.participant_uuid) {
+      return last
+    }
+
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_resolve_failed',
+      payload: {
+        ...base_debug_payload(input),
+        room_ok: last.ok,
+        participant_uuid: last.room.participant_uuid || null,
+        room_uuid: last.room.room_uuid || null,
+        source_channel: channel,
+        reason: 'resolve_chat_room_attempt_failed',
+        error_code: 'room_or_participant_missing',
+        error_message: `attempt_${attempt}`,
+      },
+    })
+
+    if (attempt < max_attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 120 * attempt))
+    }
+  }
+
+  return last
+}
+
 /**
  * Browser session: ensure direct room exists, resolve participant/room, then
  * load/seed messages via resolve_initial_chat (single chat core path).
@@ -63,28 +122,31 @@ export async function run_browser_session_chat_room_resolve(
   })
 
   try {
-    await ensure_direct_room_for_visitor({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
-      channel: input.channel,
-    })
+    let resolved_channel = input.channel
+    let room_probe = await resolve_room_with_retry(input, resolved_channel)
 
-    const room_probe = await resolve_chat_room({
-      visitor_uuid: input.visitor_uuid,
-      user_uuid: input.user_uuid,
-      channel: input.channel,
-    })
+    if (!room_probe?.ok || !room_probe.room.room_uuid) {
+      const alternate = alternate_browser_channel(input.channel)
 
-    if (!room_probe.ok || !room_probe.room.room_uuid) {
+      if (alternate) {
+        resolved_channel = alternate
+        room_probe = await resolve_room_with_retry(input, resolved_channel)
+      }
+    }
+
+    if (!room_probe || !room_probe.ok || !room_probe.room.room_uuid) {
       await debug_event({
         category: 'chat_room',
         event: 'chat_room_resolve_failed',
         payload: {
           ...base,
-          room_ok: room_probe.ok,
-          participant_uuid: room_probe.room.participant_uuid || null,
-          room_uuid: room_probe.room.room_uuid || null,
-          reason: 'resolve_chat_room_failed',
+          room_ok: room_probe?.ok ?? false,
+          participant_uuid: room_probe?.room.participant_uuid || null,
+          room_uuid: room_probe?.room.room_uuid || null,
+          source_channel: resolved_channel,
+          reason: 'resolve_chat_room_failed_after_retries',
+          error_code: 'room_or_participant_missing',
+          error_message: 'resolve_chat_room returned no room_uuid',
         },
       })
 
@@ -94,7 +156,7 @@ export async function run_browser_session_chat_room_resolve(
     const initial_chat = await resolve_initial_chat({
       visitor_uuid: input.visitor_uuid,
       user_uuid: input.user_uuid,
-      channel: input.channel,
+      channel: resolved_channel,
       locale: input.locale,
       session_restored: input.session_restored,
     })
@@ -107,7 +169,9 @@ export async function run_browser_session_chat_room_resolve(
           ...base,
           participant_uuid: initial_chat.room.participant_uuid || null,
           room_uuid: null,
+          source_channel: resolved_channel,
           reason: 'initial_chat_room_missing',
+          error_code: 'initial_chat_room_missing',
         },
       })
 
@@ -128,7 +192,7 @@ export async function run_browser_session_chat_room_resolve(
           user_uuid: input.user_uuid,
           participant_uuid: room_probe.room.participant_uuid,
           room_uuid: room_probe.room.room_uuid,
-          source_channel: input.source_channel,
+          source_channel: resolved_channel,
           role: input.role,
           tier: input.tier,
           reason: 'resolve_chat_room_ok_initial_chat_missing',
@@ -166,7 +230,7 @@ export async function run_browser_session_chat_room_resolve(
         user_uuid: input.user_uuid,
         participant_uuid: initial_chat.room.participant_uuid,
         room_uuid: initial_chat.room.room_uuid,
-        source_channel: input.source_channel,
+        source_channel: resolved_channel,
         role: input.role,
         tier: input.tier,
         reason: 'resolve_initial_chat_ok',
@@ -182,7 +246,7 @@ export async function run_browser_session_chat_room_resolve(
           user_uuid: input.user_uuid,
           participant_uuid: initial_chat.room.participant_uuid,
           room_uuid: initial_chat.room.room_uuid,
-          source_channel: input.source_channel,
+          source_channel: resolved_channel,
           role: input.role,
           tier: input.tier,
           reason: 'session_restored',
@@ -203,7 +267,7 @@ export async function run_browser_session_chat_room_resolve(
           user_uuid: input.user_uuid,
           participant_uuid: initial_chat.room.participant_uuid,
           room_uuid: initial_chat.room.room_uuid,
-          source_channel: input.source_channel,
+          source_channel: resolved_channel,
           role: input.role,
           tier: input.tier,
           reason: 'existing_room',
@@ -219,6 +283,7 @@ export async function run_browser_session_chat_room_resolve(
       payload: {
         ...base,
         reason: 'exception',
+        error_code: 'exception',
         error_message: error instanceof Error ? error.message : String(error),
       },
     })
