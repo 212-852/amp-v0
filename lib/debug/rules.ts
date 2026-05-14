@@ -123,6 +123,8 @@ export function resolve_debug_rule(input: {
   const admin_management_events = new Set([
     'profile_fetch_started',
     'profile_fetch_succeeded',
+    'profile_save_clicked',
+    'profile_save_payload_built',
     'profile_save_started',
     'profile_save_failed',
     'profile_save_succeeded',
@@ -140,7 +142,9 @@ export function resolve_debug_rule(input: {
 
     const is_save_trace_anchor =
       input.event === 'profile_fetch_started' ||
-      input.event === 'profile_fetch_succeeded'
+      input.event === 'profile_fetch_succeeded' ||
+      input.event === 'profile_save_clicked' ||
+      input.event === 'profile_save_payload_built'
 
     return {
       category: 'admin_management',

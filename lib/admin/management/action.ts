@@ -344,6 +344,9 @@ export type update_profile_result =
         | 'invalid_birth_date'
         | 'persist_failed'
         | 'target_load_failed'
+      error_message?: string
+      error_details?: string | null
+      error_hint?: string | null
     }
 
 /**
@@ -352,6 +355,7 @@ export type update_profile_result =
  */
 type profile_debug_row = {
   target_user_uuid: string
+  auth_user_uuid: string
   updated_by_user_uuid: string
   role: string | null
   tier: string | null
@@ -480,6 +484,8 @@ async function emit_admin_management_debug(input: {
   event:
     | 'profile_fetch_started'
     | 'profile_fetch_succeeded'
+    | 'profile_save_clicked'
+    | 'profile_save_payload_built'
     | 'profile_save_started'
     | 'profile_save_failed'
     | 'profile_save_succeeded'
@@ -526,6 +532,8 @@ export async function update_profile(input: {
       >,
   ): profile_debug_row => ({
     target_user_uuid: partial.target_user_uuid ?? user_uuid ?? '',
+    auth_user_uuid:
+      partial.updated_by_user_uuid ?? updated_by_user_uuid ?? '',
     updated_by_user_uuid:
       partial.updated_by_user_uuid ?? updated_by_user_uuid ?? '',
     role: partial.role ?? input.updated_by_role ?? null,
@@ -556,6 +564,15 @@ export async function update_profile(input: {
 
     return { ok: false, error: 'invalid_user' }
   }
+
+  await emit_admin_management_debug({
+    event: 'profile_save_clicked',
+    base: base_debug({
+      phase: 'clicked',
+      changed_fields: [],
+    }),
+    extra: profile_form_debug_extra(input),
+  })
 
   if (
     !updated_by_user_uuid ||
@@ -625,7 +642,13 @@ export async function update_profile(input: {
       extra: profile_form_debug_extra(input),
     })
 
-    return { ok: false, error: 'target_load_failed' }
+    return {
+      ok: false,
+      error: 'target_load_failed',
+      error_message: serialized.error_message,
+      error_details: serialized.error_details,
+      error_hint: serialized.error_hint,
+    }
   }
 
   if (!user_result.data) {
@@ -658,7 +681,7 @@ export async function update_profile(input: {
 
   const current_profile_result = await supabase
     .from('profiles')
-    .select('real_name, birth_date, internal_name, display_name, updated_at')
+    .select('real_name, birth_date, internal_name, updated_at')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -677,7 +700,13 @@ export async function update_profile(input: {
       extra: profile_form_debug_extra(input),
     })
 
-    return { ok: false, error: 'target_load_failed' }
+    return {
+      ok: false,
+      error: 'target_load_failed',
+      error_message: serialized.error_message,
+      error_details: serialized.error_details,
+      error_hint: serialized.error_hint,
+    }
   }
 
   const current_profile = (current_profile_result.data ?? {}) as profiles_row
@@ -702,11 +731,25 @@ export async function update_profile(input: {
     extra: {
       ...profile_form_debug_extra(input),
       persist_table: 'profiles',
-      persist_columns: ['real_name', 'birth_date', 'internal_name', 'display_name'],
+      persist_columns: ['real_name', 'birth_date', 'internal_name', 'updated_at'],
       persist_update_key_column: 'user_uuid',
       target_user_uuid_matches_update_key: true,
       db_client: 'supabase_service_role',
       rls_effect: 'service_role_bypasses_rls',
+    },
+  })
+
+  await emit_admin_management_debug({
+    event: 'profile_save_payload_built',
+    base: base_debug({
+      phase: 'payload_built',
+      changed_fields,
+    }),
+    extra: {
+      ...profile_form_debug_extra(input),
+      persist_table: 'profiles',
+      persist_columns: ['user_uuid', 'real_name', 'birth_date', 'internal_name', 'updated_at'],
+      persist_update_key_column: 'user_uuid',
     },
   })
 
@@ -727,16 +770,14 @@ export async function update_profile(input: {
     .upsert(
       {
         user_uuid,
-        display_name: validation.value.work_name,
         real_name: validation.value.real_name,
         birth_date: validation.value.birth_date,
         internal_name: validation.value.work_name,
-        updated_by_user_uuid,
         updated_at,
       },
       { onConflict: 'user_uuid' },
     )
-    .select('real_name, birth_date, internal_name, display_name, updated_at')
+    .select('real_name, birth_date, internal_name, updated_at')
     .maybeSingle()
 
   if (upsert_result.error) {
@@ -754,7 +795,13 @@ export async function update_profile(input: {
       extra: profile_form_debug_extra(input),
     })
 
-    return { ok: false, error: 'persist_failed' }
+    return {
+      ok: false,
+      error: 'persist_failed',
+      error_message: serialized.error_message,
+      error_details: serialized.error_details,
+      error_hint: serialized.error_hint,
+    }
   }
 
   const saved_profile = (upsert_result.data ?? {}) as profiles_row
@@ -762,7 +809,7 @@ export async function update_profile(input: {
   const profile: profile = {
     real_name: string_value(saved_profile['real_name']),
     birth_date: string_value(saved_profile['birth_date']),
-    display_name: string_value(saved_profile['display_name']),
+    display_name: null,
     work_name: next_work_name,
     updated_at: string_value(saved_profile['updated_at']) ?? updated_at,
   }

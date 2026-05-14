@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 
 type AdminManagementDetailPageProps = {
   params: Promise<{ user_uuid: string }>
-  searchParams?: Promise<{ saved?: string; error?: string }>
+  searchParams?: Promise<{ saved?: string; error?: string; error_message?: string }>
 }
 
 function format_time(iso: string | null): string {
@@ -88,6 +88,7 @@ export default async function AdminManagementDetailPage({
   const is_saved = query.saved === '1'
   const has_error = Boolean(query.error)
   const error_code = query.error ?? null
+  const error_message = query.error_message ?? null
 
   async function save_profile(form_data: FormData) {
     'use server'
@@ -106,7 +107,13 @@ export default async function AdminManagementDetailPage({
     })
 
     if (!result.ok) {
-      redirect(`/admin/management/${user_uuid}?error=${result.error}`)
+      const params = new URLSearchParams({ error: result.error })
+
+      if (result.error_message) {
+        params.set('error_message', result.error_message)
+      }
+
+      redirect(`/admin/management/${user_uuid}?${params.toString()}`)
     }
 
     revalidatePath('/admin/management')
@@ -196,10 +203,11 @@ export default async function AdminManagementDetailPage({
               ) : null}
               {has_error ? (
                 <span className="text-[12px] font-semibold text-neutral-500">
-                  {error_code === 'persist_failed' ||
-                  error_code === 'target_load_failed'
-                    ? '保存に失敗しました。時間をおいて再度お試しください。'
-                    : '入力内容を確認してください'}
+                  {error_message ??
+                    (error_code === 'persist_failed' ||
+                    error_code === 'target_load_failed'
+                      ? 'Save failed. Check Debug Cat for the Supabase error.'
+                      : '入力内容を確認してください')}
                 </span>
               ) : null}
             </div>
