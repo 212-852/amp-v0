@@ -1,3 +1,7 @@
+/**
+ * Push subscriptions are device notification endpoints in `push_subscriptions`
+ * (one user, many devices). They are not merged into `identities`.
+ */
 export type push_session_slice = {
   role: string | null | undefined
   tier: string | null | undefined

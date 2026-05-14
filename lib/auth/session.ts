@@ -298,6 +298,18 @@ export async function restore_visitor_user_link(
   }
 
   if (!resolved_user || !restore_source) {
+    await debug_event({
+      category: 'pwa',
+      event: 'pwa_user_restore_failed',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: null,
+        phase: 'restore_visitor_user_link',
+        reason: 'identity_user_uuid_not_found',
+        restore_source: null,
+      },
+    })
+
     return { outcome: 'no_match', user_uuid: null }
   }
 

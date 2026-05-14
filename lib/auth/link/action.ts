@@ -523,6 +523,49 @@ export async function complete_line_oauth_identity_link(input: {
   }
 
   const row = updated.data as unknown as pending_line_oauth_identity_row
+  const visitor_uuid = clean_uuid(row.linked_visitor_uuid ?? row.visitor_uuid)
+
+  if (visitor_uuid) {
+    const visitor_update = await supabase
+      .from('visitors')
+      .update({
+        user_uuid: input.completed_user_uuid,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('visitor_uuid', visitor_uuid)
+      .select('visitor_uuid, user_uuid')
+      .maybeSingle()
+
+    if (visitor_update.error) {
+      await debug_event({
+        category: 'pwa',
+        event: 'pwa_user_restore_failed',
+        payload: {
+          visitor_uuid,
+          user_uuid: input.completed_user_uuid,
+          phase: 'identity_link_completed',
+          reason: 'visitor_user_uuid_persist_failed',
+          restore_source: 'identity_link_completed',
+          error_code: visitor_update.error.code ?? null,
+          error_message: visitor_update.error.message,
+        },
+      })
+
+      throw visitor_update.error
+    }
+
+    await debug_event({
+      category: 'pwa',
+      event: 'pwa_user_restore_succeeded',
+      payload: {
+        visitor_uuid,
+        user_uuid: input.completed_user_uuid,
+        phase: 'identity_link_completed',
+        reason: 'visitor_user_uuid_persisted',
+        restore_source: 'identity_link_completed',
+      },
+    })
+  }
 
   await debug_event({
     category: 'pwa',
