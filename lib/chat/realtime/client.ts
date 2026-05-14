@@ -83,6 +83,46 @@ function broadcast_inner_payload_preview(value: unknown): string {
   return `keys:${keys}`
 }
 
+function extract_admin_realtime_insert_fields(raw: Record<string, unknown>) {
+  const payload_room_uuid =
+    typeof raw.room_uuid === 'string' ? raw.room_uuid : null
+  const message_uuid =
+    typeof raw.message_uuid === 'string' ? raw.message_uuid : null
+  const message_channel =
+    typeof raw.channel === 'string' ? raw.channel : null
+
+  let message_source_channel: string | null = null
+  let message_direction: string | null = null
+
+  const body = raw.body
+
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const b = body as Record<string, unknown>
+    message_source_channel =
+      typeof b.source_channel === 'string' ? b.source_channel : null
+    message_direction =
+      typeof b.direction === 'string' ? b.direction : null
+  } else if (typeof body === 'string' && body.trim()) {
+    try {
+      const b = JSON.parse(body) as Record<string, unknown>
+      message_source_channel =
+        typeof b.source_channel === 'string' ? b.source_channel : null
+      message_direction =
+        typeof b.direction === 'string' ? b.direction : null
+    } catch {
+      /* keep null */
+    }
+  }
+
+  return {
+    payload_room_uuid,
+    message_uuid,
+    message_channel,
+    message_source_channel,
+    message_direction,
+  }
+}
+
 type chat_realtime_debug_payload = {
   event: string
   room_uuid: string | null
@@ -131,6 +171,9 @@ type chat_realtime_debug_payload = {
   visibility_state?: string | null
   is_scrolled_to_bottom?: boolean | null
   skip_reason?: string | null
+  message_channel?: string | null
+  message_source_channel?: string | null
+  message_direction?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -275,6 +318,27 @@ export function subscribe_chat_room_realtime(input: {
       },
       (payload) => {
         const raw_new = payload.new as Record<string, unknown> | undefined
+        const is_admin_listener = input.source_channel === 'admin'
+        const admin_insert =
+          is_admin_listener && raw_new
+            ? extract_admin_realtime_insert_fields(raw_new)
+            : null
+
+        if (admin_insert) {
+          send_chat_realtime_debug({
+            event: 'admin_realtime_payload_received',
+            ...base_debug,
+            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+            payload_room_uuid: admin_insert.payload_room_uuid,
+            message_uuid: admin_insert.message_uuid,
+            payload_message_uuid: admin_insert.message_uuid,
+            message_channel: admin_insert.message_channel,
+            message_source_channel: admin_insert.message_source_channel,
+            message_direction: admin_insert.message_direction,
+            phase: 'postgres_changes_insert_admin',
+          })
+        }
+
         const entry_room_uuid =
           raw_new && typeof raw_new.room_uuid === 'string'
             ? raw_new.room_uuid
@@ -308,6 +372,22 @@ export function subscribe_chat_room_realtime(input: {
           typeof row?.message_uuid === 'string' ? row.message_uuid : null
 
         if (payload_room_uuid && payload_room_uuid !== input.room_uuid) {
+          if (admin_insert) {
+            send_chat_realtime_debug({
+              event: 'admin_realtime_payload_ignored',
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+              payload_room_uuid,
+              message_uuid,
+              payload_message_uuid: message_uuid,
+              message_channel: admin_insert.message_channel,
+              message_source_channel: admin_insert.message_source_channel,
+              message_direction: admin_insert.message_direction,
+              ignored_reason: 'payload_room_uuid_mismatch',
+              phase: 'postgres_changes_insert_admin',
+            })
+          }
+
           send_chat_realtime_debug({
             event: 'chat_realtime_message_callback_ignored',
             ...base_debug,
@@ -330,6 +410,22 @@ export function subscribe_chat_room_realtime(input: {
         const message = archived_message_from_message_row(row as message_insert_row)
 
         if (!message) {
+          if (admin_insert) {
+            send_chat_realtime_debug({
+              event: 'admin_realtime_payload_ignored',
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+              payload_room_uuid,
+              message_uuid,
+              payload_message_uuid: message_uuid,
+              message_channel: admin_insert.message_channel,
+              message_source_channel: admin_insert.message_source_channel,
+              message_direction: admin_insert.message_direction,
+              ignored_reason: 'unparseable_message_row',
+              phase: 'postgres_changes_insert_admin',
+            })
+          }
+
           send_chat_realtime_debug({
             event: 'chat_realtime_message_callback_ignored',
             ...base_debug,
@@ -361,6 +457,22 @@ export function subscribe_chat_room_realtime(input: {
           message.bundle.bundle_type === 'room_action_log'
             ? message.bundle.bundle_uuid
             : null
+
+        if (admin_insert) {
+          send_chat_realtime_debug({
+            event: 'admin_realtime_payload_accepted',
+            ...base_debug,
+            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+            payload_room_uuid,
+            message_uuid: message.archive_uuid,
+            payload_message_uuid: message.archive_uuid,
+            message_channel: admin_insert.message_channel,
+            message_source_channel: admin_insert.message_source_channel,
+            message_direction: admin_insert.message_direction,
+            sender_participant_uuid: message.sender_participant_uuid ?? null,
+            phase: 'postgres_changes_insert_admin',
+          })
+        }
 
         send_chat_realtime_debug({
           event: 'chat_realtime_message_callback_received',

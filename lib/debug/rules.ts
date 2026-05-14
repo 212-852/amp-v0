@@ -551,6 +551,7 @@ export function resolve_debug_rule(input: {
     'chat_typing_broadcast_failed',
     'chat_typing_listener_not_registered',
     'chat_typing_send_before_subscribed',
+    'admin_message_state_append_failed',
   ])
 
   const chat_realtime_success_gated = new Set([
@@ -579,6 +580,11 @@ export function resolve_debug_rule(input: {
     'toast_skipped',
     'toast_clicked',
     'toast_auto_hidden',
+    'admin_realtime_payload_received',
+    'admin_realtime_payload_accepted',
+    'admin_realtime_payload_ignored',
+    'admin_message_state_append_started',
+    'admin_message_state_append_succeeded',
   ])
 
   const chat_realtime_server_failed = new Set([

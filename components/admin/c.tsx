@@ -5,6 +5,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import PawIcon from '@/components/icons/paw'
 import type { reception_room_message } from '@/lib/admin/reception/room'
 import {
+  archived_message_to_timeline_message,
+} from '@/lib/chat/timeline_display'
+import type { message_bundle } from '@/lib/chat/message'
+import {
   chat_room_realtime_channel_name,
   chat_typing_is_fresh,
   cleanup_chat_room_realtime,
@@ -138,57 +142,13 @@ function archived_payload_to_reception_message(row: {
   created_at: string
   bundle: message_bundle_payload
 }): reception_room_message {
-  const bundle = row.bundle
-
-  if (bundle.bundle_type === 'room_action_log') {
-    const actor =
-      bundle.metadata &&
-      typeof bundle.metadata.actor_display_name === 'string'
-        ? bundle.metadata.actor_display_name.trim() || 'action'
-        : 'action'
-
-    return {
-      message_uuid: row.archive_uuid,
-      room_uuid: row.room_uuid,
-      direction: 'system',
-      sender: 'system',
-      role: actor,
-      text:
-        bundle.payload?.text !== undefined
-          ? String(bundle.payload.text).trim()
-          : '',
-      created_at: row.created_at,
-      sequence: row.sequence,
-      bundle_type: 'room_action_log',
-    }
-  }
-
-  const sender = typeof bundle.sender === 'string' ? bundle.sender : 'bot'
-  const direction = sender === 'user' ? 'incoming' : 'outgoing'
-  let text = ''
-
-  if (bundle.bundle_type === 'text' && bundle.payload?.text) {
-    text = String(bundle.payload.text).trim()
-  }
-
-  const role =
-    bundle.bundle_type === 'text' &&
-    bundle.metadata &&
-    typeof bundle.metadata.sender_display_name === 'string'
-      ? bundle.metadata.sender_display_name.trim() || sender
-      : sender
-
-  return {
-    message_uuid: row.archive_uuid,
+  return archived_message_to_timeline_message({
+    archive_uuid: row.archive_uuid,
     room_uuid: row.room_uuid,
-    direction,
-    sender,
-    role,
-    text,
-    created_at: row.created_at,
     sequence: row.sequence,
-    bundle_type: bundle.bundle_type ?? null,
-  }
+    created_at: row.created_at,
+    bundle: row.bundle as message_bundle,
+  })
 }
 
 export default function AdminChatTimeline({
@@ -381,17 +341,35 @@ export default function AdminChatTimeline({
           return
         }
 
-        const mapped = archived_payload_to_reception_message({
+        const mapped = archived_message_to_timeline_message({
           archive_uuid: archived.archive_uuid,
           room_uuid: archived.room_uuid,
           sequence: archived.sequence,
           created_at: archived.created_at,
-          bundle: archived.bundle as message_bundle_payload,
+          bundle: archived.bundle,
         })
 
         const near_bottom_before = compute_message_list_near_bottom(
           message_list_scroll_ref.current,
         )
+
+        send_chat_realtime_debug({
+          event: 'admin_message_state_append_started',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: admin_rt_ctx_ref.current.staff_participant_uuid,
+          user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+          role: 'admin',
+          tier: admin_rt_ctx_ref.current.staff_tier,
+          source_channel: 'admin',
+          channel_name: chat_room_realtime_channel_name(locked_room),
+          message_uuid: mapped.message_uuid,
+          payload_room_uuid: mapped.room_uuid,
+          message_direction: mapped.direction,
+          message_channel: null,
+          message_source_channel: null,
+          phase: 'admin_chat_message_append',
+        })
 
         let update_result = {
           prev_message_count: 0,
@@ -399,20 +377,99 @@ export default function AdminChatTimeline({
           dedupe_hit: false,
         }
 
-        set_rows_ref.current((previous) => {
-          const result = merge_timeline_rows(previous, [mapped])
-          update_result = {
-            prev_message_count: result.prev_message_count,
-            next_message_count: result.next_message_count,
-            dedupe_hit: result.dedupe_hit,
-          }
+        let append_error: string | null = null
 
-          return result.rows
+        set_rows_ref.current((previous) => {
+          try {
+            const result = merge_timeline_rows(previous, [mapped])
+            update_result = {
+              prev_message_count: result.prev_message_count,
+              next_message_count: result.next_message_count,
+              dedupe_hit: result.dedupe_hit,
+            }
+
+            return result.rows
+          } catch (error) {
+            append_error =
+              error instanceof Error ? error.message : String(error)
+            update_result = {
+              prev_message_count: previous.length,
+              next_message_count: previous.length,
+              dedupe_hit: false,
+            }
+
+            return previous
+          }
         })
 
-        if (update_result.dedupe_hit) {
+        if (append_error) {
+          const dbg = admin_rt_ctx_ref.current
+
+          send_chat_realtime_debug({
+            event: 'admin_message_state_append_failed',
+            room_uuid: locked_room,
+            active_room_uuid: locked_room,
+            participant_uuid: dbg.staff_participant_uuid,
+            user_uuid: dbg.staff_user_uuid,
+            role: 'admin',
+            tier: dbg.staff_tier,
+            source_channel: 'admin',
+            channel_name: chat_room_realtime_channel_name(locked_room),
+            message_uuid: mapped.message_uuid,
+            payload_room_uuid: mapped.room_uuid,
+            message_direction: mapped.direction,
+            error_message: append_error,
+            prev_message_count: update_result.prev_message_count,
+            next_message_count: update_result.next_message_count,
+            phase: 'admin_chat_message_append',
+          })
+
           return
         }
+
+        if (update_result.dedupe_hit) {
+          const dbg = admin_rt_ctx_ref.current
+
+          send_chat_realtime_debug({
+            event: 'admin_realtime_payload_ignored',
+            room_uuid: locked_room,
+            active_room_uuid: locked_room,
+            participant_uuid: dbg.staff_participant_uuid,
+            user_uuid: dbg.staff_user_uuid,
+            role: 'admin',
+            tier: dbg.staff_tier,
+            source_channel: 'admin',
+            channel_name: chat_room_realtime_channel_name(locked_room),
+            message_uuid: mapped.message_uuid,
+            payload_room_uuid: mapped.room_uuid,
+            message_direction: mapped.direction,
+            ignored_reason: 'message_uuid_dedupe',
+            prev_message_count: update_result.prev_message_count,
+            next_message_count: update_result.next_message_count,
+            dedupe_hit: true,
+            phase: 'admin_chat_message_append',
+          })
+
+          return
+        }
+
+        send_chat_realtime_debug({
+          event: 'admin_message_state_append_succeeded',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: admin_rt_ctx_ref.current.staff_participant_uuid,
+          user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+          role: 'admin',
+          tier: admin_rt_ctx_ref.current.staff_tier,
+          source_channel: 'admin',
+          channel_name: chat_room_realtime_channel_name(locked_room),
+          message_uuid: mapped.message_uuid,
+          payload_room_uuid: mapped.room_uuid,
+          message_direction: mapped.direction,
+          prev_message_count: update_result.prev_message_count,
+          next_message_count: update_result.next_message_count,
+          phase: 'admin_chat_message_append',
+        })
 
         const dbg = admin_rt_ctx_ref.current
 

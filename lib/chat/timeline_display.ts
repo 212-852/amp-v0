@@ -1,5 +1,3 @@
-import 'server-only'
-
 import type { archived_message } from './archive'
 import type { message_bundle } from './message'
 
