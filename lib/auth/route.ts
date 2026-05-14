@@ -2,8 +2,12 @@ import 'server-only'
 
 import { redirect } from 'next/navigation'
 
+import type { normalized_role, normalized_tier } from '@/lib/auth/identity'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
+import { run_browser_session_chat_room_resolve } from '@/lib/chat/browser_session_room'
+import type { chat_channel } from '@/lib/chat/room'
+import type { locale_key } from '@/lib/locale/action'
 import { read_session } from './session'
 
 export type admin_route_access =
@@ -264,4 +268,18 @@ export async function require_admin_route_access(pathname = '/admin') {
     role: 'admin' as const,
     tier: session.tier,
   }
+}
+
+export async function resolve_browser_session_chat_room(input: {
+  visitor_uuid: string
+  user_uuid: string | null
+  channel: chat_channel
+  locale: locale_key
+  is_new_visitor: boolean
+  session_restored: boolean
+  role: normalized_role
+  tier: normalized_tier
+  source_channel: string
+}) {
+  return run_browser_session_chat_room_resolve(input)
 }

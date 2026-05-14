@@ -540,6 +540,27 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const chat_room_lifecycle = new Set([
+    'chat_room_resolve_started',
+    'chat_room_resolve_succeeded',
+    'chat_room_resolve_failed',
+    'participant_linked_to_user',
+    'room_uuid_restored',
+  ])
+
+  if (
+    input.category === 'chat_room' &&
+    chat_room_lifecycle.has(input.event)
+  ) {
+    const is_failed = input.event === 'chat_room_resolve_failed'
+
+    return {
+      category: 'chat_room',
+      level: is_failed ? 'error' : 'info',
+      channels: ['discord'],
+    }
+  }
+
   return {
     category: input.category,
     level: 'info',
