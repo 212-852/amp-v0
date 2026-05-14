@@ -137,6 +137,7 @@ export async function deactivate_push_subscription(input: {
     .from('push_subscriptions')
     .update({
       is_active: false,
+      enabled: false,
       updated_at: new Date().toISOString(),
     })
     .eq('user_uuid', user_uuid)
@@ -225,6 +226,7 @@ export async function save_push_subscription(
     os: normalized.os,
     is_pwa: normalized.is_pwa,
     is_active: true,
+    enabled: true,
     last_seen_at: now,
     updated_at: now,
   }

@@ -10,6 +10,7 @@ export type push_notify_input = {
   message: string
   title?: string
   room_uuid?: string | null
+  participant_uuid?: string | null
   message_uuid?: string | null
   kind?: 'chat' | 'reservation' | 'announcement'
 }
@@ -22,6 +23,25 @@ export type push_notify_result = {
 
 type push_subscription_delivery_row = {
   endpoint: string
+  p256dh: string
+  auth: string
+}
+
+type push_payload = {
+  title: string
+  body: string
+  icon: string
+  badge: string
+  tag: string
+  renotify: boolean
+  silent: boolean
+  unread_count: number | null
+  data: {
+    room_uuid: string | null
+    participant_uuid: string | null
+    message_uuid: string | null
+    url: string
+  }
 }
 
 function base64url_to_bytes(value: string): Uint8Array {
@@ -49,6 +69,63 @@ function base64url(input: Uint8Array | string) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/g, '')
+}
+
+function concat_bytes(parts: Uint8Array[]): Uint8Array {
+  const length = parts.reduce((total, part) => total + part.length, 0)
+  const output = new Uint8Array(length)
+  let offset = 0
+
+  for (const part of parts) {
+    output.set(part, offset)
+    offset += part.length
+  }
+
+  return output
+}
+
+function to_array_buffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer
+}
+
+async function hmac_sha256(key_bytes: Uint8Array, data: Uint8Array) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    to_array_buffer(key_bytes),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signature = await crypto.subtle.sign('HMAC', key, to_array_buffer(data))
+
+  return new Uint8Array(signature)
+}
+
+async function hkdf_expand(
+  prk: Uint8Array,
+  info: Uint8Array,
+  length: number,
+) {
+  const output = new Uint8Array(length)
+  let previous = new Uint8Array()
+  let offset = 0
+  let counter = 1
+
+  while (offset < length) {
+    const block = await hmac_sha256(
+      prk,
+      concat_bytes([previous, info, new Uint8Array([counter])]),
+    )
+    output.set(block.subarray(0, Math.min(block.length, length - offset)), offset)
+    offset += block.length
+    previous = block
+    counter += 1
+  }
+
+  return output
 }
 
 async function create_vapid_private_key(input: {
@@ -105,19 +182,147 @@ async function create_vapid_jwt(input: {
   const signature = await crypto.subtle.sign(
     { name: 'ECDSA', hash: 'SHA-256' },
     key,
-    new TextEncoder().encode(signing_input),
+    to_array_buffer(new TextEncoder().encode(signing_input)),
   )
 
   return `${signing_input}.${base64url(new Uint8Array(signature))}`
 }
 
-async function send_empty_web_push(input: {
+function sanitize_push_body(value: string) {
+  const cleaned = value
+    .replace(/<[^>]*>/g, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return cleaned.slice(0, 80) || '\u65B0\u3057\u3044\u30E1\u30C3\u30BB\u30FC\u30B8'
+}
+
+function build_push_payload(input: push_notify_input): push_payload {
+  const room_uuid =
+    typeof input.room_uuid === 'string' && input.room_uuid.trim()
+      ? input.room_uuid.trim()
+      : null
+  const title =
+    typeof input.title === 'string' && input.title.trim()
+      ? input.title.trim()
+      : '\u65B0\u3057\u3044\u30E1\u30C3\u30BB\u30FC\u30B8'
+  const url = room_uuid
+    ? `/user?room_uuid=${encodeURIComponent(room_uuid)}`
+    : '/user'
+
+  return {
+    title,
+    body: sanitize_push_body(input.message),
+    icon: '/icons/icon-192.png',
+    badge: '/icons/badge.png',
+    tag: room_uuid ?? 'new_chat',
+    renotify: true,
+    silent: false,
+    unread_count: null,
+    data: {
+      room_uuid,
+      participant_uuid: input.participant_uuid ?? null,
+      message_uuid: input.message_uuid ?? null,
+      url,
+    },
+  }
+}
+
+async function encrypt_web_push_payload(input: {
+  payload: push_payload
+  p256dh: string
+  auth: string
+}) {
+  const encoder = new TextEncoder()
+  const client_public_bytes = base64url_to_bytes(input.p256dh)
+  const auth_secret = base64url_to_bytes(input.auth)
+  const server_keys = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveBits'],
+  )
+  const server_public_bytes = new Uint8Array(
+    await crypto.subtle.exportKey('raw', server_keys.publicKey),
+  )
+  const client_public_key = await crypto.subtle.importKey(
+    'raw',
+    to_array_buffer(client_public_bytes),
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    [],
+  )
+  const shared_secret = new Uint8Array(
+    await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: client_public_key },
+      server_keys.privateKey,
+      256,
+    ),
+  )
+  const key_info = concat_bytes([
+    encoder.encode('WebPush: info\u0000'),
+    client_public_bytes,
+    server_public_bytes,
+  ])
+  const key_prk = await hmac_sha256(auth_secret, shared_secret)
+  const ikm = await hkdf_expand(key_prk, key_info, 32)
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const prk = await hmac_sha256(salt, ikm)
+  const cek = await hkdf_expand(
+    prk,
+    encoder.encode('Content-Encoding: aes128gcm\u0000'),
+    16,
+  )
+  const nonce = await hkdf_expand(
+    prk,
+    encoder.encode('Content-Encoding: nonce\u0000'),
+    12,
+  )
+  const aes_key = await crypto.subtle.importKey(
+    'raw',
+    to_array_buffer(cek),
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt'],
+  )
+  const plaintext = concat_bytes([
+    encoder.encode(JSON.stringify(input.payload)),
+    new Uint8Array([2]),
+  ])
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: nonce },
+      aes_key,
+      to_array_buffer(plaintext),
+    ),
+  )
+  const record_size = new Uint8Array([0, 0, 16, 0])
+  const key_length = new Uint8Array([server_public_bytes.length])
+
+  return concat_bytes([
+    salt,
+    record_size,
+    key_length,
+    server_public_bytes,
+    ciphertext,
+  ])
+}
+
+async function send_web_push(input: {
   endpoint: string
+  p256dh: string
+  auth: string
+  payload: push_payload
   public_key: string
   private_key: string
   subject: string
 }) {
   const jwt = await create_vapid_jwt(input)
+  const body = await encrypt_web_push_payload({
+    payload: input.payload,
+    p256dh: input.p256dh,
+    auth: input.auth,
+  })
 
   return fetch(input.endpoint, {
     method: 'POST',
@@ -125,8 +330,11 @@ async function send_empty_web_push(input: {
       TTL: '60',
       Authorization: `WebPush ${jwt}`,
       'Crypto-Key': `p256ecdsa=${input.public_key}`,
-      'Content-Length': '0',
+      'Content-Encoding': 'aes128gcm',
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(body.byteLength),
     },
+    body: to_array_buffer(body),
   })
 }
 
@@ -160,9 +368,10 @@ export async function send_push_notify(
 
   const result = await supabase
     .from('push_subscriptions')
-    .select('endpoint')
+    .select('endpoint, p256dh, auth')
     .eq('user_uuid', input.user_uuid)
     .eq('is_active', true)
+    .eq('enabled', true)
     .order('updated_at', { ascending: false })
 
   if (result.error) {
@@ -198,6 +407,24 @@ export async function send_push_notify(
   const public_key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
   const private_key = process.env.VAPID_PRIVATE_KEY
   const subject = process.env.VAPID_SUBJECT
+  const payload = build_push_payload(input)
+
+  await debug_event({
+    category: 'pwa',
+    event: 'notify_push_payload_built',
+    payload: {
+      user_uuid: input.user_uuid,
+      room_uuid: payload.data.room_uuid,
+      participant_uuid: payload.data.participant_uuid,
+      message_uuid: payload.data.message_uuid,
+      tag: payload.tag,
+      url: payload.data.url,
+      body_length: payload.body.length,
+      has_title: payload.title.length > 0,
+      unread_count: payload.unread_count,
+      phase: 'build_push_payload',
+    },
+  })
 
   if (!public_key || !private_key || !subject) {
     return {
@@ -209,8 +436,11 @@ export async function send_push_notify(
 
   const settled = await Promise.allSettled(
     rows.map((row) =>
-      send_empty_web_push({
+      send_web_push({
         endpoint: row.endpoint,
+        p256dh: row.p256dh,
+        auth: row.auth,
+        payload,
         public_key,
         private_key,
         subject,

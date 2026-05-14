@@ -126,6 +126,7 @@ export async function evaluate_push_chat_delivery_allowed(input: {
       .select('subscription_uuid')
       .eq('user_uuid', user_uuid)
       .eq('is_active', true)
+      .eq('enabled', true)
       .limit(1),
     supabase
       .from('settings')

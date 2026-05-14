@@ -66,7 +66,9 @@ export async function notify(
     const push = await send_push_notify({
       user_uuid: event.user_uuid,
       message: event.message,
+      title: event.sender_internal_name ?? undefined,
       room_uuid: event.room_uuid,
+      participant_uuid: event.participant_uuid ?? null,
       message_uuid: event.message_uuid ?? null,
       kind: 'chat',
     }).catch((error) => ({

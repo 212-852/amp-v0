@@ -2749,8 +2749,10 @@ export async function handle_chat_message_request(
           event: 'new_chat',
           user_uuid: resolved.data.user_uuid ?? '',
           room_uuid: resolved.data.room_uuid,
+          participant_uuid: resolved.data.user_participant_uuid,
           message_uuid: archived_messages[0]?.archive_uuid ?? null,
           message: text_value,
+          sender_internal_name: sender_display_name,
           source_channel: 'web',
         }),
       )

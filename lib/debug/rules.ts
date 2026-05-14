@@ -461,6 +461,9 @@ export function resolve_debug_rule(input: {
     'notify_push_subscription_checked',
     'notify_push_disabled_reason',
     'notify_push_send_started',
+    'notify_push_payload_built',
+    'sw_push_received',
+    'sw_notification_shown',
   ])
 
   if (

@@ -45,8 +45,10 @@ export type notify_event =
       event: 'new_chat'
       user_uuid: string
       room_uuid: string
+      participant_uuid?: string | null
       message_uuid?: string | null
       message: string
+      sender_internal_name?: string | null
       source_channel: string
     }
   | {

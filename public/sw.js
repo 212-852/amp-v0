@@ -6,6 +6,19 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
 })
 
+function sw_debug(event, payload) {
+  return fetch('/api/debug/pwa', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      event,
+      source_channel: 'pwa',
+      phase: 'service_worker',
+      ...payload,
+    }),
+  }).catch(() => undefined)
+}
+
 self.addEventListener('push', (event) => {
   let payload = {}
 
@@ -23,18 +36,67 @@ self.addEventListener('push', (event) => {
     typeof payload.body === 'string' && payload.body
       ? payload.body
       : 'New message'
+  const data =
+    payload.data && typeof payload.data === 'object'
+      ? payload.data
+      : {}
   const url =
-    typeof payload.url === 'string' && payload.url
-      ? payload.url
-      : '/'
+    typeof data.url === 'string' && data.url
+      ? data.url
+      : typeof payload.url === 'string' && payload.url
+        ? payload.url
+        : '/'
+  const room_uuid =
+    typeof data.room_uuid === 'string' ? data.room_uuid : null
+  const participant_uuid =
+    typeof data.participant_uuid === 'string' ? data.participant_uuid : null
+  const message_uuid =
+    typeof data.message_uuid === 'string' ? data.message_uuid : null
+  const tag =
+    typeof payload.tag === 'string' && payload.tag
+      ? payload.tag
+      : room_uuid || 'new_chat'
+  const notification_data = {
+    ...data,
+    room_uuid,
+    participant_uuid,
+    message_uuid,
+    url,
+  }
 
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      data: { url },
-    }),
+    (async () => {
+      await sw_debug('sw_push_received', {
+        room_uuid,
+        participant_uuid,
+        message_uuid,
+        has_payload: Boolean(event.data),
+        tag,
+      })
+
+      await self.registration.showNotification(title, {
+        body,
+        icon:
+          typeof payload.icon === 'string' && payload.icon
+            ? payload.icon
+            : '/icons/icon-192.png',
+        badge:
+          typeof payload.badge === 'string' && payload.badge
+            ? payload.badge
+            : '/icons/badge.png',
+        tag,
+        renotify: payload.renotify === true,
+        silent: payload.silent === true,
+        data: notification_data,
+      })
+
+      await sw_debug('sw_notification_shown', {
+        room_uuid,
+        participant_uuid,
+        message_uuid,
+        tag,
+      })
+    })(),
   )
 })
 
