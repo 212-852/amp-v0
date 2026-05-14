@@ -114,6 +114,16 @@ const content = {
     en: 'LINE notifications',
     es: 'Avisos de LINE',
   },
+  method_heading: {
+    ja: '\u901A\u77E5\u65B9\u6CD5',
+    en: 'Notification method',
+    es: 'Metodo de aviso',
+  },
+  content_heading: {
+    ja: '\u901A\u77E5\u3059\u308B\u5185\u5BB9',
+    en: 'Notification content',
+    es: 'Contenido de aviso',
+  },
   chat: {
     ja: '\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8',
     en: 'New chat',
@@ -171,6 +181,7 @@ function Toggle(props: {
   checked: boolean
   disabled?: boolean
   label: string
+  is_last?: boolean
   on_change: (checked: boolean) => void
 }) {
   return (
@@ -178,7 +189,10 @@ function Toggle(props: {
       type="button"
       disabled={props.disabled}
       onClick={() => props.on_change(!props.checked)}
-      className="flex w-full items-center justify-between gap-4 rounded-[8px] border border-[#eadbd0] bg-white px-4 py-3 text-left disabled:opacity-60"
+      className={[
+        'flex w-full items-center justify-between gap-4 px-4 py-3 text-left disabled:opacity-60',
+        props.is_last ? '' : 'border-b border-[#f0e3d8]',
+      ].join(' ')}
     >
       <span className="text-[14px] font-medium leading-[1.45] text-[#2a1d18]">
         {props.label}
@@ -507,37 +521,56 @@ export default function NotificationSettings(props: notification_settings_props)
         </div>
       ) : (
         <>
-          <div className="mt-5 space-y-2.5">
-            <Toggle
-              label={content.pwa_push[props.locale]}
-              checked={preferences.pwa_push_enabled}
-              disabled={is_saving}
-              on_change={set_push_enabled}
-            />
-            <Toggle
-              label={content.line[props.locale]}
-              checked={preferences.line_enabled}
-              disabled={is_saving}
-              on_change={set_line_enabled}
-            />
-            <Toggle
-              label={content.chat[props.locale]}
-              checked={preferences.kinds.chat}
-              disabled={is_saving}
-              on_change={(enabled) => set_kind_enabled('chat', enabled)}
-            />
-            <Toggle
-              label={content.reservation[props.locale]}
-              checked={preferences.kinds.reservation}
-              disabled={is_saving}
-              on_change={(enabled) => set_kind_enabled('reservation', enabled)}
-            />
-            <Toggle
-              label={content.announcement[props.locale]}
-              checked={preferences.kinds.announcement}
-              disabled={is_saving}
-              on_change={(enabled) => set_kind_enabled('announcement', enabled)}
-            />
+          <div className="mt-5 space-y-5">
+            <section className="rounded-[8px] border border-[#eadbd0] bg-white">
+              <h3 className="px-4 pb-1 pt-3 text-[13px] font-semibold leading-[1.4] text-[#6d5c52]">
+                {content.method_heading[props.locale]}
+              </h3>
+
+              <div>
+                <Toggle
+                  label={content.pwa_push[props.locale]}
+                  checked={preferences.pwa_push_enabled}
+                  disabled={is_saving}
+                  on_change={set_push_enabled}
+                />
+                <Toggle
+                  label={content.line[props.locale]}
+                  checked={preferences.line_enabled}
+                  disabled={is_saving}
+                  is_last
+                  on_change={set_line_enabled}
+                />
+              </div>
+            </section>
+
+            <section className="rounded-[8px] border border-[#eadbd0] bg-white">
+              <h3 className="px-4 pb-1 pt-3 text-[13px] font-semibold leading-[1.4] text-[#6d5c52]">
+                {content.content_heading[props.locale]}
+              </h3>
+
+              <div>
+                <Toggle
+                  label={content.chat[props.locale]}
+                  checked={preferences.kinds.chat}
+                  disabled={is_saving}
+                  on_change={(enabled) => set_kind_enabled('chat', enabled)}
+                />
+                <Toggle
+                  label={content.reservation[props.locale]}
+                  checked={preferences.kinds.reservation}
+                  disabled={is_saving}
+                  on_change={(enabled) => set_kind_enabled('reservation', enabled)}
+                />
+                <Toggle
+                  label={content.announcement[props.locale]}
+                  checked={preferences.kinds.announcement}
+                  disabled={is_saving}
+                  is_last
+                  on_change={(enabled) => set_kind_enabled('announcement', enabled)}
+                />
+              </div>
+            </section>
           </div>
 
           {message || is_saving ? (

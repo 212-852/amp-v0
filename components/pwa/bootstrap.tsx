@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react'
 import {
   build_pwa_diagnostic_payload,
   capture_before_install_prompt,
+  clear_pwa_push_notifications,
   get_retained_before_install_prompt,
   is_standalone_pwa,
   load_pwa_manifest_for_debug,
@@ -55,6 +56,10 @@ export default function PwaBootstrap() {
       }
 
       sw_registered_ref.current = Boolean(registration)
+
+      if (registration) {
+        void clear_pwa_push_notifications()
+      }
 
       post_pwa_installability_checked({
         manifest_exists: manifest.manifest_exists,

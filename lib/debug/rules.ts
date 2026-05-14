@@ -468,6 +468,9 @@ export function resolve_debug_rule(input: {
     'notify_push_payload_built',
     'sw_push_received',
     'sw_notification_shown',
+    'sw_notification_clicked',
+    'sw_notifications_clear_requested',
+    'sw_notifications_cleared',
   ])
 
   if (

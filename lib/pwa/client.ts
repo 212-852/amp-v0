@@ -411,6 +411,21 @@ export async function register_pwa_service_worker() {
   return navigator.serviceWorker.register('/sw.js')
 }
 
+export async function clear_pwa_push_notifications() {
+  if (!('serviceWorker' in navigator)) {
+    return
+  }
+
+  try {
+    await navigator.serviceWorker.ready
+    navigator.serviceWorker.controller?.postMessage({
+      type: 'clear_notifications',
+    })
+  } catch {
+    return
+  }
+}
+
 function url_base64_to_uint8_array(value: string) {
   const padding = '='.repeat((4 - (value.length % 4)) % 4)
   const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/')

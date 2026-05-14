@@ -103,19 +103,71 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
-  const url = event.notification.data?.url || '/'
+  const data =
+    event.notification.data && typeof event.notification.data === 'object'
+      ? event.notification.data
+      : {}
+  const url =
+    typeof data.url === 'string' && data.url
+      ? data.url
+      : '/user'
+  const room_uuid =
+    typeof data.room_uuid === 'string' ? data.room_uuid : null
+  const participant_uuid =
+    typeof data.participant_uuid === 'string' ? data.participant_uuid : null
+  const message_uuid =
+    typeof data.message_uuid === 'string' ? data.message_uuid : null
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      .then((clients) => {
-        for (const client of clients) {
-          if ('focus' in client) {
-            client.navigate(url)
-            return client.focus()
-          }
-        }
+    (async () => {
+      await sw_debug('sw_notification_clicked', {
+        room_uuid,
+        participant_uuid,
+        message_uuid,
+        current_url: url,
+      })
 
-        return self.clients.openWindow(url)
-      }),
+      const clients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      })
+
+      for (const client of clients) {
+        if ('focus' in client) {
+          if ('navigate' in client) {
+            await client.navigate(url)
+          }
+
+          return client.focus()
+        }
+      }
+
+      return self.clients.openWindow(url)
+    })(),
+  )
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'clear_notifications') {
+    return
+  }
+
+  event.waitUntil(
+    (async () => {
+      await sw_debug('sw_notifications_clear_requested', {
+        source_channel: 'pwa',
+      })
+
+      const notifications = await self.registration.getNotifications()
+
+      for (const notification of notifications) {
+        notification.close()
+      }
+
+      await sw_debug('sw_notifications_cleared', {
+        notification_count: notifications.length,
+        source_channel: 'pwa',
+      })
+    })(),
   )
 })
