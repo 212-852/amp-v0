@@ -32,6 +32,8 @@ type pwa_debug_payload = {
   app_visibility_state?: string | null
   error_code?: string | null
   error_message?: string | null
+  error_details?: string | null
+  error_hint?: string | null
   modal_reused?: string | null
   install_client_os?: string | null
   prompt_available?: boolean | null

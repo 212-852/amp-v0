@@ -132,29 +132,43 @@ function debug_participant_room_payload(input: {
 }
 
 function supabase_error_fields(error: unknown) {
+  let json_message: string | null = null
+
+  try {
+    json_message = JSON.stringify(error)
+  } catch {
+    json_message = null
+  }
+
   if (!error || typeof error !== 'object') {
     return {
-      error,
-      error_code: undefined as string | undefined,
-      error_message: String(error),
-      error_details: undefined as string | undefined,
-      error_hint: undefined as string | undefined,
+      error_code: null as string | null,
+      error_message: error ? String(error) : 'unknown_error',
+      error_details: null as string | null,
+      error_hint: null as string | null,
+      error_json: json_message,
     }
   }
 
   const e = error as {
-    code?: string
-    message?: string
-    details?: string
-    hint?: string
+    code?: unknown
+    message?: unknown
+    details?: unknown
+    hint?: unknown
   }
+  const error_message =
+    typeof e.message === 'string' && e.message.trim()
+      ? e.message
+      : json_message && json_message !== '{}'
+        ? json_message
+        : String(error)
 
   return {
-    error,
-    error_code: e.code,
-    error_message: e.message,
-    error_details: e.details,
-    error_hint: e.hint,
+    error_code: typeof e.code === 'string' ? e.code : null,
+    error_message,
+    error_details: typeof e.details === 'string' ? e.details : null,
+    error_hint: typeof e.hint === 'string' ? e.hint : null,
+    error_json: json_message,
   }
 }
 
@@ -186,8 +200,11 @@ async function debug_chat_room(
   event: string,
   payload: Record<string, unknown>,
 ) {
+  const normalized =
+    payload.error !== undefined ? supabase_error_fields(payload.error) : {}
   const log_record = {
     ...payload,
+    ...normalized,
     error:
       payload.error !== undefined
         ? snapshot_error_for_log(payload.error)
@@ -271,6 +288,19 @@ function build_bot_participant_insert_row(room_uuid: string) {
 }
 
 async function find_user_participant_by_user(user_uuid: string) {
+  await debug_event({
+    category: 'chat_room',
+    event: 'chat_room_participant_lookup_started',
+    payload: {
+      user_uuid,
+      visitor_uuid: null,
+      room_uuid: null,
+      participant_uuid: null,
+      source_channel: null,
+      reason: 'find_user_participant_by_user',
+    },
+  })
+
   const result = await supabase
     .from('participants')
     .select(PARTICIPANT_DB_SELECT)
@@ -281,13 +311,53 @@ async function find_user_participant_by_user(user_uuid: string) {
     .maybeSingle()
 
   if (result.error) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_participant_lookup_failed',
+      payload: {
+        user_uuid,
+        visitor_uuid: null,
+        room_uuid: null,
+        participant_uuid: null,
+        source_channel: null,
+        reason: 'find_user_participant_by_user',
+        ...supabase_error_fields(result.error),
+      },
+    })
+
     throw result.error
   }
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'chat_room_participant_lookup_succeeded',
+    payload: {
+      user_uuid,
+      visitor_uuid: null,
+      room_uuid: result.data?.room_uuid ?? null,
+      participant_uuid: result.data?.participant_uuid ?? null,
+      source_channel: null,
+      reason: 'find_user_participant_by_user',
+    },
+  })
 
   return result.data ? (result.data as participant_row) : null
 }
 
 async function find_user_participant_by_visitor(visitor_uuid: string) {
+  await debug_event({
+    category: 'chat_room',
+    event: 'chat_room_participant_lookup_started',
+    payload: {
+      user_uuid: null,
+      visitor_uuid,
+      room_uuid: null,
+      participant_uuid: null,
+      source_channel: null,
+      reason: 'find_user_participant_by_visitor',
+    },
+  })
+
   const result = await supabase
     .from('participants')
     .select(PARTICIPANT_DB_SELECT)
@@ -298,8 +368,35 @@ async function find_user_participant_by_visitor(visitor_uuid: string) {
     .maybeSingle()
 
   if (result.error) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_participant_lookup_failed',
+      payload: {
+        user_uuid: null,
+        visitor_uuid,
+        room_uuid: null,
+        participant_uuid: null,
+        source_channel: null,
+        reason: 'find_user_participant_by_visitor',
+        ...supabase_error_fields(result.error),
+      },
+    })
+
     throw result.error
   }
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'chat_room_participant_lookup_succeeded',
+    payload: {
+      user_uuid: null,
+      visitor_uuid,
+      room_uuid: result.data?.room_uuid ?? null,
+      participant_uuid: result.data?.participant_uuid ?? null,
+      source_channel: null,
+      reason: 'find_user_participant_by_visitor',
+    },
+  })
 
   return result.data ? (result.data as participant_row) : null
 }
@@ -397,9 +494,18 @@ async function insert_direct_room_row(
   input: resolve_room_input,
   identity: ReturnType<typeof debug_identity_payload>,
 ): Promise<direct_room_insert_result> {
-  void identity
-
   const now = new Date().toISOString()
+  await debug_event({
+    category: 'chat_room',
+    event: 'chat_room_create_started',
+    payload: {
+      ...identity,
+      room_uuid: null,
+      participant_uuid: null,
+      reason: 'insert_direct_room_row',
+    },
+  })
+
   const room_result = await supabase
     .from('rooms')
     .insert({
@@ -412,6 +518,18 @@ async function insert_direct_room_row(
     .single()
 
   if (room_result.error && !is_unique_violation(room_result.error)) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_create_failed',
+      payload: {
+        ...identity,
+        room_uuid: null,
+        participant_uuid: null,
+        reason: 'insert_direct_room_row',
+        ...supabase_error_fields(room_result.error),
+      },
+    })
+
     throw room_result.error
   }
 
@@ -420,12 +538,36 @@ async function insert_direct_room_row(
       await find_canonical_user_participant(input)
 
     if (!existing_participant?.room_uuid) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'chat_room_create_failed',
+        payload: {
+          ...identity,
+          room_uuid: null,
+          participant_uuid: existing_participant?.participant_uuid ?? null,
+          reason: 'insert_direct_room_unique_without_participant_room',
+          ...supabase_error_fields(room_result.error),
+        },
+      })
+
       throw room_result.error
     }
 
     const existing_room = await load_room_row(existing_participant.room_uuid)
 
     if (!existing_room) {
+      await debug_event({
+        category: 'chat_room',
+        event: 'chat_room_create_failed',
+        payload: {
+          ...identity,
+          room_uuid: existing_participant.room_uuid,
+          participant_uuid: existing_participant.participant_uuid,
+          reason: 'insert_direct_room_unique_existing_room_missing',
+          ...supabase_error_fields(room_result.error),
+        },
+      })
+
       throw room_result.error
     }
 
@@ -438,8 +580,34 @@ async function insert_direct_room_row(
   const inserted = room_result.data as room_row | null
 
   if (!inserted?.room_uuid) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_create_failed',
+      payload: {
+        ...identity,
+        room_uuid: null,
+        participant_uuid: null,
+        reason: 'insert_direct_room_no_row_returned',
+        error_code: 'no_room_row',
+        error_message: 'insert_direct_room_row returned no room_uuid',
+        error_details: null,
+        error_hint: null,
+      },
+    })
+
     throw new Error('insert_direct_room_row: no row returned')
   }
+
+  await debug_event({
+    category: 'chat_room',
+    event: 'chat_room_create_succeeded',
+    payload: {
+      ...identity,
+      room_uuid: inserted.room_uuid,
+      participant_uuid: null,
+      reason: 'insert_direct_room_row',
+    },
+  })
 
   return {
     room: inserted,
@@ -697,6 +865,17 @@ async function try_insert_participant_and_direct_room(
   const room_result = await insert_direct_room_row(input, identity)
   const room = room_result.room
   const now = new Date().toISOString()
+  await debug_event({
+    category: 'chat_room',
+    event: 'chat_room_participant_create_started',
+    payload: {
+      ...identity,
+      room_uuid: room.room_uuid,
+      participant_uuid: null,
+      reason: 'insert_user_participant',
+    },
+  })
+
   const participant_result = await supabase
     .from('participants')
     .insert(build_user_participant_insert_row(input, room.room_uuid, now))
@@ -705,6 +884,16 @@ async function try_insert_participant_and_direct_room(
 
   if (!participant_result.error && participant_result.data) {
     await touch_room_row(room.room_uuid)
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_participant_create_succeeded',
+      payload: {
+        ...identity,
+        room_uuid: room.room_uuid,
+        participant_uuid: participant_result.data.participant_uuid,
+        reason: 'insert_user_participant',
+      },
+    })
 
     return {
       tag: 'fresh',
@@ -716,6 +905,18 @@ async function try_insert_participant_and_direct_room(
 
   if (!is_unique_violation(participant_result.error)) {
     await delete_orphan_direct_room(room.room_uuid)
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_participant_create_failed',
+      payload: {
+        ...identity,
+        room_uuid: room.room_uuid,
+        participant_uuid: null,
+        reason: 'insert_user_participant',
+        ...supabase_error_fields(participant_result.error),
+      },
+    })
+
     throw participant_result.error
   }
 
@@ -725,6 +926,18 @@ async function try_insert_participant_and_direct_room(
   await delete_orphan_direct_room(room.room_uuid)
 
   if (!existing) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_participant_create_failed',
+      payload: {
+        ...identity,
+        room_uuid: room.room_uuid,
+        participant_uuid: null,
+        reason: 'insert_user_participant_unique_without_existing',
+        ...supabase_error_fields(participant_result.error),
+      },
+    })
+
     throw participant_result.error
   }
 
@@ -1529,6 +1742,10 @@ export type resolve_user_room_outcome =
       reason: string
       room_uuid: null
       participant_uuid: null
+      error_code?: string | null
+      error_message?: string | null
+      error_details?: string | null
+      error_hint?: string | null
     }
 
 /**
@@ -1559,7 +1776,10 @@ export async function resolve_user_room(input: {
   if (!visitor_uuid) {
     await emit_chat_room_resolve_event('chat_room_resolve_failed', {
       ...base,
+      error_code: 'missing_visitor_uuid',
       error_message: 'missing_visitor_uuid',
+      error_details: null,
+      error_hint: null,
     })
 
     return {
@@ -1567,6 +1787,10 @@ export async function resolve_user_room(input: {
       reason: 'missing_visitor_uuid',
       room_uuid: null,
       participant_uuid: null,
+      error_code: 'missing_visitor_uuid',
+      error_message: 'missing_visitor_uuid',
+      error_details: null,
+      error_hint: null,
     }
   }
 
@@ -1663,6 +1887,10 @@ export async function resolve_user_room(input: {
     reason: last_reason,
     room_uuid: null,
     participant_uuid: null,
+    error_code: 'room_or_participant_missing',
+    error_message: last_reason,
+    error_details: null,
+    error_hint: null,
   })
 
   return {
@@ -1670,5 +1898,9 @@ export async function resolve_user_room(input: {
     reason: last_reason,
     room_uuid: null,
     participant_uuid: null,
+    error_code: 'room_or_participant_missing',
+    error_message: last_reason,
+    error_details: null,
+    error_hint: null,
   }
 }

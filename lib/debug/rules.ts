@@ -551,7 +551,14 @@ export function resolve_debug_rule(input: {
   const chat_room_lifecycle = new Set([
     'chat_room_resolve_started',
     'chat_room_participant_lookup_started',
+    'chat_room_participant_lookup_failed',
     'chat_room_participant_lookup_succeeded',
+    'chat_room_create_started',
+    'chat_room_create_failed',
+    'chat_room_create_succeeded',
+    'chat_room_participant_create_started',
+    'chat_room_participant_create_failed',
+    'chat_room_participant_create_succeeded',
     'chat_room_created',
     'chat_room_participant_created',
     'chat_room_user_attached',
@@ -565,7 +572,9 @@ export function resolve_debug_rule(input: {
     input.category === 'chat_room' &&
     chat_room_lifecycle.has(input.event)
   ) {
-    const is_failed = input.event === 'chat_room_resolve_failed'
+    const is_failed =
+      input.event === 'chat_room_resolve_failed' ||
+      input.event.endsWith('_failed')
 
     return {
       category: 'chat_room',

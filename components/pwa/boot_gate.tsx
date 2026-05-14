@@ -72,6 +72,7 @@ function needs_member_room(session: merged_session | null) {
 export function PwaBootProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const [overlay_visible, set_overlay_visible] = useState(false)
+  const [boot_error, set_boot_error] = useState<string | null>(null)
 
   useEffect(() => {
     if (!is_standalone_pwa()) {
@@ -117,6 +118,11 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
         ok: boolean
         room_uuid?: string | null
         participant_uuid?: string | null
+        error?: string | null
+        error_code?: string | null
+        error_message?: string | null
+        error_details?: string | null
+        error_hint?: string | null
       } | null> {
         const response = await fetch('/api/chat/room/resolve', {
           method: 'POST',
@@ -152,6 +158,23 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      function resolve_error_message(input: {
+        error?: string | null
+        error_code?: string | null
+        error_message?: string | null
+        error_details?: string | null
+        error_hint?: string | null
+      } | null) {
+        return (
+          input?.error_message ||
+          input?.error_details ||
+          input?.error_hint ||
+          input?.error_code ||
+          input?.error ||
+          'room_or_participant_missing'
+        )
+      }
+
       try {
         let session = await fetch_session()
 
@@ -168,14 +191,23 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
             session = await fetch_session()
             write_local_visitor_uuid(session?.visitor_uuid ?? null)
           } else if (!cancelled) {
+            const error_message = resolve_error_message(core)
+
+            set_boot_error(error_message)
             post_pwa_debug({
               event: 'chat_room_resolve_failed',
               phase: 'pwa_boot_gate',
               reason: 'post_room_resolve_failed',
-              error_code: 'resolve_user_room_api_failed',
+              error_code:
+                core?.error_code ?? 'resolve_user_room_api_failed',
+              error_message,
+              error_details: core?.error_details ?? null,
+              error_hint: core?.error_hint ?? null,
               ...room_payload(session),
               ...build_pwa_diagnostic_payload({}),
             })
+
+            return
           }
         }
 
@@ -184,14 +216,20 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
           needs_member_room(session) &&
           !room_ready(session)
         ) {
+          const error_message = 'room_uuid and participant_uuid are missing'
+
+          set_boot_error(error_message)
           post_pwa_debug({
             event: 'chat_room_resolve_failed',
             phase: 'pwa_boot_gate',
             reason: 'room_missing_after_session_and_resolve',
             error_code: 'room_or_participant_missing',
+            error_message,
             ...room_payload(session),
             ...build_pwa_diagnostic_payload({}),
           })
+
+          return
         }
 
         if (!cancelled) {
@@ -208,12 +246,15 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
           ...room_payload(session),
           ...base_diag,
         })
-      } catch {
+      } catch (error) {
+        const error_message =
+          error instanceof Error ? error.message : String(error)
+        set_boot_error(error_message)
         post_pwa_debug({
           event: 'chat_room_resolve_failed',
           phase: 'pwa_boot_gate',
           error_code: 'boot_failed',
-          error_message: 'session_fetch_or_refresh_failed',
+          error_message,
           visitor_uuid: read_local_visitor_uuid(),
           ...build_pwa_diagnostic_payload({}),
         })
@@ -240,15 +281,24 @@ export function PwaBootProvider({ children }: { children: ReactNode }) {
       {overlay_visible ? (
         <div
           className="fixed inset-0 z-[200000] flex flex-col items-center justify-center bg-[#f6e5cf] px-8 text-center"
-          role="status"
+          role={boot_error ? 'alert' : 'status'}
           aria-live="polite"
         >
           <h1 className="text-[18px] font-semibold tracking-wide text-[#2a1d18]">
-            読み込み中
+            {boot_error ? '読み込みに失敗しました' : '読み込み中'}
           </h1>
           <p className="mt-3 max-w-[280px] text-[14px] leading-relaxed text-[#6f5b4d]">
-            アプリを準備しています
+            {boot_error ? boot_error : 'アプリを準備しています'}
           </p>
+          {boot_error ? (
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-6 h-[46px] rounded-[20px] bg-[#2a1d18] px-6 text-[14px] font-semibold text-white"
+            >
+              再読み込み
+            </button>
+          ) : null}
         </div>
       ) : null}
     </PwaBootContext.Provider>

@@ -22,6 +22,8 @@ type pwa_debug_body = {
   app_visibility_state?: unknown
   error_code?: unknown
   error_message?: unknown
+  error_details?: unknown
+  error_hint?: unknown
   phase?: unknown
   modal_reused?: unknown
   install_client_os?: unknown
@@ -116,6 +118,8 @@ export async function POST(request: Request) {
       app_visibility_state: string_or_null(body?.app_visibility_state),
       error_code: string_or_null(body?.error_code),
       error_message: string_or_null(body?.error_message),
+      error_details: string_or_null(body?.error_details),
+      error_hint: string_or_null(body?.error_hint),
       modal_reused:
         typeof body?.modal_reused === 'string' ? body.modal_reused.trim() : null,
       install_client_os: string_or_null(body?.install_client_os),

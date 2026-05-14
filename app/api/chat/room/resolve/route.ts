@@ -69,6 +69,10 @@ export async function POST() {
       {
         ok: false,
         error: outcome.reason,
+        error_code: outcome.error_code ?? null,
+        error_message: outcome.error_message ?? outcome.reason,
+        error_details: outcome.error_details ?? null,
+        error_hint: outcome.error_hint ?? null,
         room_uuid: null,
         participant_uuid: null,
       },

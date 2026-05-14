@@ -43,6 +43,57 @@ function base_debug_payload(input: resolve_browser_session_chat_room_input) {
   }
 }
 
+function normalized_error_fields(error: unknown) {
+  let error_json: string | null = null
+
+  try {
+    error_json = JSON.stringify(error)
+  } catch {
+    error_json = null
+  }
+
+  if (error instanceof Error) {
+    return {
+      error_code: null,
+      error_message: error.message,
+      error_details: null,
+      error_hint: null,
+      error_json,
+    }
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as {
+      code?: unknown
+      message?: unknown
+      details?: unknown
+      hint?: unknown
+    }
+
+    return {
+      error_code: typeof record.code === 'string' ? record.code : null,
+      error_message:
+        typeof record.message === 'string' && record.message.trim()
+          ? record.message
+          : error_json && error_json !== '{}'
+            ? error_json
+            : String(error),
+      error_details:
+        typeof record.details === 'string' ? record.details : null,
+      error_hint: typeof record.hint === 'string' ? record.hint : null,
+      error_json,
+    }
+  }
+
+  return {
+    error_code: null,
+    error_message: error ? String(error) : 'unknown_error',
+    error_details: null,
+    error_hint: null,
+    error_json,
+  }
+}
+
 /**
  * Browser session: resolve_user_room (lib/chat/room.ts) then
  * resolve_initial_chat (messages). No polling or timed retries.
@@ -166,8 +217,7 @@ export async function run_browser_session_chat_room_resolve(
       payload: {
         ...base,
         reason: 'exception',
-        error_code: 'exception',
-        error_message: error instanceof Error ? error.message : String(error),
+        ...normalized_error_fields(error),
       },
     })
 
