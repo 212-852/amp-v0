@@ -40,21 +40,6 @@ async function debug_notification_setting(
   })
 }
 
-function merge_profile_json(
-  profile_json: unknown,
-  preferences: notification_preferences,
-) {
-  const base =
-    profile_json && typeof profile_json === 'object' && !Array.isArray(profile_json)
-      ? (profile_json as Record<string, unknown>)
-      : {}
-
-  return {
-    ...base,
-    notification_preferences: to_settings_json(preferences),
-  }
-}
-
 function to_settings_json(preferences: notification_preferences): setting_json {
   return {
     push_enabled: preferences.pwa_push_enabled,
@@ -78,44 +63,26 @@ export async function load_notification_settings() {
   }
 
   const settings = await supabase
-    .from('notification_settings')
-    .select('settings')
+    .from('settings')
+    .select('notification_preferences')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
-  if (!settings.error && settings.data) {
-    const row = settings.data as { settings?: unknown } | null
-
-    return {
-      ok: true as const,
-      preferences: normalize_notification_preferences(row?.settings),
-    }
-  }
-
-  const result = await supabase
-    .from('users')
-    .select('profile_json')
-    .eq('user_uuid', user_uuid)
-    .maybeSingle()
-
-  if (result.error) {
+  if (settings.error) {
     return {
       ok: false as const,
-      error: result.error.message,
+      error: settings.error.message,
       preferences: default_notification_preferences,
     }
   }
 
-  const row = result.data as { profile_json?: unknown } | null
-  const profile_json = row?.profile_json
-  const source =
-    profile_json && typeof profile_json === 'object'
-      ? (profile_json as Record<string, unknown>).notification_preferences
-      : null
+  const row = settings.data as { notification_preferences?: unknown } | null
 
   return {
     ok: true as const,
-    preferences: normalize_notification_preferences(source),
+    preferences: normalize_notification_preferences(
+      row?.notification_preferences ?? null,
+    ),
   }
 }
 
@@ -153,8 +120,8 @@ export async function save_notification_settings(input: {
   }
 
   const current_settings = await supabase
-    .from('notification_settings')
-    .select('settings')
+    .from('settings')
+    .select('notification_preferences')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
@@ -168,7 +135,7 @@ export async function save_notification_settings(input: {
       error_message: current_settings.error.message,
       error_details: error_field(current_settings.error, 'details'),
       error_hint: error_field(current_settings.error, 'hint'),
-      phase: 'select_notification_settings',
+      phase: 'select_settings_notification_preferences',
     })
 
     return {
@@ -178,8 +145,10 @@ export async function save_notification_settings(input: {
     }
   }
 
-  const current_row = current_settings.data as { settings?: unknown } | null
-  const source = current_row?.settings ?? null
+  const current_row = current_settings.data as {
+    notification_preferences?: unknown
+  } | null
+  const source = current_row?.notification_preferences ?? null
   const previous = normalize_notification_preferences(source)
   const incoming = input.preferences ?? {}
   const incoming_kinds =
@@ -221,10 +190,10 @@ export async function save_notification_settings(input: {
   })
 
   const update = await supabase
-    .from('notification_settings')
+    .from('settings')
     .upsert({
       user_uuid,
-      settings: settings_json,
+      notification_preferences: settings_json,
       updated_at: new Date().toISOString(),
     })
 

@@ -75,43 +75,19 @@ export async function user_allows_notification(input: {
   }
 
   const result = await supabase
-    .from('notification_settings')
-    .select('settings')
+    .from('settings')
+    .select('notification_preferences')
     .eq('user_uuid', user_uuid)
     .maybeSingle()
 
-  if (!result.error && result.data) {
-    const row = result.data as { settings?: unknown } | null
-    const preferences = normalize_notification_preferences(row?.settings)
-
-    if (!preferences.kinds[input.kind]) {
-      return false
-    }
-
-    if (input.channel === 'push') {
-      return preferences.pwa_push_enabled
-    }
-
-    return preferences.line_enabled
-  }
-
-  const fallback = await supabase
-    .from('users')
-    .select('profile_json')
-    .eq('user_uuid', user_uuid)
-    .maybeSingle()
-
-  if (fallback.error) {
+  if (result.error) {
     return false
   }
 
-  const row = fallback.data as { profile_json?: unknown } | null
-  const profile_json = row?.profile_json
-  const source =
-    profile_json && typeof profile_json === 'object'
-      ? (profile_json as Record<string, unknown>).notification_preferences
-      : null
-  const preferences = normalize_notification_preferences(source)
+  const row = result.data as { notification_preferences?: unknown } | null
+  const preferences = normalize_notification_preferences(
+    row?.notification_preferences ?? null,
+  )
 
   if (!preferences.kinds[input.kind]) {
     return false
