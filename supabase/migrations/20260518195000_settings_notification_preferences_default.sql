@@ -2,6 +2,7 @@
 
 ALTER TABLE public.settings
   ALTER COLUMN notification_preferences SET DEFAULT jsonb_build_object(
+    'primary_channel', 'line',
     'pwa_push_enabled', false,
     'line_enabled', true,
     'kinds', jsonb_build_object(

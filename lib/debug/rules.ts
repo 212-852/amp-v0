@@ -457,6 +457,7 @@ export function resolve_debug_rule(input: {
     'notification_setting_save_started',
     'notification_setting_save_succeeded',
     'notification_setting_save_failed',
+    'notification_primary_channel_changed',
     'push_subscription_lookup_started',
     'push_subscription_lookup_result',
     'push_subscription_lookup_failed',

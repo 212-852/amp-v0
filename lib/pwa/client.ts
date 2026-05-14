@@ -15,6 +15,9 @@ type pwa_debug_payload = {
   message_count?: number | null
   message_uuid?: string | null
   notification_route?: string | null
+  primary_channel?: string | null
+  from_primary_channel?: string | null
+  to_primary_channel?: string | null
   has_push_subscription?: boolean | null
   permission?: string | null
   enabled?: boolean | null

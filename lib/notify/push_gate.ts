@@ -72,7 +72,7 @@ async function emit_push_subscription_lookup_debug(
 
 function build_disabled_reason(input: {
   push_subscription_enabled: boolean
-  pwa_push_enabled: boolean
+  push_primary_selected: boolean
   kind_enabled: boolean
   kind: notification_kind_key
 }): string {
@@ -82,8 +82,8 @@ function build_disabled_reason(input: {
     parts.push('push_subscription_inactive')
   }
 
-  if (!input.pwa_push_enabled) {
-    parts.push('pwa_push_disabled')
+  if (!input.push_primary_selected) {
+    parts.push('primary_channel_not_push')
   }
 
   if (!input.kind_enabled) {
@@ -296,7 +296,9 @@ export async function evaluate_push_chat_delivery_allowed(input: {
   if (!has_settings_row && push_subscription_enabled) {
     const seeded: notification_preferences = {
       ...default_notification_preferences,
+      primary_channel: 'push',
       pwa_push_enabled: true,
+      line_enabled: false,
     }
     const seeded_json = notification_preferences_to_json(seeded)
 
@@ -314,14 +316,17 @@ export async function evaluate_push_chat_delivery_allowed(input: {
 
   const normalized = normalize_notification_preferences(doc)
   const pwa_push_enabled = normalized.pwa_push_enabled === true
+  const push_primary_selected = normalized.primary_channel === 'push'
   const category_enabled = kind_enabled(normalized, kind)
   const allowed =
-    push_subscription_enabled && pwa_push_enabled && category_enabled
+    push_subscription_enabled &&
+    push_primary_selected &&
+    category_enabled
   const disabled_reason = allowed
     ? null
     : build_disabled_reason({
         push_subscription_enabled,
-        pwa_push_enabled,
+        push_primary_selected,
         kind_enabled: category_enabled,
         kind,
       })

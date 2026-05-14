@@ -11,6 +11,7 @@ type notification_tab = 'notices' | 'settings'
 type pwa_debug_input = Parameters<typeof post_pwa_debug>[0]
 
 type notification_preferences = {
+  primary_channel: 'push' | 'line' | 'none'
   pwa_push_enabled: boolean
   line_enabled: boolean
   kinds: Record<notification_kind_key, boolean>
@@ -28,6 +29,7 @@ type notification_settings_props = {
 }
 
 const default_preferences: notification_preferences = {
+  primary_channel: 'line',
   pwa_push_enabled: false,
   line_enabled: true,
   kinds: {
@@ -35,6 +37,50 @@ const default_preferences: notification_preferences = {
     reservation: true,
     announcement: true,
   },
+}
+
+function apply_push_channel_on(
+  prev: notification_preferences,
+): notification_preferences {
+  return {
+    ...prev,
+    primary_channel: 'push',
+    pwa_push_enabled: true,
+    line_enabled: false,
+  }
+}
+
+function apply_push_channel_off(
+  prev: notification_preferences,
+): notification_preferences {
+  return {
+    ...prev,
+    primary_channel: 'none',
+    pwa_push_enabled: false,
+    line_enabled: false,
+  }
+}
+
+function apply_line_channel_on(
+  prev: notification_preferences,
+): notification_preferences {
+  return {
+    ...prev,
+    primary_channel: 'line',
+    line_enabled: true,
+    pwa_push_enabled: false,
+  }
+}
+
+function apply_line_channel_off(
+  prev: notification_preferences,
+): notification_preferences {
+  return {
+    ...prev,
+    primary_channel: 'none',
+    line_enabled: false,
+    pwa_push_enabled: false,
+  }
 }
 
 const content = {
@@ -188,10 +234,23 @@ export default function NotificationSettings(props: notification_settings_props)
   const save_preferences = useCallback(
     async (next_preferences: notification_preferences) => {
       set_is_saving(true)
+
+      if (next_preferences.primary_channel !== preferences.primary_channel) {
+        post_pwa_debug({
+          event: 'notification_primary_channel_changed',
+          ...debug_payload({
+            from_primary_channel: preferences.primary_channel,
+            to_primary_channel: next_preferences.primary_channel,
+            phase: 'notification_settings',
+          }),
+        })
+      }
+
       post_pwa_debug({
         event: 'notification_setting_save_started',
         ...debug_payload({
           enabled: next_preferences.pwa_push_enabled,
+          primary_channel: next_preferences.primary_channel,
           phase: 'notification_settings',
         }),
       })
@@ -209,6 +268,7 @@ export default function NotificationSettings(props: notification_settings_props)
           event: 'notification_setting_save_failed',
           ...debug_payload({
             enabled: next_preferences.pwa_push_enabled,
+            primary_channel: next_preferences.primary_channel,
             error_code: `http_${response.status}`,
             error_message: 'notification_setting_save_failed',
             phase: 'notification_settings',
@@ -228,11 +288,12 @@ export default function NotificationSettings(props: notification_settings_props)
         event: 'notification_setting_save_succeeded',
         ...debug_payload({
           enabled: saved_preferences.pwa_push_enabled,
+          primary_channel: saved_preferences.primary_channel,
           phase: 'notification_settings',
         }),
       })
     },
-    [debug_payload],
+    [debug_payload, preferences],
   )
 
   useEffect(() => {
@@ -294,15 +355,9 @@ export default function NotificationSettings(props: notification_settings_props)
           await subscription.unsubscribe()
         }
 
-        await save_preferences({
-          ...preferences,
-          pwa_push_enabled: false,
-        })
+        await save_preferences(apply_push_channel_off(preferences))
       } catch {
-        await save_preferences({
-          ...preferences,
-          pwa_push_enabled: false,
-        })
+        await save_preferences(apply_push_channel_off(preferences))
       }
 
       return
@@ -366,27 +421,20 @@ export default function NotificationSettings(props: notification_settings_props)
     }
 
     try {
-      const next_preferences = {
-        ...preferences,
-        pwa_push_enabled: true,
-      }
-
-      await save_preferences(next_preferences)
+      await save_preferences(apply_push_channel_on(preferences))
     } catch {
-      set_preferences({
-        ...preferences,
-        pwa_push_enabled: true,
-      })
       set_message(content.save_failed[props.locale])
     }
   }
 
   async function set_line_enabled(enabled: boolean) {
+    set_message(null)
+    const next = enabled
+      ? apply_line_channel_on(preferences)
+      : apply_line_channel_off(preferences)
+
     try {
-      await save_preferences({
-        ...preferences,
-        line_enabled: enabled,
-      })
+      await save_preferences(next)
     } catch {
       set_message(content.save_failed[props.locale])
     }

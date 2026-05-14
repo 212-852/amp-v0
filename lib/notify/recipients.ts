@@ -34,6 +34,27 @@ type identity_row_min = {
   provider_id: string | null
 }
 
+export async function load_line_provider_id_for_user(
+  user_uuid: string,
+): Promise<string | null> {
+  const result = await supabase
+    .from('identities')
+    .select('provider_id')
+    .eq('user_uuid', user_uuid)
+    .eq('provider', 'line')
+    .maybeSingle()
+
+  if (result.error || !result.data) {
+    return null
+  }
+
+  const row = result.data as { provider_id?: string | null }
+
+  return typeof row.provider_id === 'string' && row.provider_id.trim()
+    ? row.provider_id.trim()
+    : null
+}
+
 /**
  * Single core query that loads admins + owner/core users and resolves their
  * reception state and LINE provider id in one pass.

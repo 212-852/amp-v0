@@ -138,30 +138,52 @@ export async function save_notification_settings(input: {
     incoming.kinds && typeof incoming.kinds === 'object'
       ? (incoming.kinds as Record<string, unknown>)
       : {}
-  const preferences: notification_preferences = {
-    pwa_push_enabled: boolean_value(
-      (incoming as Record<string, unknown>).push_enabled ??
-        incoming.pwa_push_enabled,
-      previous.pwa_push_enabled,
-    ),
-    line_enabled: boolean_value(incoming.line_enabled, previous.line_enabled),
+  const incoming_record = incoming as Record<string, unknown>
+
+  const merged_record: Record<string, unknown> = {
+    primary_channel:
+      incoming_record.primary_channel !== undefined
+        ? incoming_record.primary_channel
+        : previous.primary_channel,
+    pwa_push_enabled:
+      incoming.pwa_push_enabled !== undefined
+        ? incoming.pwa_push_enabled
+        : incoming_record.push_enabled !== undefined
+          ? incoming_record.push_enabled
+          : previous.pwa_push_enabled,
+    line_enabled:
+      incoming.line_enabled !== undefined
+        ? incoming.line_enabled
+        : previous.line_enabled,
     kinds: {
-      chat: boolean_value(
-        (incoming as Record<string, unknown>).new_chat ?? incoming_kinds.chat,
-        previous.kinds.chat,
-      ),
-      reservation: boolean_value(
-        (incoming as Record<string, unknown>).reservation ??
-          incoming_kinds.reservation,
-        previous.kinds.reservation,
-      ),
-      announcement: boolean_value(
-        (incoming as Record<string, unknown>).announcement ??
-          incoming_kinds.announcement,
-        previous.kinds.announcement,
-      ),
+      chat:
+        incoming_record.new_chat !== undefined ||
+        incoming_kinds.chat !== undefined
+          ? boolean_value(
+              incoming_record.new_chat ?? incoming_kinds.chat,
+              previous.kinds.chat,
+            )
+          : previous.kinds.chat,
+      reservation:
+        incoming_record.reservation !== undefined ||
+        incoming_kinds.reservation !== undefined
+          ? boolean_value(
+              incoming_record.reservation ?? incoming_kinds.reservation,
+              previous.kinds.reservation,
+            )
+          : previous.kinds.reservation,
+      announcement:
+        incoming_record.announcement !== undefined ||
+        incoming_kinds.announcement !== undefined
+          ? boolean_value(
+              incoming_record.announcement ?? incoming_kinds.announcement,
+              previous.kinds.announcement,
+            )
+          : previous.kinds.announcement,
     },
   }
+
+  const preferences = normalize_notification_preferences(merged_record)
   const preferences_json = notification_preferences_to_json(preferences)
 
   await debug_notification_setting('notification_setting_request', {

@@ -120,6 +120,12 @@ export function resolve_concierge_targets(input: {
 }
 
 /**
+ * User `settings.notification_preferences` uses `primary_channel` (`push` | `line` | `none`):
+ * at most one external channel is active; chat delivery follows
+ * `resolve_chat_external_notification_route` in `lib/notification/rules.ts`.
+ */
+
+/**
  * Push subscription policy for notify (see `resolve_push_subscription_enabled_for_notify`):
  * `push_subscription_enabled` means a `push_subscriptions` row exists for the user with
  * `enabled = true`, a non-empty `endpoint`, using the latest row (`updated_at` desc, limit 1).

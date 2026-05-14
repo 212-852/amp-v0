@@ -11,9 +11,10 @@ import {
 } from './discord'
 import { send_line_push_notify } from './line'
 import { send_push_notify } from './push'
-import { user_allows_notification } from '@/lib/notification/rules'
+import { resolve_chat_external_notification_route } from '@/lib/notification/rules'
 import {
   load_concierge_recipients,
+  load_line_provider_id_for_user,
   read_requester_display_name,
   type concierge_recipients,
   type notify_recipient,
@@ -63,53 +64,116 @@ export async function notify(
   event: notify_event,
 ): Promise<notify_run_result> {
   if (event.event === 'new_chat') {
-    const push = await send_push_notify({
+    const route = await resolve_chat_external_notification_route({
       user_uuid: event.user_uuid,
-      message: event.message,
-      title: event.sender_internal_name ?? undefined,
-      room_uuid: event.room_uuid,
-      participant_uuid: event.participant_uuid ?? null,
-      message_uuid: event.message_uuid ?? null,
-      kind: 'chat',
-    }).catch((error) => ({
-      ok: false,
-      available: false,
-      reason: error instanceof Error ? error.message : 'push_threw',
-    }))
+    })
 
     await notification_route_trace('notify_route_decided', {
       user_uuid: event.user_uuid,
       room_uuid: event.room_uuid,
       message_uuid: event.message_uuid ?? null,
-      notification_route: 'push',
+      primary_channel: route,
+      notification_route: route,
       source_channel: event.source_channel,
-      phase: 'new_chat_push',
+      phase: 'new_chat',
     })
 
-    if (push.ok && push.available) {
-      await notification_route_trace('notify_push_sent', {
+    if (route === 'none') {
+      return { deliveries: [] }
+    }
+
+    if (route === 'push') {
+      const push = await send_push_notify({
+        user_uuid: event.user_uuid,
+        message: event.message,
+        title: event.sender_internal_name ?? undefined,
+        room_uuid: event.room_uuid,
+        participant_uuid: event.participant_uuid ?? null,
+        message_uuid: event.message_uuid ?? null,
+        kind: 'chat',
+      }).catch((error) => ({
+        ok: false,
+        available: false,
+        reason: error instanceof Error ? error.message : 'push_threw',
+      }))
+
+      if (push.ok && push.available) {
+        await notification_route_trace('notify_push_sent', {
+          user_uuid: event.user_uuid,
+          room_uuid: event.room_uuid,
+          message_uuid: event.message_uuid ?? null,
+          notification_route: 'push',
+          primary_channel: route,
+          source_channel: event.source_channel,
+          phase: 'new_chat_push',
+        })
+
+        return { deliveries: [{ channel: 'push' }] }
+      }
+
+      await notification_route_trace('notify_push_failed', {
         user_uuid: event.user_uuid,
         room_uuid: event.room_uuid,
         message_uuid: event.message_uuid ?? null,
         notification_route: 'push',
+        primary_channel: route,
         source_channel: event.source_channel,
+        error_message: push.reason ?? 'push_failed',
         phase: 'new_chat_push',
       })
 
-      return { deliveries: [{ channel: 'push' }] }
+      return { deliveries: [] }
     }
 
-    await notification_route_trace('notify_push_failed', {
-      user_uuid: event.user_uuid,
-      room_uuid: event.room_uuid,
-      message_uuid: event.message_uuid ?? null,
-      notification_route: 'push',
-      source_channel: event.source_channel,
-      error_message: push.reason ?? 'push_failed',
-      phase: 'new_chat_push',
-    })
+    const line_user_id = await load_line_provider_id_for_user(event.user_uuid)
 
-    return { deliveries: [] }
+    if (!line_user_id) {
+      await notification_route_trace('notification_line_failed', {
+        user_uuid: event.user_uuid,
+        room_uuid: event.room_uuid,
+        message_uuid: event.message_uuid ?? null,
+        notification_route: 'line',
+        primary_channel: route,
+        source_channel: event.source_channel,
+        error_message: 'line_user_missing',
+        phase: 'new_chat_line',
+      })
+
+      return { deliveries: [] }
+    }
+
+    try {
+      await send_line_push_notify({
+        line_user_id,
+        message: event.message,
+      })
+
+      await notification_route_trace('notification_line_sent', {
+        user_uuid: event.user_uuid,
+        room_uuid: event.room_uuid,
+        message_uuid: event.message_uuid ?? null,
+        notification_route: 'line',
+        primary_channel: route,
+        source_channel: event.source_channel,
+        phase: 'new_chat_line',
+      })
+
+      return { deliveries: [{ channel: 'line' }] }
+    } catch (error) {
+      await notification_route_trace('notification_line_failed', {
+        user_uuid: event.user_uuid,
+        room_uuid: event.room_uuid,
+        message_uuid: event.message_uuid ?? null,
+        notification_route: 'line',
+        primary_channel: route,
+        source_channel: event.source_channel,
+        error_message:
+          error instanceof Error ? error.message : 'line_push_failed',
+        phase: 'new_chat_line',
+      })
+
+      return { deliveries: [] }
+    }
   }
 
   if (event.event === 'concierge_requested') {
@@ -663,74 +727,93 @@ async function deliver_personal_to_recipient(input: {
   recipient: notify_recipient
   message: string
 }): Promise<personal_delivery_outcome> {
+  const route = await resolve_chat_external_notification_route({
+    user_uuid: input.recipient.user_uuid,
+  })
+
   await notification_route_trace('notify_route_decided', {
     user_uuid: input.recipient.user_uuid,
-    notification_route: 'push_first',
+    primary_channel: route,
+    notification_route: route,
     has_line_identity: Boolean(input.recipient.line_user_id),
     phase: 'personal_delivery_start',
   })
 
-  const push = await send_push_notify({
-    user_uuid: input.recipient.user_uuid,
-    message: input.message,
-    kind: 'chat',
-  }).catch((error) => ({
-    ok: false,
-    available: false,
-    reason: error instanceof Error ? error.message : 'push_threw',
-  }))
-
-  if (push.ok && push.available) {
-    await notification_route_trace('notify_push_sent', {
-      user_uuid: input.recipient.user_uuid,
-      notification_route: 'push',
-      has_push_subscription: true,
-      has_line_identity: Boolean(input.recipient.line_user_id),
-      phase: 'personal_delivery_push',
-    })
-
+  if (route === 'none') {
     return {
       recipient: input.recipient,
-      channel: 'push',
-      ok: true,
+      channel: 'none',
+      ok: false,
+      reason: 'notification_route_none',
     }
   }
 
-  if (push.available || push.reason) {
+  if (route === 'push') {
+    const push = await send_push_notify({
+      user_uuid: input.recipient.user_uuid,
+      message: input.message,
+      kind: 'chat',
+    }).catch((error) => ({
+      ok: false,
+      available: false,
+      reason: error instanceof Error ? error.message : 'push_threw',
+    }))
+
+    if (push.ok && push.available) {
+      await notification_route_trace('notify_push_sent', {
+        user_uuid: input.recipient.user_uuid,
+        notification_route: 'push',
+        primary_channel: route,
+        has_push_subscription: true,
+        has_line_identity: Boolean(input.recipient.line_user_id),
+        phase: 'personal_delivery_push',
+      })
+
+      return {
+        recipient: input.recipient,
+        channel: 'push',
+        ok: true,
+      }
+    }
+
     await notification_route_trace('notify_push_failed', {
       user_uuid: input.recipient.user_uuid,
       notification_route: 'push',
+      primary_channel: route,
       has_push_subscription: push.available,
       has_line_identity: Boolean(input.recipient.line_user_id),
       error_message: push.reason ?? 'push_failed',
       phase: 'personal_delivery_push',
     })
-  }
 
-  const line_user_id = input.recipient.line_user_id
-
-  if (!line_user_id) {
     return {
       recipient: input.recipient,
       channel: 'none',
       ok: false,
-      reason:
-        push.reason ?? (push.available ? 'push_failed' : 'no_personal_channel'),
+      reason: push.reason ?? 'push_failed',
     }
   }
 
-  const line_allowed = await user_allows_notification({
-    user_uuid: input.recipient.user_uuid,
-    channel: 'line',
-    kind: 'chat',
-  })
+  const line_user_id =
+    input.recipient.line_user_id ??
+    (await load_line_provider_id_for_user(input.recipient.user_uuid))
 
-  if (!line_allowed) {
+  if (!line_user_id) {
+    await notification_route_trace('notification_line_failed', {
+      user_uuid: input.recipient.user_uuid,
+      notification_route: 'line',
+      primary_channel: route,
+      has_push_subscription: false,
+      has_line_identity: false,
+      error_message: 'line_user_missing',
+      phase: 'personal_delivery_line',
+    })
+
     return {
       recipient: input.recipient,
       channel: 'none',
       ok: false,
-      reason: 'line_notification_disabled',
+      reason: 'line_user_missing',
     }
   }
 
@@ -743,7 +826,8 @@ async function deliver_personal_to_recipient(input: {
     await notification_route_trace('notification_line_sent', {
       user_uuid: input.recipient.user_uuid,
       notification_route: 'line',
-      has_push_subscription: push.available,
+      primary_channel: route,
+      has_push_subscription: false,
       has_line_identity: true,
       phase: 'personal_delivery_line',
     })
@@ -757,7 +841,8 @@ async function deliver_personal_to_recipient(input: {
     await notification_route_trace('notification_line_failed', {
       user_uuid: input.recipient.user_uuid,
       notification_route: 'line',
-      has_push_subscription: push.available,
+      primary_channel: route,
+      has_push_subscription: false,
       has_line_identity: true,
       error_message: error instanceof Error ? error.message : 'line_push_failed',
       phase: 'personal_delivery_line',
