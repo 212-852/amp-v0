@@ -47,7 +47,6 @@ import {
   normalize_discord_thread_action_id,
 } from '@/lib/notify/discord'
 import { normalize_locale } from '@/lib/locale/action'
-import { fetch_user_profile_json } from '@/lib/users/profile_json'
 import {
   ensure_direct_room_for_visitor,
   parse_room_mode,
@@ -2383,9 +2382,18 @@ export async function handle_admin_reception_room_opened(
   const subject = await resolve_room_subject(room_uuid)
   const customer_display_name = subject.display_name
 
-  const admin_profile_json = await fetch_user_profile_json(admin_uuid)
+  const profile_result = await supabase
+    .from('profiles')
+    .select('internal_name')
+    .eq('user_uuid', admin_uuid)
+    .maybeSingle()
+  const profile = profile_result.data as
+    | { internal_name?: unknown }
+    | null
   const admin_internal_name_raw =
-    admin_profile_json.internal_name?.trim() ?? ''
+    typeof profile?.internal_name === 'string'
+      ? profile.internal_name.trim()
+      : ''
   const admin_internal_name =
     admin_internal_name_raw.length > 0 ? admin_internal_name_raw : null
 
@@ -2753,6 +2761,8 @@ export async function handle_chat_message_request(
           message_uuid: archived_messages[0]?.archive_uuid ?? null,
           message: text_value,
           sender_internal_name: sender_display_name,
+          sender_user_uuid: clean_uuid(session.user_uuid),
+          sender_role: session.role ?? null,
           source_channel: 'web',
         }),
       )

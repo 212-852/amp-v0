@@ -121,9 +121,11 @@ export function resolve_debug_rule(input: {
   }
 
   const admin_management_events = new Set([
-    'admin_profile_save_started',
-    'admin_profile_save_failed',
-    'admin_profile_save_succeeded',
+    'profile_fetch_started',
+    'profile_fetch_succeeded',
+    'profile_save_started',
+    'profile_save_failed',
+    'profile_save_succeeded',
     'admin_internal_name_notify_failed',
     'admin_internal_name_notify_succeeded',
   ])
@@ -133,14 +135,20 @@ export function resolve_debug_rule(input: {
     admin_management_events.has(input.event)
   ) {
     const is_failed =
-      input.event === 'admin_profile_save_failed' ||
+      input.event === 'profile_save_failed' ||
       input.event === 'admin_internal_name_notify_failed'
+
+    const is_save_trace_anchor =
+      input.event === 'profile_fetch_started' ||
+      input.event === 'profile_fetch_succeeded'
 
     return {
       category: 'admin_management',
       level: is_failed ? 'error' : 'info',
       channels:
-        is_failed || debug_control.admin_management_debug_enabled
+        is_failed ||
+        is_save_trace_anchor ||
+        debug_control.admin_management_debug_enabled
           ? ['discord']
           : [],
     }
@@ -465,6 +473,7 @@ export function resolve_debug_rule(input: {
     'notify_push_subscription_checked',
     'notify_push_disabled_reason',
     'notify_push_send_started',
+    'notify_push_sender_name_resolved',
     'notify_push_payload_built',
     'sw_push_received',
     'sw_notification_shown',

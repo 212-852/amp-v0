@@ -2,8 +2,13 @@ import 'server-only'
 
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 
 import { evaluate_push_chat_delivery_allowed } from './push_gate'
+import {
+  resolve_push_notification_title,
+  type push_sender_title_source,
+} from './rules'
 
 export type push_notify_input = {
   user_uuid: string
@@ -13,6 +18,8 @@ export type push_notify_input = {
   participant_uuid?: string | null
   message_uuid?: string | null
   kind?: 'chat' | 'reservation' | 'announcement'
+  sender_user_uuid?: string | null
+  sender_role?: string | null
 }
 
 export type push_notify_result = {
@@ -198,14 +205,131 @@ function sanitize_push_body(value: string) {
   return cleaned.slice(0, 80) || '\u65B0\u3057\u3044\u30E1\u30C3\u30BB\u30FC\u30B8'
 }
 
-function build_push_payload(input: push_notify_input): push_payload {
+type push_title_resolution_debug = {
+  sender_user_uuid: string | null
+  sender_role: string | null
+  internal_name_exists: boolean
+  resolved_sender_name_source:
+    | push_sender_title_source
+    | 'input_title'
+    | 'default_new_message'
+  title_exists: boolean
+}
+
+async function resolve_push_notify_title(input: push_notify_input): Promise<{
+  title: string
+  debug: push_title_resolution_debug
+}> {
+  const kind = input.kind ?? 'chat'
+  const sender_uuid = clean_uuid(input.sender_user_uuid ?? null)
+  const input_title =
+    typeof input.title === 'string' && input.title.trim()
+      ? input.title.trim()
+      : null
+
+  if (kind !== 'chat') {
+    const title =
+      input_title ?? '\u65B0\u3057\u3044\u30E1\u30C3\u30BB\u30FC\u30B8'
+
+    return {
+      title,
+      debug: {
+        sender_user_uuid: null,
+        sender_role: null,
+        internal_name_exists: false,
+        resolved_sender_name_source: input_title
+          ? 'input_title'
+          : 'default_new_message',
+        title_exists: title.length > 0,
+      },
+    }
+  }
+
+  if (!sender_uuid) {
+    const title =
+      input_title ?? '\u65B0\u3057\u3044\u30E1\u30C3\u30BB\u30FC\u30B8'
+
+    return {
+      title,
+      debug: {
+        sender_user_uuid: null,
+        sender_role: null,
+        internal_name_exists: false,
+        resolved_sender_name_source: input_title
+          ? 'input_title'
+          : 'default_new_message',
+        title_exists: title.length > 0,
+      },
+    }
+  }
+
+  const [profile_row, user_row] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('internal_name, display_name')
+      .eq('user_uuid', sender_uuid)
+      .maybeSingle(),
+    supabase
+      .from('users')
+      .select('display_name, role')
+      .eq('user_uuid', sender_uuid)
+      .maybeSingle(),
+  ])
+
+  const profile = profile_row.data as
+    | { internal_name?: unknown; display_name?: unknown }
+    | null
+  const internal_raw = profile?.internal_name
+  const internal =
+    typeof internal_raw === 'string' && internal_raw.trim()
+      ? internal_raw.trim()
+      : null
+  const internal_name_exists = Boolean(internal)
+
+  const row = user_row.data as
+    | { display_name?: unknown; role?: unknown }
+    | null
+  const profile_display_name =
+    typeof profile?.display_name === 'string' ? profile.display_name : null
+  const users_display_name =
+    typeof row?.display_name === 'string' ? row.display_name : null
+  const display_name = profile_display_name ?? users_display_name
+  const role_from_db =
+    typeof row?.role === 'string' && row.role.trim()
+      ? row.role.trim()
+      : typeof input.sender_role === 'string' && input.sender_role.trim()
+        ? input.sender_role.trim()
+        : null
+
+  const resolved = resolve_push_notification_title({
+    sender_role: role_from_db,
+    profile_internal_name: internal,
+    users_display_name: display_name,
+  })
+
+  return {
+    title: resolved.title,
+    debug: {
+      sender_user_uuid: sender_uuid,
+      sender_role: role_from_db,
+      internal_name_exists,
+      resolved_sender_name_source: resolved.source,
+      title_exists: resolved.title.length > 0,
+    },
+  }
+}
+
+function build_push_payload(
+  input: push_notify_input,
+  resolved_title: string,
+): push_payload {
   const room_uuid =
     typeof input.room_uuid === 'string' && input.room_uuid.trim()
       ? input.room_uuid.trim()
       : null
   const title =
-    typeof input.title === 'string' && input.title.trim()
-      ? input.title.trim()
+    typeof resolved_title === 'string' && resolved_title.trim()
+      ? resolved_title.trim()
       : '\u65B0\u3057\u3044\u30E1\u30C3\u30BB\u30FC\u30B8'
   const url = room_uuid
     ? `/user?room_uuid=${encodeURIComponent(room_uuid)}`
@@ -370,6 +494,22 @@ export async function send_push_notify(
     },
   })
 
+  const resolved_title_pack = await resolve_push_notify_title(input)
+
+  await debug_event({
+    category: 'pwa',
+    event: 'notify_push_sender_name_resolved',
+    payload: {
+      user_uuid: input.user_uuid,
+      sender_user_uuid: resolved_title_pack.debug.sender_user_uuid,
+      sender_role: resolved_title_pack.debug.sender_role,
+      internal_name_exists: resolved_title_pack.debug.internal_name_exists,
+      resolved_sender_name_source:
+        resolved_title_pack.debug.resolved_sender_name_source,
+      title_exists: resolved_title_pack.debug.title_exists,
+    },
+  })
+
   const result = await supabase
     .from('push_subscriptions')
     .select('endpoint, p256dh, auth')
@@ -412,7 +552,7 @@ export async function send_push_notify(
   const public_key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
   const private_key = process.env.VAPID_PRIVATE_KEY
   const subject = process.env.VAPID_SUBJECT
-  const payload = build_push_payload(input)
+  const payload = build_push_payload(input, resolved_title_pack.title)
 
   await debug_event({
     category: 'pwa',

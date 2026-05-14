@@ -5,11 +5,10 @@ import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import { deliver_admin_internal_name_updated } from '@/lib/notify'
-import { fetch_user_profile_json, fetch_users_profile_json_map, merge_user_profile_json } from '@/lib/users/profile_json'
 import {
-  can_update_admin_profile,
-  validate_admin_profile_input,
-  type admin_profile_input,
+  can_update_profile,
+  validate_profile_input,
+  type profile_input,
 } from './rules'
 
 // ============================================================================
@@ -30,13 +29,14 @@ export type admin_user_summary = {
   created_at: string | null
   reception_state: 'open' | 'offline' | null
   reception_updated_at: string | null
-  profile: admin_profile
+  profile: profile
 }
 
-export type admin_profile = {
+export type profile = {
   real_name: string | null
   birth_date: string | null
-  /** UI-facing internal display name. Stored as users.profile_json.internal_name. */
+  display_name: string | null
+  /** UI-facing internal display name. Stored as profiles.internal_name. */
   work_name: string | null
   updated_at: string | null
 }
@@ -53,6 +53,7 @@ export type admin_user_detail = admin_user_summary & {
 type users_row = Record<string, unknown>
 type receptions_row = Record<string, unknown>
 type identities_row = Record<string, unknown>
+type profiles_row = Record<string, unknown>
 
 function string_value(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
@@ -62,7 +63,9 @@ function pick_reception_state(value: unknown): 'open' | 'offline' | null {
   return value === 'open' || value === 'offline' ? value : null
 }
 
-function row_user_uuid(row: users_row | identities_row | receptions_row): string | null {
+function row_user_uuid(
+  row: users_row | identities_row | receptions_row | profiles_row,
+): string | null {
   const raw = row['user_uuid']
   return typeof raw === 'string' && raw.length > 0 ? raw : null
 }
@@ -132,41 +135,75 @@ async function fetch_identities_by_user(
     .filter((value): value is admin_user_identity => value !== null)
 }
 
-async function fetch_admin_profiles_by_user(
+async function fetch_profiles_by_user(
   user_uuids: string[],
-): Promise<Map<string, admin_profile>> {
-  const map = new Map<string, admin_profile>()
+): Promise<Map<string, profile>> {
+  const map = new Map<string, profile>()
 
   if (user_uuids.length === 0) {
     return map
   }
 
-  const profile_map = await fetch_users_profile_json_map(user_uuids)
+  await debug_event({
+    category: 'admin_management',
+    event: 'profile_fetch_started',
+    payload: {
+      user_count: user_uuids.length,
+      source_channel: 'web',
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+    },
+  })
 
-  for (const user_uuid of user_uuids) {
-    const uuid = clean_uuid(user_uuid)
+  const result = await supabase
+    .from('profiles')
+    .select('user_uuid, real_name, birth_date, internal_name, display_name, updated_at')
+    .in('user_uuid', user_uuids)
+
+  if (result.error) {
+    throw result.error
+  }
+
+  for (const raw of (result.data ?? []) as profiles_row[]) {
+    const uuid = row_user_uuid(raw)
 
     if (!uuid) {
       continue
     }
 
-    const profile = profile_map.get(uuid) ?? {}
-
     map.set(uuid, {
-      real_name: profile.real_name ?? null,
-      birth_date: profile.birth_date ?? null,
-      work_name: profile.internal_name ?? null,
-      updated_at: null,
+      real_name: string_value(raw['real_name']),
+      birth_date: string_value(raw['birth_date']),
+      display_name: string_value(raw['display_name']),
+      work_name: string_value(raw['internal_name']),
+      updated_at: string_value(raw['updated_at']),
     })
   }
+
+  await debug_event({
+    category: 'admin_management',
+    event: 'profile_fetch_succeeded',
+    payload: {
+      user_count: user_uuids.length,
+      profile_count: map.size,
+      source_channel: 'web',
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
+    },
+  })
 
   return map
 }
 
-function empty_profile(): admin_profile {
+function empty_profile(): profile {
   return {
     real_name: null,
     birth_date: null,
+    display_name: null,
     work_name: null,
     updated_at: null,
   }
@@ -183,7 +220,7 @@ function fallback_user_name(row: users_row): string | null {
 function row_to_summary(
   row: users_row,
   receptions: Map<string, { state: 'open' | 'offline' | null; updated_at: string | null }>,
-  profiles: Map<string, admin_profile>,
+  profiles: Map<string, profile>,
 ): admin_user_summary | null {
   const user_uuid = row_user_uuid(row)
 
@@ -197,7 +234,7 @@ function row_to_summary(
 
   return {
     user_uuid,
-    display_name: profile.work_name ?? fallback_name,
+    display_name: profile.display_name ?? profile.work_name ?? fallback_name,
     fallback_name,
     role: string_value(row['role']),
     tier: string_value(row['tier']),
@@ -229,7 +266,7 @@ export async function list_admin_users(): Promise<admin_user_summary[]> {
     .filter((value): value is string => value !== null)
   const [receptions, profiles] = await Promise.all([
     fetch_receptions_by_user(user_uuids),
-    fetch_admin_profiles_by_user(user_uuids),
+    fetch_profiles_by_user(user_uuids),
   ])
 
   const summaries = rows
@@ -275,7 +312,7 @@ export async function read_admin_user(
 
   const [receptions, profiles] = await Promise.all([
     fetch_receptions_by_user([sanitized]),
-    fetch_admin_profiles_by_user([sanitized]),
+    fetch_profiles_by_user([sanitized]),
   ])
   const summary = row_to_summary(row, receptions, profiles)
 
@@ -291,10 +328,10 @@ export async function read_admin_user(
   }
 }
 
-export type update_admin_profile_result =
+export type update_profile_result =
   | {
       ok: true
-      profile: admin_profile
+      profile: profile
     }
   | {
       ok: false
@@ -310,10 +347,10 @@ export type update_admin_profile_result =
     }
 
 /**
- * Admin operator profile fields live in `users.profile_json`
- * (real_name, birth_date, internal_name). Writes use the service-role client.
+ * Admin operator profile fields live in `public.profiles`.
+ * Writes use the service-role client.
  */
-type admin_profile_debug_row = {
+type profile_debug_row = {
   target_user_uuid: string
   updated_by_user_uuid: string
   role: string | null
@@ -413,7 +450,7 @@ function hint_for_postgrest_code(code: string): string | null {
 }
 
 function empty_debug_errors(): Pick<
-  admin_profile_debug_row,
+  profile_debug_row,
   'error_code' | 'error_message' | 'error_details' | 'error_hint'
 > {
   return {
@@ -424,14 +461,31 @@ function empty_debug_errors(): Pick<
   }
 }
 
+function profile_form_debug_extra(
+  input: profile_input,
+): Record<string, unknown> {
+  const rn = String(input.real_name ?? '').trim()
+  const bd = String(input.birth_date ?? '').trim()
+  const wn = String(input.work_name ?? '').trim()
+
+  return {
+    real_name_exists: rn.length > 0,
+    birth_date_exists: bd.length > 0,
+    internal_name_exists: wn.length > 0,
+    internal_name_length: wn.length,
+  }
+}
+
 async function emit_admin_management_debug(input: {
   event:
-    | 'admin_profile_save_started'
-    | 'admin_profile_save_failed'
-    | 'admin_profile_save_succeeded'
+    | 'profile_fetch_started'
+    | 'profile_fetch_succeeded'
+    | 'profile_save_started'
+    | 'profile_save_failed'
+    | 'profile_save_succeeded'
     | 'admin_internal_name_notify_failed'
     | 'admin_internal_name_notify_succeeded'
-  base: admin_profile_debug_row
+  base: profile_debug_row
   extra?: Record<string, unknown>
 }) {
   await debug_event({
@@ -444,25 +498,25 @@ async function emit_admin_management_debug(input: {
   })
 }
 
-export async function update_admin_profile(input: {
+export async function update_profile(input: {
   user_uuid: string
   updated_by_user_uuid: string
   updated_by_role: string | null
   updated_by_tier: string | null
   source_channel?: string | null
-} & admin_profile_input): Promise<update_admin_profile_result> {
+} & profile_input): Promise<update_profile_result> {
   const user_uuid = clean_uuid(input.user_uuid)
   const updated_by_user_uuid = clean_uuid(input.updated_by_user_uuid)
   const source_channel = input.source_channel ?? 'web'
 
   const base_debug = (
     partial: Pick<
-      admin_profile_debug_row,
+      profile_debug_row,
       'phase' | 'changed_fields'
     > &
       Partial<
         Pick<
-          admin_profile_debug_row,
+          profile_debug_row,
           | 'target_user_uuid'
           | 'updated_by_user_uuid'
           | 'role'
@@ -470,7 +524,7 @@ export async function update_admin_profile(input: {
           | 'source_channel'
         >
       >,
-  ): admin_profile_debug_row => ({
+  ): profile_debug_row => ({
     target_user_uuid: partial.target_user_uuid ?? user_uuid ?? '',
     updated_by_user_uuid:
       partial.updated_by_user_uuid ?? updated_by_user_uuid ?? '',
@@ -484,7 +538,7 @@ export async function update_admin_profile(input: {
 
   if (!user_uuid) {
     await emit_admin_management_debug({
-      event: 'admin_profile_save_failed',
+      event: 'profile_save_failed',
       base: {
         ...base_debug({
           phase: 'ingress',
@@ -497,6 +551,7 @@ export async function update_admin_profile(input: {
         error_details: null,
         error_hint: 'check_url_uuid',
       },
+      extra: profile_form_debug_extra(input),
     })
 
     return { ok: false, error: 'invalid_user' }
@@ -504,13 +559,13 @@ export async function update_admin_profile(input: {
 
   if (
     !updated_by_user_uuid ||
-    !can_update_admin_profile({
+    !can_update_profile({
       role: input.updated_by_role,
       tier: input.updated_by_tier,
     })
   ) {
     await emit_admin_management_debug({
-      event: 'admin_profile_save_failed',
+      event: 'profile_save_failed',
       base: {
         ...base_debug({
           phase: 'gate',
@@ -521,16 +576,17 @@ export async function update_admin_profile(input: {
         error_details: null,
         error_hint: 'check_session_tier',
       },
+      extra: profile_form_debug_extra(input),
     })
 
     return { ok: false, error: 'not_allowed' }
   }
 
-  const validation = validate_admin_profile_input(input)
+  const validation = validate_profile_input(input)
 
   if (!validation.ok) {
     await emit_admin_management_debug({
-      event: 'admin_profile_save_failed',
+      event: 'profile_save_failed',
       base: {
         ...base_debug({
           phase: 'validate_input',
@@ -541,6 +597,7 @@ export async function update_admin_profile(input: {
         error_details: null,
         error_hint: 'fix_form_input',
       },
+      extra: profile_form_debug_extra(input),
     })
 
     return validation
@@ -557,7 +614,7 @@ export async function update_admin_profile(input: {
     const serialized = serialize_service_error(user_result.error)
 
     await emit_admin_management_debug({
-      event: 'admin_profile_save_failed',
+      event: 'profile_save_failed',
       base: {
         ...base_debug({
           phase: 'validate_target',
@@ -565,6 +622,7 @@ export async function update_admin_profile(input: {
         }),
         ...serialized,
       },
+      extra: profile_form_debug_extra(input),
     })
 
     return { ok: false, error: 'target_load_failed' }
@@ -572,7 +630,7 @@ export async function update_admin_profile(input: {
 
   if (!user_result.data) {
     await emit_admin_management_debug({
-      event: 'admin_profile_save_failed',
+      event: 'profile_save_failed',
       base: {
         ...base_debug({
           phase: 'validate_target',
@@ -583,17 +641,51 @@ export async function update_admin_profile(input: {
         error_details: null,
         error_hint: 'check_user_uuid',
       },
+      extra: profile_form_debug_extra(input),
     })
 
     return { ok: false, error: 'admin_not_found' }
   }
 
-  const current_profile = await fetch_user_profile_json(user_uuid)
+  await emit_admin_management_debug({
+    event: 'profile_fetch_started',
+    base: base_debug({
+      phase: 'fetch_current',
+      changed_fields: [],
+    }),
+    extra: profile_form_debug_extra(input),
+  })
+
+  const current_profile_result = await supabase
+    .from('profiles')
+    .select('real_name, birth_date, internal_name, display_name, updated_at')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  if (current_profile_result.error) {
+    const serialized = serialize_service_error(current_profile_result.error)
+
+    await emit_admin_management_debug({
+      event: 'profile_save_failed',
+      base: {
+        ...base_debug({
+          phase: 'fetch_current',
+          changed_fields: [],
+        }),
+        ...serialized,
+      },
+      extra: profile_form_debug_extra(input),
+    })
+
+    return { ok: false, error: 'target_load_failed' }
+  }
+
+  const current_profile = (current_profile_result.data ?? {}) as profiles_row
 
   const before = {
-    real_name: string_value(current_profile.real_name ?? null),
-    birth_date: string_value(current_profile.birth_date ?? null),
-    work_name: string_value(current_profile.internal_name ?? null),
+    real_name: string_value(current_profile['real_name']),
+    birth_date: string_value(current_profile['birth_date']),
+    work_name: string_value(current_profile['internal_name']),
   }
 
   const changed_fields = compute_changed_field_names({
@@ -602,30 +694,56 @@ export async function update_admin_profile(input: {
   })
 
   await emit_admin_management_debug({
-    event: 'admin_profile_save_started',
+    event: 'profile_fetch_succeeded',
+    base: base_debug({
+      phase: 'fetch_current_complete',
+      changed_fields,
+    }),
+    extra: {
+      ...profile_form_debug_extra(input),
+      persist_table: 'profiles',
+      persist_columns: ['real_name', 'birth_date', 'internal_name', 'display_name'],
+      persist_update_key_column: 'user_uuid',
+      target_user_uuid_matches_update_key: true,
+      db_client: 'supabase_service_role',
+      rls_effect: 'service_role_bypasses_rls',
+    },
+  })
+
+  await emit_admin_management_debug({
+    event: 'profile_save_started',
     base: base_debug({
       phase: 'persist',
       changed_fields,
     }),
+    extra: profile_form_debug_extra(input),
   })
 
   const old_work_name = before.work_name
   const updated_at = new Date().toISOString()
 
-  const merge = await merge_user_profile_json({
-    user_uuid,
-    patch: {
-      real_name: validation.value.real_name,
-      birth_date: validation.value.birth_date,
-      internal_name: validation.value.work_name,
-    },
-  })
+  const upsert_result = await supabase
+    .from('profiles')
+    .upsert(
+      {
+        user_uuid,
+        display_name: validation.value.work_name,
+        real_name: validation.value.real_name,
+        birth_date: validation.value.birth_date,
+        internal_name: validation.value.work_name,
+        updated_by_user_uuid,
+        updated_at,
+      },
+      { onConflict: 'user_uuid' },
+    )
+    .select('real_name, birth_date, internal_name, display_name, updated_at')
+    .maybeSingle()
 
-  if (!merge.ok) {
-    const serialized = serialize_service_error(merge.error)
+  if (upsert_result.error) {
+    const serialized = serialize_service_error(upsert_result.error)
 
     await emit_admin_management_debug({
-      event: 'admin_profile_save_failed',
+      event: 'profile_save_failed',
       base: {
         ...base_debug({
           phase: 'persist',
@@ -633,25 +751,29 @@ export async function update_admin_profile(input: {
         }),
         ...serialized,
       },
+      extra: profile_form_debug_extra(input),
     })
 
     return { ok: false, error: 'persist_failed' }
   }
 
+  const saved_profile = (upsert_result.data ?? {}) as profiles_row
   const next_work_name = string_value(validation.value.work_name)
-  const profile: admin_profile = {
-    real_name: string_value(validation.value.real_name),
-    birth_date: string_value(validation.value.birth_date),
+  const profile: profile = {
+    real_name: string_value(saved_profile['real_name']),
+    birth_date: string_value(saved_profile['birth_date']),
+    display_name: string_value(saved_profile['display_name']),
     work_name: next_work_name,
-    updated_at,
+    updated_at: string_value(saved_profile['updated_at']) ?? updated_at,
   }
 
   await emit_admin_management_debug({
-    event: 'admin_profile_save_succeeded',
+    event: 'profile_save_succeeded',
     base: base_debug({
       phase: 'persist_complete',
       changed_fields,
     }),
+    extra: profile_form_debug_extra(input),
   })
 
   if (next_work_name && next_work_name !== old_work_name) {

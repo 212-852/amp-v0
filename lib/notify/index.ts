@@ -86,11 +86,12 @@ export async function notify(
       const push = await send_push_notify({
         user_uuid: event.user_uuid,
         message: event.message,
-        title: event.sender_internal_name ?? undefined,
         room_uuid: event.room_uuid,
         participant_uuid: event.participant_uuid ?? null,
         message_uuid: event.message_uuid ?? null,
         kind: 'chat',
+        sender_user_uuid: event.sender_user_uuid ?? null,
+        sender_role: event.sender_role ?? null,
       }).catch((error) => ({
         ok: false,
         available: false,

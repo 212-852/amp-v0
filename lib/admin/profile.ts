@@ -2,14 +2,10 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
-import {
-  fetch_user_profile_json,
-  fetch_users_profile_json_map,
-} from '@/lib/users/profile_json'
 
 /**
- * Single core for operator-facing labels from `users.profile_json` + `users`.
- * Uses `profile_json.internal_name` only (never real_name / birth_date for display policy paths that require it).
+ * Single core for operator-facing labels from `public.profiles` + `users`.
+ * Uses profiles.internal_name first, then profiles.display_name.
  */
 
 export type admin_operator_display_policy =
@@ -19,6 +15,12 @@ export type admin_operator_display_policy =
 
 type users_embed_row = {
   user_uuid: string
+  display_name: string | null
+}
+
+type profiles_embed_row = {
+  user_uuid: string
+  internal_name: string | null
   display_name: string | null
 }
 
@@ -80,7 +82,7 @@ function compose_admin_display_label(input: {
 }
 
 /**
- * One saved_by snapshot for handoff memo insert (`users.profile_json.internal_name` first).
+ * One saved_by snapshot for handoff memo insert.
  */
 export async function resolve_handoff_memo_saved_by_name(
   user_uuid_raw: string | null | undefined,
@@ -91,11 +93,25 @@ export async function resolve_handoff_memo_saved_by_name(
     return 'Admin'
   }
 
-  const profile = await fetch_user_profile_json(user_uuid)
-  const internal = string_value(profile.internal_name ?? null)
+  const profile_result = await supabase
+    .from('profiles')
+    .select('internal_name, display_name')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  const profile = profile_result.data as
+    | { internal_name?: unknown; display_name?: unknown }
+    | null
+  const internal = string_value(profile?.internal_name ?? null)
 
   if (internal) {
     return internal
+  }
+
+  const profile_display_name = string_value(profile?.display_name ?? null)
+
+  if (profile_display_name) {
+    return profile_display_name
   }
 
   const user_result = await supabase
@@ -118,8 +134,7 @@ export async function resolve_handoff_memo_saved_by_name(
 }
 
 /**
- * Batch resolve for list views: reads `users.profile_json.internal_name` and
- * falls back to `users.display_name`. Map keys are lower-case UUIDs (see `clean_uuid`).
+ * Batch resolve for list views. Map keys are lower-case UUIDs (see `clean_uuid`).
  */
 export async function batch_resolve_admin_operator_display(
   user_uuids: ReadonlyArray<string | null | undefined>,
@@ -142,23 +157,29 @@ export async function batch_resolve_admin_operator_display(
     return map
   }
 
-  const profile_map = await fetch_users_profile_json_map(cleaned)
-  const internal_by_user = new Map<string, string | null>()
+  const [profiles_result, users_result] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('user_uuid, internal_name, display_name')
+      .in('user_uuid', cleaned),
+    supabase
+      .from('users')
+      .select('user_uuid, display_name')
+      .in('user_uuid', cleaned),
+  ])
 
-  for (const uuid of cleaned) {
-    internal_by_user.set(
-      uuid,
-      string_value(profile_map.get(uuid)?.internal_name ?? null),
-    )
+  if (profiles_result.error || users_result.error) {
+    return map
   }
 
-  const users_result = await supabase
-    .from('users')
-    .select('user_uuid, display_name')
-    .in('user_uuid', cleaned)
+  const profile_by_user = new Map<string, profiles_embed_row>()
 
-  if (users_result.error) {
-    return map
+  for (const raw of (profiles_result.data ?? []) as profiles_embed_row[]) {
+    const uuid = clean_uuid(raw.user_uuid)
+
+    if (uuid) {
+      profile_by_user.set(uuid, raw)
+    }
   }
 
   for (const raw of (users_result.data ?? []) as unknown as users_embed_row[]) {
@@ -168,7 +189,10 @@ export async function batch_resolve_admin_operator_display(
       continue
     }
 
-    const internal = internal_by_user.get(uuid) ?? null
+    const profile = profile_by_user.get(uuid) ?? null
+    const internal = string_value(profile?.internal_name ?? null)
+    const profile_display_name = string_value(profile?.display_name ?? null)
+    const users_display_name = string_value(raw.display_name)
 
     let label: string | null = null
 
@@ -176,12 +200,12 @@ export async function batch_resolve_admin_operator_display(
       label =
         compose_admin_display_label({
           internal_name: internal,
-          display_name: string_value(raw.display_name),
+          display_name: profile_display_name ?? users_display_name,
         }) ?? null
     } else {
       label = compose_handoff_saved_by_label({
         internal_name: internal,
-        display_name: string_value(raw.display_name),
+        display_name: profile_display_name ?? users_display_name,
         email: null,
       })
     }

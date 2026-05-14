@@ -49,9 +49,12 @@ export function should_offer_pwa_install(input: {
   return can_save_push_subscription(input.session) && !input.pwa_push_installed
 }
 
-/** Admin header menu: any authenticated admin tier may open the install guide. */
+/**
+ * Admin header menu: PWA install row is for end-user / member flows only.
+ * Admins must not see the home-screen install entry here.
+ */
 export function can_offer_admin_pwa_install_menu_row(
-  session: push_session_slice,
+  _session: push_session_slice,
 ): boolean {
-  return session.role === 'admin'
+  return false
 }

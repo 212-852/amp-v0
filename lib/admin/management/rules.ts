@@ -1,17 +1,17 @@
-export type admin_profile_input = {
+export type profile_input = {
   real_name?: string | null
   birth_date?: string | null
   work_name?: string | null
 }
 
-export function can_update_admin_profile(input: {
+export function can_update_profile(input: {
   role: string | null | undefined
   tier: string | null | undefined
 }): boolean {
   return input.role === 'admin' && (input.tier === 'owner' || input.tier === 'core')
 }
 
-export type admin_profile_validated = {
+export type profile_validated = {
   ok: true
   value: {
     real_name: string | null
@@ -20,7 +20,7 @@ export type admin_profile_validated = {
   }
 }
 
-export type admin_profile_validation_failed = {
+export type profile_validation_failed = {
   ok: false
   error:
     | 'real_name_too_long'
@@ -47,9 +47,9 @@ function is_valid_birth_date(value: string): boolean {
   return date.toISOString().slice(0, 10) === value
 }
 
-export function validate_admin_profile_input(
-  input: admin_profile_input,
-): admin_profile_validated | admin_profile_validation_failed {
+export function validate_profile_input(
+  input: profile_input,
+): profile_validated | profile_validation_failed {
   const real_name = nullable_trimmed(input.real_name)
   const birth_date = nullable_trimmed(input.birth_date)
   const work_name = nullable_trimmed(input.work_name)

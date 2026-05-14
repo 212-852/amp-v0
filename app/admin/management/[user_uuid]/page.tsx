@@ -5,7 +5,7 @@ import { UserRound } from 'lucide-react'
 
 import {
   read_admin_user,
-  update_admin_profile,
+  update_profile,
   type admin_user_detail,
 } from '@/lib/admin/management/action'
 import { require_admin_management_access } from '@/lib/admin/management/context'
@@ -89,12 +89,12 @@ export default async function AdminManagementDetailPage({
   const has_error = Boolean(query.error)
   const error_code = query.error ?? null
 
-  async function save_admin_profile(form_data: FormData) {
+  async function save_profile(form_data: FormData) {
     'use server'
 
     const access = await require_admin_management_access()
 
-    const result = await update_admin_profile({
+    const result = await update_profile({
       user_uuid,
       updated_by_user_uuid: access.admin_user_uuid,
       updated_by_role: access.role,
@@ -182,7 +182,7 @@ export default async function AdminManagementDetailPage({
           </section>
 
           <form
-            action={save_admin_profile}
+            action={save_profile}
             className="rounded-2xl border border-neutral-200 bg-white px-4 py-4"
           >
             <div className="mb-4 flex items-center justify-between gap-3">

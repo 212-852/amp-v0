@@ -49,6 +49,8 @@ export type notify_event =
       message_uuid?: string | null
       message: string
       sender_internal_name?: string | null
+      sender_user_uuid?: string | null
+      sender_role?: string | null
       source_channel: string
     }
   | {
@@ -246,6 +248,47 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
   return {
     channels: [],
   }
+}
+
+export type push_sender_title_source =
+  | 'admin_internal_name'
+  | 'profile_internal_name'
+  | 'users_display_name'
+  | 'fallback'
+
+function trim_nonempty(value: string | null | undefined): string | null {
+  const t = typeof value === 'string' ? value.trim() : ''
+
+  return t.length > 0 ? t : null
+}
+
+/**
+ * Push notification title for staff-originated messages: profiles.internal_name
+ * first when sender is admin, then profiles.display_name/users.display_name,
+ * then fixed operator label.
+ */
+export function resolve_push_notification_title(input: {
+  sender_role: string | null
+  profile_internal_name: string | null
+  users_display_name: string | null
+}): { title: string; source: push_sender_title_source } {
+  const internal = trim_nonempty(input.profile_internal_name)
+  const disp = trim_nonempty(input.users_display_name)
+  const is_admin = input.sender_role === 'admin'
+
+  if (is_admin && internal) {
+    return { title: internal, source: 'admin_internal_name' }
+  }
+
+  if (internal) {
+    return { title: internal, source: 'profile_internal_name' }
+  }
+
+  if (disp) {
+    return { title: disp, source: 'users_display_name' }
+  }
+
+  return { title: '\u904b\u55b6', source: 'fallback' }
 }
 
 export function format_support_started_notify_content(

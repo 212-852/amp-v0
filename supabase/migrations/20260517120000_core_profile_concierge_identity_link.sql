@@ -1,24 +1,11 @@
--- Single core: users.profile_json, rooms.concierge_json, identities LINE link state.
--- Stops using admin_profiles / chat_handoff_memos / auth_link_sessions for new writes.
+-- Single core: public.profiles, rooms.concierge_json, identities LINE link state.
+-- Stops using retired handoff memo and link-session tables for new writes.
 
 ALTER TABLE public.users
   ADD COLUMN IF NOT EXISTS profile_json jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 ALTER TABLE public.rooms
   ADD COLUMN IF NOT EXISTS concierge_json jsonb NOT NULL DEFAULT '{}'::jsonb;
-
-UPDATE public.users u
-SET profile_json =
-  COALESCE(u.profile_json, '{}'::jsonb)
-  || jsonb_strip_nulls(
-    jsonb_build_object(
-      'internal_name', ap.internal_name,
-      'real_name', ap.real_name,
-      'birth_date', ap.birth_date
-    )
-  )
-FROM public.admin_profiles ap
-WHERE ap.user_uuid = u.user_uuid;
 
 UPDATE public.rooms r
 SET concierge_json =
