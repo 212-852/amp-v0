@@ -46,6 +46,30 @@ async function emit_notify_push_debug(
   })
 }
 
+async function emit_push_subscription_lookup_debug(
+  event:
+    | 'push_subscription_lookup_started'
+    | 'push_subscription_lookup_result'
+    | 'push_subscription_lookup_failed',
+  payload: {
+    user_uuid: string | null
+    participant_uuid: string | null
+    source_channel: string | null
+    enabled: boolean | null
+    endpoint_exists: boolean | null
+    subscription_count: number | null
+    latest_updated_at: string | null
+    error_code?: string | null
+    error_message?: string | null
+  },
+) {
+  await debug_event({
+    category: 'pwa',
+    event,
+    payload,
+  })
+}
+
 function build_disabled_reason(input: {
   push_subscription_enabled: boolean
   pwa_push_enabled: boolean
@@ -80,10 +104,14 @@ function build_disabled_reason(input: {
  */
 export async function evaluate_push_chat_delivery_allowed(input: {
   user_uuid: string
+  participant_uuid?: string | null
+  source_channel?: string | null
   kind?: notification_kind_key
 }): Promise<push_chat_gate_result> {
   const kind = input.kind ?? 'chat'
   const user_uuid = clean_uuid(input.user_uuid)
+  const participant_uuid = clean_uuid(input.participant_uuid ?? null)
+  const source_channel = input.source_channel ?? null
   const empty_payload = {
     user_uuid,
     pwa_push_enabled: false,
@@ -93,6 +121,21 @@ export async function evaluate_push_chat_delivery_allowed(input: {
   }
 
   if (!user_uuid) {
+    await emit_push_subscription_lookup_debug(
+      'push_subscription_lookup_failed',
+      {
+        user_uuid,
+        participant_uuid,
+        source_channel,
+        enabled: null,
+        endpoint_exists: null,
+        subscription_count: null,
+        latest_updated_at: null,
+        error_code: 'invalid_user_uuid',
+        error_message: 'user_uuid_missing',
+      },
+    )
+
     await emit_notify_push_debug('notify_push_preference_checked', {
       user_uuid,
       pwa_push_enabled: false,
@@ -120,13 +163,24 @@ export async function evaluate_push_chat_delivery_allowed(input: {
     }
   }
 
+  await emit_push_subscription_lookup_debug('push_subscription_lookup_started', {
+    user_uuid,
+    participant_uuid,
+    source_channel,
+    enabled: true,
+    endpoint_exists: null,
+    subscription_count: null,
+    latest_updated_at: null,
+  })
+
   const [sub_result, settings_result] = await Promise.all([
     supabase
       .from('push_subscriptions')
-      .select('subscription_uuid')
+      .select('subscription_uuid, endpoint, enabled, updated_at')
       .eq('user_uuid', user_uuid)
-      .eq('is_active', true)
       .eq('enabled', true)
+      .not('endpoint', 'is', null)
+      .order('updated_at', { ascending: false })
       .limit(1),
     supabase
       .from('settings')
@@ -135,11 +189,48 @@ export async function evaluate_push_chat_delivery_allowed(input: {
       .maybeSingle(),
   ])
 
+  if (sub_result.error) {
+    await emit_push_subscription_lookup_debug(
+      'push_subscription_lookup_failed',
+      {
+        user_uuid,
+        participant_uuid,
+        source_channel,
+        enabled: true,
+        endpoint_exists: null,
+        subscription_count: null,
+        latest_updated_at: null,
+        error_code: sub_result.error.code,
+        error_message: sub_result.error.message,
+      },
+    )
+  }
+
+  const latest_subscription =
+    !sub_result.error && sub_result.data
+      ? (sub_result.data[0] as {
+          endpoint?: string | null
+          enabled?: boolean | null
+          updated_at?: string | null
+        } | undefined)
+      : undefined
   const push_subscription_enabled = Boolean(
     !sub_result.error &&
-      sub_result.data &&
-      sub_result.data.length > 0,
+      latest_subscription?.endpoint &&
+      latest_subscription.enabled === true,
   )
+
+  if (!sub_result.error) {
+    await emit_push_subscription_lookup_debug('push_subscription_lookup_result', {
+      user_uuid,
+      participant_uuid,
+      source_channel,
+      enabled: latest_subscription?.enabled ?? null,
+      endpoint_exists: Boolean(latest_subscription?.endpoint),
+      subscription_count: sub_result.data?.length ?? 0,
+      latest_updated_at: latest_subscription?.updated_at ?? null,
+    })
+  }
 
   if (settings_result.error) {
     await emit_notify_push_debug('notify_push_preference_checked', {

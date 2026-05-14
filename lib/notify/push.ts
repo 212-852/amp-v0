@@ -343,6 +343,8 @@ export async function send_push_notify(
 ): Promise<push_notify_result> {
   const gate = await evaluate_push_chat_delivery_allowed({
     user_uuid: input.user_uuid,
+    participant_uuid: input.participant_uuid ?? null,
+    source_channel: 'push',
     kind: input.kind ?? 'chat',
   })
 
@@ -359,6 +361,8 @@ export async function send_push_notify(
     event: 'notify_push_send_started',
     payload: {
       user_uuid: input.user_uuid,
+      participant_uuid: input.participant_uuid ?? null,
+      source_channel: 'push',
       pwa_push_enabled: gate.pwa_push_enabled,
       chat_enabled: gate.chat_enabled,
       push_subscription_enabled: gate.push_subscription_enabled,
@@ -370,9 +374,10 @@ export async function send_push_notify(
     .from('push_subscriptions')
     .select('endpoint, p256dh, auth')
     .eq('user_uuid', input.user_uuid)
-    .eq('is_active', true)
     .eq('enabled', true)
+    .not('endpoint', 'is', null)
     .order('updated_at', { ascending: false })
+    .limit(1)
 
   if (result.error) {
     return {
