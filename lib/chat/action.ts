@@ -479,17 +479,23 @@ export async function resolve_initial_chat(
       !room_result.is_new_room &&
       archived_messages.length > 0
 
+    const skip_welcome_guest_pwa =
+      input.channel === 'pwa' && !input.user_uuid
+
     const should_seed =
       !room_has_initial_messages &&
       should_seed_initial_messages(archived_messages) &&
-      !reopen_guard
+      !reopen_guard &&
+      !skip_welcome_guest_pwa
 
     if (!should_seed && should_seed_initial_messages(archived_messages)) {
-      const skip_reason = room_has_initial_messages
-        ? 'room_has_initial_messages'
-        : reopen_guard
-          ? 'reopen_existing_room_with_message_history'
-          : null
+      const skip_reason = skip_welcome_guest_pwa
+        ? 'user_uuid_missing'
+        : room_has_initial_messages
+          ? 'room_has_initial_messages'
+          : reopen_guard
+            ? 'reopen_existing_room_with_message_history'
+            : null
 
       if (skip_reason) {
         await debug_event({
@@ -506,6 +512,7 @@ export async function resolve_initial_chat(
         })
       }
     }
+
     const incoming_line_text = input.incoming_line_text
     const normalized_line_text = normalize_dispatch_text(
       incoming_line_text?.text,

@@ -2,6 +2,7 @@ import { cache } from 'react'
 
 import { control } from '@/lib/config/control'
 import { participant_idle_status } from '@/lib/chat/participant/rules'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 import { visitor_cookie_name } from '@/lib/visitor/cookie'
 import { get_request_visitor_uuid } from '@/lib/visitor/request'
 
@@ -184,6 +185,234 @@ async function resolve_visitor_user_uuid(
   }
 
   return row.data?.user_uuid ?? null
+}
+
+export type restore_visitor_user_link_outcome = {
+  outcome: 'already_linked' | 'restored' | 'no_match' | 'failed'
+  user_uuid: string | null
+  restore_source?: 'identities_by_visitor' | 'auth_link_completed'
+  error_message?: string | null
+}
+
+/**
+ * When visitors.user_uuid is null, try identities or completed auth_link_sessions
+ * for this visitor_uuid, then persist user_uuid on visitors (single auth core).
+ */
+export async function restore_visitor_user_link(
+  visitor_uuid: string,
+): Promise<restore_visitor_user_link_outcome> {
+  const supabase = await get_supabase()
+  const trimmed = clean_uuid(visitor_uuid)
+
+  if (!trimmed) {
+    return { outcome: 'no_match', user_uuid: null }
+  }
+
+  const initial_row = await supabase
+    .from('visitors')
+    .select('user_uuid')
+    .eq('visitor_uuid', trimmed)
+    .maybeSingle()
+
+  if (initial_row.error) {
+    const { debug_event } = await import('@/lib/debug')
+
+    await debug_event({
+      category: 'pwa',
+      event: 'pwa_user_restore_failed',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: null,
+        phase: 'restore_visitor_user_link',
+        reason: 'visitor_row_read_failed',
+        error_message: initial_row.error.message,
+      },
+    })
+
+    return {
+      outcome: 'failed',
+      user_uuid: null,
+      error_message: initial_row.error.message,
+    }
+  }
+
+  const existing_user = clean_uuid(
+    initial_row.data?.user_uuid as string | undefined,
+  )
+
+  if (existing_user) {
+    return {
+      outcome: 'already_linked',
+      user_uuid: existing_user,
+    }
+  }
+
+  const { debug_event } = await import('@/lib/debug')
+
+  await debug_event({
+    category: 'pwa',
+    event: 'pwa_user_restore_started',
+    payload: {
+      visitor_uuid: trimmed,
+      user_uuid: null,
+      phase: 'restore_visitor_user_link',
+      reason: 'visitor_user_uuid_null',
+    },
+  })
+
+  let resolved_user: string | null = null
+  let restore_source: 'identities_by_visitor' | 'auth_link_completed' | null =
+    null
+
+  const id_result = await supabase
+    .from('identities')
+    .select('user_uuid')
+    .eq('visitor_uuid', trimmed)
+    .not('user_uuid', 'is', null)
+    .limit(1)
+
+  if (!id_result.error && id_result.data?.length) {
+    resolved_user = clean_uuid(id_result.data[0].user_uuid as string)
+    restore_source = 'identities_by_visitor'
+  }
+
+  if (!resolved_user) {
+    const link_result = await supabase
+      .from('auth_link_sessions')
+      .select('completed_user_uuid')
+      .eq('visitor_uuid', trimmed)
+      .eq('status', 'completed')
+      .not('completed_user_uuid', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+
+    if (!link_result.error && link_result.data?.length) {
+      resolved_user = clean_uuid(
+        link_result.data[0].completed_user_uuid as string,
+      )
+      restore_source = 'auth_link_completed'
+    }
+
+    if (!resolved_user) {
+      const fallback = await supabase
+        .from('auth_link_sessions')
+        .select('completed_user_uuid')
+        .eq('visitor_uuid', trimmed)
+        .eq('status', 'completed')
+        .not('completed_user_uuid', 'is', null)
+        .limit(20)
+
+      if (!fallback.error && fallback.data?.length) {
+        resolved_user = clean_uuid(
+          fallback.data[0].completed_user_uuid as string,
+        )
+        restore_source = 'auth_link_completed'
+      }
+    }
+  }
+
+  if (!resolved_user || !restore_source) {
+    return { outcome: 'no_match', user_uuid: null }
+  }
+
+  const updated = await supabase
+    .from('visitors')
+    .update({
+      user_uuid: resolved_user,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('visitor_uuid', trimmed)
+    .is('user_uuid', null)
+    .select('user_uuid')
+    .maybeSingle()
+
+  if (updated.error) {
+    await debug_event({
+      category: 'pwa',
+      event: 'pwa_user_restore_failed',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: resolved_user,
+        phase: 'restore_visitor_user_link',
+        reason: 'visitor_user_uuid_persist_failed',
+        restore_source,
+        error_message: updated.error.message,
+      },
+    })
+
+    return {
+      outcome: 'failed',
+      user_uuid: null,
+      error_message: updated.error.message,
+    }
+  }
+
+  let final_user = clean_uuid(updated.data?.user_uuid as string | undefined)
+
+  if (!final_user) {
+    const reread = await supabase
+      .from('visitors')
+      .select('user_uuid')
+      .eq('visitor_uuid', trimmed)
+      .maybeSingle()
+
+    if (reread.error) {
+      await debug_event({
+        category: 'pwa',
+        event: 'pwa_user_restore_failed',
+        payload: {
+          visitor_uuid: trimmed,
+          user_uuid: resolved_user,
+          phase: 'restore_visitor_user_link',
+          reason: 'visitor_reread_failed',
+          restore_source,
+          error_message: reread.error.message,
+        },
+      })
+
+      return {
+        outcome: 'failed',
+        user_uuid: null,
+        error_message: reread.error.message,
+      }
+    }
+
+    final_user = clean_uuid(reread.data?.user_uuid as string | undefined)
+  }
+
+  if (!final_user) {
+    await debug_event({
+      category: 'pwa',
+      event: 'pwa_user_restore_failed',
+      payload: {
+        visitor_uuid: trimmed,
+        user_uuid: resolved_user,
+        phase: 'restore_visitor_user_link',
+        reason: 'visitor_user_uuid_still_null_after_update',
+        restore_source,
+      },
+    })
+
+    return { outcome: 'failed', user_uuid: null }
+  }
+
+  await debug_event({
+    category: 'pwa',
+    event: 'pwa_user_restore_succeeded',
+    payload: {
+      visitor_uuid: trimmed,
+      user_uuid: final_user,
+      phase: 'restore_visitor_user_link',
+      reason: 'visitor_user_uuid_persisted',
+      restore_source,
+    },
+  })
+
+  return {
+    outcome: 'restored',
+    user_uuid: final_user,
+    restore_source,
+  }
 }
 
 export type session_core_debug_payload = {

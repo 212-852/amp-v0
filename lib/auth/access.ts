@@ -142,6 +142,18 @@ export async function resolve_auth_access(
       visitor_uuid: input.visitor_uuid,
     })
 
+    if (input.visitor_uuid) {
+      const patch = await supabase
+        .from('identities')
+        .update({ visitor_uuid: input.visitor_uuid })
+        .eq('provider', input.provider)
+        .eq('provider_id', input.provider_id)
+
+      if (patch.error) {
+        console.error('[identity_visitor_uuid_patch]', patch.error.message)
+      }
+    }
+
     if (input.provider === 'line') {
       const user_patch: { display_name?: string; image_url?: string | null } =
         {}
@@ -260,6 +272,7 @@ export async function resolve_auth_access(
       user_uuid,
       provider: input.provider,
       provider_id: input.provider_id,
+      visitor_uuid: input.visitor_uuid ?? null,
     })
 
   if (created_identity.error) {

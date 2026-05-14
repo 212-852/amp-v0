@@ -6,6 +6,7 @@ import {
   ensure_session,
   get_visitor_cookie_options,
   infer_source_channel_from_ua,
+  restore_visitor_user_link,
   visitor_cookie_max_age,
   visitor_cookie_name,
   type browser_session_result,
@@ -125,7 +126,9 @@ function normalize_client_session_shape(
   const line_connected =
     state.line_connected || connected_providers.includes('line')
   const linked =
-    connected_providers.length > 0 || line_connected
+    connected_providers.length > 0 ||
+    line_connected ||
+    Boolean(state.user_uuid)
 
   let role = state.role
   let tier = state.tier
@@ -433,6 +436,9 @@ async function resolve_session_payload() {
     access_platform: get_access_platform(user_agent),
     ip: client_ip,
   })
+
+  await restore_visitor_user_link(visitor.visitor_uuid)
+
   const session_state = await resolve_session_state(visitor.visitor_uuid)
   const normalized_session =
     normalize_client_session_shape(session_state)
