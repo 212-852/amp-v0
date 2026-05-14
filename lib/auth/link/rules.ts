@@ -2,7 +2,13 @@ import 'server-only'
 
 export type auth_link_provider = 'line'
 export type auth_link_source_channel = 'pwa' | 'web' | 'liff' | 'line'
-export type auth_link_status = 'pending' | 'completed' | 'expired' | 'failed'
+export type auth_link_status =
+  | 'pending'
+  | 'open'
+  | 'closed'
+  | 'completed'
+  | 'expired'
+  | 'failed'
 
 const allowed_sources = new Set(['pwa', 'web', 'liff', 'line'])
 
@@ -31,9 +37,18 @@ export function normalize_link_status(
   if (
     value === 'completed' ||
     value === 'expired' ||
-    value === 'failed'
+    value === 'failed' ||
+    value === 'closed'
   ) {
     return value
+  }
+
+  if (value === 'open') {
+    if (expires_at && new Date(expires_at).getTime() <= Date.now()) {
+      return 'expired'
+    }
+
+    return 'open'
   }
 
   if (expires_at && new Date(expires_at).getTime() <= Date.now()) {

@@ -190,14 +190,16 @@ async function resolve_visitor_user_uuid(
 export type restore_visitor_user_link_outcome = {
   outcome: 'already_linked' | 'restored' | 'no_match' | 'failed'
   user_uuid: string | null
-  restore_source?: 'identities_by_visitor' | 'auth_link_completed'
+  restore_source?:
+    | 'identities_by_visitor'
+    | 'auth_link_completed'
+    | 'one_time_pass_completed'
   error_message?: string | null
 }
 
 /**
- * When visitors.user_uuid is null, try identities or a completed LINE OAuth
- * pending link row for this visitor_uuid, then persist user_uuid on visitors
- * (single auth core).
+ * When visitors.user_uuid is null, try identities or a completed PWA LINE
+ * one_time_pass for this visitor_uuid, then persist user_uuid on visitors.
  */
 export async function restore_visitor_user_link(
   visitor_uuid: string,
@@ -262,8 +264,11 @@ export async function restore_visitor_user_link(
   })
 
   let resolved_user: string | null = null
-  let restore_source: 'identities_by_visitor' | 'auth_link_completed' | null =
-    null
+  let restore_source:
+    | 'identities_by_visitor'
+    | 'auth_link_completed'
+    | 'one_time_pass_completed'
+    | null = null
 
   const id_result = await supabase
     .from('identities')
@@ -279,21 +284,21 @@ export async function restore_visitor_user_link(
   }
 
   if (!resolved_user) {
-    const id_link = await supabase
-      .from('identities')
-      .select('link_completed_user_uuid')
-      .eq('linked_visitor_uuid', trimmed)
-      .eq('provider', 'line_oauth_pending')
-      .eq('link_status', 'completed')
-      .not('link_completed_user_uuid', 'is', null)
-      .order('updated_at', { ascending: false })
+    const pass_link = await supabase
+      .from('one_time_passes')
+      .select('completed_user_uuid')
+      .eq('visitor_uuid', trimmed)
+      .eq('purpose', 'pwa_line_link')
+      .eq('status', 'completed')
+      .not('completed_user_uuid', 'is', null)
+      .order('completed_at', { ascending: false })
       .limit(1)
 
-    if (!id_link.error && id_link.data?.length) {
+    if (!pass_link.error && pass_link.data?.length) {
       resolved_user = clean_uuid(
-        id_link.data[0].link_completed_user_uuid as string,
+        pass_link.data[0].completed_user_uuid as string,
       )
-      restore_source = 'auth_link_completed'
+      restore_source = 'one_time_pass_completed'
     }
   }
 

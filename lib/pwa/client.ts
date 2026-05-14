@@ -50,6 +50,8 @@ type pwa_debug_payload = {
   pathname?: string | null
   visitor_uuid?: string | null
   link_session_uuid?: string | null
+  pass_uuid?: string | null
+  poll_status?: string | null
   state_exists?: boolean | null
   completed_user_uuid?: string | null
   provider?: string | null

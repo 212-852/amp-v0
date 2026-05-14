@@ -7,8 +7,8 @@ import {
   post_pwa_debug,
 } from '@/lib/pwa/client'
 import {
-  pending_line_link_session_storage_key,
-  poll_auth_link_session_client,
+  pending_pwa_line_pass_storage_key,
+  poll_pwa_line_link_status_client,
 } from '@/lib/pwa/link_return_client'
 import {
   build_session_restore_headers,
@@ -23,9 +23,11 @@ export default function PwaLinkReturnProbe() {
       return
     }
 
-    const uuid = sessionStorage.getItem(pending_line_link_session_storage_key)
+    const visitor = sessionStorage
+      .getItem(pending_pwa_line_pass_storage_key)
+      ?.trim()
 
-    if (!uuid?.trim()) {
+    if (!visitor) {
       return
     }
 
@@ -33,26 +35,26 @@ export default function PwaLinkReturnProbe() {
 
     void (async () => {
       post_pwa_debug({
-        event: 'pwa_link_poll_started',
+        event: 'pwa_line_link_poll_started',
         phase: 'link_return_probe',
-        link_session_uuid: uuid,
+        visitor_uuid: visitor,
         provider: 'line',
-        status: 'pending',
+        status: 'open',
         ...build_pwa_diagnostic_payload(),
       })
 
-      const outcome = await poll_auth_link_session_client({
-        link_session_uuid: uuid,
-        max_ms: 90_000,
+      const outcome = await poll_pwa_line_link_status_client({
+        visitor_uuid: visitor,
+        max_ms: 60_000,
       })
 
-      sessionStorage.removeItem(pending_line_link_session_storage_key)
+      sessionStorage.removeItem(pending_pwa_line_pass_storage_key)
 
       if (outcome.status !== 'completed') {
         post_pwa_debug({
-          event: 'pwa_link_poll_completed',
+          event: 'pwa_line_link_poll_completed',
           phase: 'link_return_probe',
-          link_session_uuid: uuid,
+          visitor_uuid: visitor,
           provider: 'line',
           status: outcome.status,
           ...build_pwa_diagnostic_payload(),
@@ -62,9 +64,9 @@ export default function PwaLinkReturnProbe() {
       }
 
       post_pwa_debug({
-        event: 'pwa_link_poll_completed',
+        event: 'pwa_line_link_poll_completed',
         phase: 'link_return_probe',
-        link_session_uuid: uuid,
+        visitor_uuid: visitor,
         provider: 'line',
         status: 'completed',
         completed_user_uuid: outcome.completed_user_uuid,
@@ -74,7 +76,7 @@ export default function PwaLinkReturnProbe() {
       post_pwa_debug({
         event: 'pwa_session_refresh_started',
         phase: 'link_return_probe',
-        link_session_uuid: uuid,
+        visitor_uuid: visitor,
         ...build_pwa_diagnostic_payload(),
       })
 
@@ -99,16 +101,15 @@ export default function PwaLinkReturnProbe() {
         post_pwa_debug({
           event: 'pwa_session_refresh_succeeded',
           phase: 'link_return_probe',
-          link_session_uuid: uuid,
+          visitor_uuid: visitor,
           user_uuid: payload?.user_uuid ?? null,
-          visitor_uuid: payload?.visitor_uuid ?? null,
           ...build_pwa_diagnostic_payload(),
         })
 
         post_pwa_debug({
           event: 'pwa_reload_triggered',
           phase: 'link_return_probe',
-          link_session_uuid: uuid,
+          visitor_uuid: visitor,
           ...build_pwa_diagnostic_payload(),
         })
 
@@ -117,7 +118,7 @@ export default function PwaLinkReturnProbe() {
         post_pwa_debug({
           event: 'pwa_session_refresh_failed',
           phase: 'link_return_probe',
-          link_session_uuid: uuid,
+          visitor_uuid: visitor,
           error_code: 'session_refresh_failed',
           error_message:
             error instanceof Error ? error.message : String(error),

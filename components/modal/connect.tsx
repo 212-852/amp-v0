@@ -11,13 +11,14 @@ import {
 } from 'lucide-react'
 
 import { is_line_in_app_browser } from '@/lib/auth/context'
+import { pwa_line_link_purpose } from '@/lib/auth/pwa/link/rules'
 import type { locale_key } from '@/lib/locale/action'
 import {
   build_pwa_diagnostic_payload,
   is_standalone_pwa,
   post_pwa_debug,
 } from '@/lib/pwa/client'
-import { pending_line_link_session_storage_key } from '@/lib/pwa/link_return_client'
+import { pending_pwa_line_pass_storage_key } from '@/lib/pwa/link_return_client'
 import {
   build_session_restore_headers,
   write_local_visitor_uuid,
@@ -123,9 +124,14 @@ const content = {
     es: 'Conexion completada. Actualizando la app.',
   },
   timeout_line: {
-    ja: '連携が反映されない場合は、アプリを開き直してください',
-    en: 'If the connection is not reflected, reopen the app.',
-    es: 'Si la conexion no aparece, vuelve a abrir la app.',
+    ja: '時間切れです。もう一度「LINEと連携」からお試しください',
+    en: 'Timed out. Try Connect LINE again.',
+    es: 'Tiempo agotado. Prueba Conectar LINE de nuevo.',
+  },
+  line_link_failed_hint: {
+    ja: '連携に失敗しました。もう一度「LINEと連携」からお試しください',
+    en: 'Link failed. Try Connect LINE again.',
+    es: 'Error al conectar. Prueba Conectar LINE de nuevo.',
   },
   manual_refresh: {
     ja: '更新する',
@@ -153,9 +159,9 @@ export default function ConnectModal({
   const [line_status, set_line_status] = useState<
     'idle' | 'checking' | 'completed' | 'timeout' | 'failed'
   >('idle')
-  const [link_session_uuid, set_link_session_uuid] = useState<string | null>(
-    null,
-  )
+  const [line_poll_visitor_uuid, set_line_poll_visitor_uuid] = useState<
+    string | null
+  >(null)
   const poll_started_at_ref = useRef<number | null>(null)
   const poll_timer_ref = useRef<number | null>(null)
   const polling_ref = useRef(false)
@@ -171,11 +177,11 @@ export default function ConnectModal({
     }
   }
 
-  async function refresh_session_and_reload(uuid: string) {
+  async function refresh_session_and_reload(visitor: string) {
     post_pwa_debug({
       event: 'pwa_session_refresh_started',
       phase: 'link_session_refresh',
-      link_session_uuid: uuid,
+      visitor_uuid: visitor,
       provider: 'line',
       status: 'completed',
       ...build_pwa_diagnostic_payload(),
@@ -202,9 +208,8 @@ export default function ConnectModal({
       post_pwa_debug({
         event: 'pwa_session_refresh_succeeded',
         phase: 'link_session_refresh',
-        link_session_uuid: uuid,
+        visitor_uuid: visitor,
         user_uuid: payload?.user_uuid ?? null,
-        visitor_uuid: payload?.visitor_uuid ?? null,
         provider: 'line',
         status: 'completed',
         ...build_pwa_diagnostic_payload(),
@@ -213,7 +218,7 @@ export default function ConnectModal({
       post_pwa_debug({
         event: 'pwa_reload_triggered',
         phase: 'link_session_reload',
-        link_session_uuid: uuid,
+        visitor_uuid: visitor,
         provider: 'line',
         status: 'completed',
         ...build_pwa_diagnostic_payload(),
@@ -225,7 +230,7 @@ export default function ConnectModal({
       post_pwa_debug({
         event: 'pwa_session_refresh_failed',
         phase: 'link_session_refresh',
-        link_session_uuid: uuid,
+        visitor_uuid: visitor,
         provider: 'line',
         status: 'completed',
         error_code: 'session_refresh_failed',
@@ -235,7 +240,7 @@ export default function ConnectModal({
     }
   }
 
-  async function poll_link_status(uuid: string) {
+  async function poll_link_status(visitor: string) {
     if (polling_ref.current) {
       return
     }
@@ -250,22 +255,25 @@ export default function ConnectModal({
         clear_poll_timer()
         set_line_status('timeout')
         post_pwa_debug({
-          event: 'pwa_link_poll_timeout',
+          event: 'pwa_line_link_poll_failed',
           phase: 'link_session_poll',
-          link_session_uuid: uuid,
+          visitor_uuid: visitor,
           provider: 'line',
-          status: 'pending',
+          reason: 'poll_timeout_60s',
           ...build_pwa_diagnostic_payload(),
         })
 
         return
       }
 
-      const response = await fetch('/api/auth/link/status', {
+      const response = await fetch('/api/auth/pwa/link/status', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ link_session_uuid: uuid }),
+        body: JSON.stringify({
+          visitor_uuid: visitor,
+          purpose: pwa_line_link_purpose,
+        }),
       })
       const payload = (await response.json().catch(() => null)) as {
         status?: string
@@ -278,29 +286,43 @@ export default function ConnectModal({
         clear_poll_timer()
         set_line_status('completed')
         post_pwa_debug({
-          event: 'pwa_link_poll_completed',
+          event: 'pwa_line_link_poll_completed',
           phase: 'link_session_poll',
-          link_session_uuid: uuid,
+          visitor_uuid: visitor,
           completed_user_uuid: payload?.completed_user_uuid ?? null,
           provider: 'line',
           status,
           return_path: payload?.return_path ?? null,
           ...build_pwa_diagnostic_payload(),
         })
-        await refresh_session_and_reload(uuid)
+        await refresh_session_and_reload(visitor)
 
         return
       }
 
-      if (status === 'expired' || status === 'failed' || !response.ok) {
+      if (
+        status === 'expired' ||
+        status === 'failed' ||
+        status === 'closed' ||
+        !response.ok
+      ) {
         clear_poll_timer()
         set_line_status(status === 'expired' ? 'timeout' : 'failed')
+        post_pwa_debug({
+          event: 'pwa_line_link_poll_failed',
+          phase: 'link_session_poll',
+          visitor_uuid: visitor,
+          provider: 'line',
+          poll_status: status,
+          error_message: response.ok ? null : `http_${response.status}`,
+          ...build_pwa_diagnostic_payload(),
+        })
 
         return
       }
 
       poll_timer_ref.current = window.setTimeout(() => {
-        void poll_link_status(uuid)
+        void poll_link_status(visitor)
       }, 2_000)
     } finally {
       polling_ref.current = false
@@ -358,7 +380,7 @@ export default function ConnectModal({
 
       write_local_visitor_uuid(session_payload?.visitor_uuid ?? null)
 
-      const response = await fetch('/api/auth/link/start', {
+      const response = await fetch('/api/auth/pwa/link/start', {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -374,7 +396,8 @@ export default function ConnectModal({
       })
       const payload = (await response.json().catch(() => null)) as {
         auth_url?: string
-        link_session_uuid?: string
+        pass_uuid?: string
+        visitor_uuid?: string | null
         error?: string
         error_code?: string
         error_message?: string
@@ -385,7 +408,7 @@ export default function ConnectModal({
         throw new Error('link_start_invalid_json')
       }
 
-      if (!response.ok || !payload.auth_url || !payload.link_session_uuid) {
+      if (!response.ok || !payload.auth_url || !payload.visitor_uuid) {
         const error_code =
           payload.error_code ?? `http_${response.status}`
         const error_message =
@@ -419,37 +442,40 @@ export default function ConnectModal({
       post_pwa_debug({
         event: 'pwa_link_start_request_succeeded',
         phase: 'connect_modal',
-        link_session_uuid: payload.link_session_uuid,
+        visitor_uuid: payload.visitor_uuid,
+        pass_uuid: payload.pass_uuid ?? null,
         provider: 'line',
-        status: 'pending',
+        status: 'open',
         ...build_pwa_diagnostic_payload(),
       })
 
-      set_link_session_uuid(payload.link_session_uuid)
+      set_line_poll_visitor_uuid(payload.visitor_uuid)
       poll_started_at_ref.current = Date.now()
 
       post_pwa_debug({
         event: 'pwa_line_auth_opened',
         phase: 'line_auth_opened',
-        link_session_uuid: payload.link_session_uuid,
+        visitor_uuid: payload.visitor_uuid,
+        pass_uuid: payload.pass_uuid ?? null,
         provider: 'line',
-        status: 'pending',
+        status: 'open',
         ...build_pwa_diagnostic_payload(),
       })
 
       if (standalone) {
         try {
           sessionStorage.setItem(
-            pending_line_link_session_storage_key,
-            payload.link_session_uuid,
+            pending_pwa_line_pass_storage_key,
+            payload.visitor_uuid,
           )
         } catch (storage_error) {
           post_pwa_debug({
             event: 'pwa_line_auth_redirect_failed',
             phase: 'connect_modal',
-            link_session_uuid: payload.link_session_uuid,
+            visitor_uuid: payload.visitor_uuid,
+            pass_uuid: payload.pass_uuid ?? null,
             provider: 'line',
-            error_code: 'pending_link_session_storage_failed',
+            error_code: 'pending_pass_storage_failed',
             error_message:
               storage_error instanceof Error
                 ? storage_error.message
@@ -463,9 +489,10 @@ export default function ConnectModal({
         post_pwa_debug({
           event: 'pwa_line_auth_redirect_started',
           phase: 'connect_modal',
-          link_session_uuid: payload.link_session_uuid,
+          visitor_uuid: payload.visitor_uuid,
+          pass_uuid: payload.pass_uuid ?? null,
           provider: 'line',
-          status: 'pending',
+          status: 'open',
           ...build_pwa_diagnostic_payload(),
         })
 
@@ -475,11 +502,12 @@ export default function ConnectModal({
       }
 
       post_pwa_debug({
-        event: 'pwa_link_poll_started',
+        event: 'pwa_line_link_poll_started',
         phase: 'link_session_poll',
-        link_session_uuid: payload.link_session_uuid,
+        visitor_uuid: payload.visitor_uuid,
+        pass_uuid: payload.pass_uuid ?? null,
         provider: 'line',
-        status: 'pending',
+        status: 'open',
         ...build_pwa_diagnostic_payload(),
       })
 
@@ -490,16 +518,17 @@ export default function ConnectModal({
         post_pwa_debug({
           event: 'pwa_line_auth_redirect_started',
           phase: 'connect_modal',
-          link_session_uuid: payload.link_session_uuid,
+          visitor_uuid: payload.visitor_uuid,
+          pass_uuid: payload.pass_uuid ?? null,
           provider: 'line',
-          status: 'pending',
+          status: 'open',
           ...build_pwa_diagnostic_payload(),
         })
 
         window.location.href = payload.auth_url
       }
 
-      void poll_link_status(payload.link_session_uuid)
+      void poll_link_status(payload.visitor_uuid)
     } catch (error) {
       auth_window?.close()
       set_line_status('failed')
@@ -564,10 +593,10 @@ export default function ConnectModal({
       if (
         document.visibilityState === 'visible' &&
         line_status === 'checking' &&
-        link_session_uuid
+        line_poll_visitor_uuid
       ) {
         clear_poll_timer()
-        void poll_link_status(link_session_uuid)
+        void poll_link_status(line_poll_visitor_uuid)
       }
     }
 
@@ -580,7 +609,7 @@ export default function ConnectModal({
       )
       clear_poll_timer()
     }
-  }, [line_status, link_session_uuid])
+  }, [line_status, line_poll_visitor_uuid])
 
   return (
     <div className="relative w-[92%] max-w-[420px] rounded-[34px] bg-[#fdfaf8] px-7 py-7 shadow-[0_12px_40px_rgba(42,29,24,0.08)]">
@@ -665,9 +694,11 @@ export default function ConnectModal({
               <h2 className="text-[21px] font-semibold leading-[1.45] text-[#2a1d18]">
                 {line_status === 'completed'
                   ? content.completed_line[locale]
-                  : line_status === 'timeout' || line_status === 'failed'
+                  : line_status === 'timeout'
                     ? content.timeout_line[locale]
-                    : content.checking_line[locale]}
+                    : line_status === 'failed'
+                      ? content.line_link_failed_hint[locale]
+                      : content.checking_line[locale]}
               </h2>
             </div>
 

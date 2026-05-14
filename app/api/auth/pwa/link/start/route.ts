@@ -1,7 +1,7 @@
 import { cookies, headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-import { run_auth_link_start } from '@/lib/auth/link/action'
+import { run_pwa_line_link_start } from '@/lib/auth/pwa/link/action'
 import { debug_event } from '@/lib/debug'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import {
@@ -20,10 +20,10 @@ export async function POST(request: Request) {
     category: 'pwa',
     event: 'auth_link_start_api_entered',
     payload: {
-      phase: 'link_start_api',
+      phase: 'pwa_link_start_api',
       cookie_present: Boolean(cookie_visitor),
       header_visitor_present: Boolean(header_visitor),
-      pathname: '/api/auth/link/start',
+      pathname: '/api/auth/pwa/link/start',
     },
   })
 
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       clean_uuid(header_visitor) ??
       clean_uuid(header_store.get(resolved_visitor_request_header_name))
 
-    const result = await run_auth_link_start({
+    const result = await run_pwa_line_link_start({
       body,
       visitor_uuid,
     })
@@ -47,25 +47,11 @@ export async function POST(request: Request) {
         category: 'pwa',
         event: 'auth_link_start_response_sent',
         payload: {
-          phase: 'link_start_api',
+          phase: 'pwa_link_start_api',
           ok: false,
           http_status: result.http_status,
           visitor_uuid: result.visitor_uuid ?? visitor_uuid,
           user_uuid: result.user_uuid ?? null,
-          source_channel:
-            result.source_channel ??
-            (typeof body?.source_channel === 'string'
-              ? body.source_channel
-              : null),
-          provider:
-            typeof body?.provider === 'string' ? body.provider : null,
-          state_exists: null,
-          auth_url_exists: false,
-          insert_success: null,
-          redirect_url: null,
-          return_path:
-            typeof body?.return_path === 'string' ? body.return_path : null,
-          is_standalone: body?.is_standalone === true,
           error_code: result.error_code,
           error_message: result.error_message,
           cause: result.cause,
@@ -88,25 +74,13 @@ export async function POST(request: Request) {
       category: 'pwa',
       event: 'auth_link_start_response_sent',
       payload: {
-        phase: 'link_start_api',
+        phase: 'pwa_link_start_api',
         ok: true,
         http_status: 200,
         visitor_uuid: result.visitor_uuid,
         user_uuid: result.user_uuid,
-        source_channel: result.source_channel,
-        provider: 'line',
         pass_uuid: result.pass_uuid,
-        link_state: result.link_state,
-        link_session_uuid: result.link_state,
-        state_exists: true,
         auth_url_exists: true,
-        insert_success: true,
-        redirect_url: result.auth_url,
-        return_path:
-          typeof body?.return_path === 'string' ? body.return_path : null,
-        is_standalone: body?.is_standalone === true,
-        error_code: null,
-        error_message: null,
       },
     })
 
@@ -114,9 +88,10 @@ export async function POST(request: Request) {
       ok: true,
       auth_url: result.auth_url,
       pass_uuid: result.pass_uuid,
+      visitor_uuid: result.visitor_uuid,
       code: result.code,
-      link_state: result.link_state,
-      link_session_uuid: result.link_state,
+      link_state: result.code,
+      link_session_uuid: result.code,
       status: result.status,
     })
   } catch (error) {
@@ -135,13 +110,9 @@ export async function POST(request: Request) {
       category: 'pwa',
       event: 'auth_link_start_response_sent',
       payload: {
-        phase: 'link_start_api',
+        phase: 'pwa_link_start_api',
         ok: false,
         http_status: 500,
-        state_exists: null,
-        auth_url_exists: false,
-        insert_success: null,
-        redirect_url: null,
         error_code: 'link_start_unhandled',
         error_message,
         cause,
