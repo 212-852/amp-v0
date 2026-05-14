@@ -1733,6 +1733,10 @@ export type resolve_user_room_ok = {
   mode: room_mode
   channel: chat_channel
   is_new_room: boolean
+  selected_source:
+    | 'user_participant'
+    | 'visitor_participant'
+    | 'created_participant'
 }
 
 export type resolve_user_room_outcome =
@@ -1811,75 +1815,194 @@ export async function resolve_user_room(input: {
   let last_reason = 'resolve_not_ok'
 
   for (const channel of channel_plan) {
-    await ensure_direct_room_for_visitor({
-      visitor_uuid,
-      user_uuid,
-      channel,
-    })
+    try {
+      const user_participant = user_uuid
+        ? await find_user_participant_by_user(user_uuid)
+        : null
+      const visitor_participant = visitor_uuid
+        ? await find_user_participant_by_visitor(visitor_uuid)
+        : null
+      let selected_participant =
+        user_participant ?? visitor_participant ?? null
+      let selected_source:
+        | 'user_participant'
+        | 'visitor_participant'
+        | 'created_participant' =
+        user_participant
+          ? 'user_participant'
+          : visitor_participant
+            ? 'visitor_participant'
+            : 'created_participant'
+      let selected_room: room_row | null = null
+      let is_new_room = false
 
-    const room_result = await resolve_chat_room({
-      visitor_uuid,
-      user_uuid,
-      channel,
-    })
+      if (selected_participant?.room_uuid) {
+        selected_room = await load_room_row(selected_participant.room_uuid)
 
-    if (
-      room_result.ok &&
-      room_result.room.room_uuid &&
-      room_result.room.participant_uuid
-    ) {
-      await emit_chat_room_resolve_event(
-        'chat_room_participant_lookup_succeeded',
-        {
-          ...base,
-          channel,
-          room_uuid: room_result.room.room_uuid,
-          participant_uuid: room_result.room.participant_uuid,
-        },
-      )
+        if (
+          !selected_room ||
+          selected_room.room_type !== 'direct' ||
+          selected_room.status === 'inactive'
+        ) {
+          const assigned = await assign_participant_to_direct_room(
+            {
+              visitor_uuid,
+              user_uuid,
+              channel,
+            },
+            selected_participant,
+            {
+              ...base,
+              source_channel: channel,
+              room_type: 'direct',
+            },
+          )
 
-      if (room_result.is_new_room) {
-        await emit_chat_room_resolve_event('chat_room_created', {
-          ...base,
-          channel,
-          room_uuid: room_result.room.room_uuid,
-        })
-        await emit_chat_room_resolve_event('chat_room_participant_created', {
-          ...base,
-          channel,
-          participant_uuid: room_result.room.participant_uuid,
-        })
+          selected_participant = assigned.participant
+          selected_room = assigned.room
+          is_new_room = assigned.is_new_room
+        }
       }
 
-      if (user_uuid) {
-        await emit_chat_room_resolve_event('chat_room_user_attached', {
-          ...base,
-          channel,
-          room_uuid: room_result.room.room_uuid,
-          participant_uuid: room_result.room.participant_uuid,
-        })
+      if (selected_participant && !selected_participant.room_uuid) {
+        const assigned = await assign_participant_to_direct_room(
+          {
+            visitor_uuid,
+            user_uuid,
+            channel,
+          },
+          selected_participant,
+          {
+            ...base,
+            source_channel: channel,
+            room_type: 'direct',
+          },
+        )
+
+        selected_participant = assigned.participant
+        selected_room = assigned.room
+        is_new_room = assigned.is_new_room
       }
 
-      await emit_chat_room_resolve_event('chat_room_resolve_succeeded', {
+      if (!selected_participant || !selected_room) {
+        const created = await try_insert_participant_and_direct_room(
+          {
+            visitor_uuid,
+            user_uuid,
+            channel,
+          },
+          {
+            ...base,
+            source_channel: channel,
+            room_type: 'direct',
+          },
+        )
+
+        selected_source = 'created_participant'
+
+        if (created.tag === 'reuse') {
+          selected_participant = created.participant
+          selected_room = selected_participant.room_uuid
+            ? await load_room_row(selected_participant.room_uuid)
+            : null
+          is_new_room = false
+        } else {
+          selected_participant = created.participant
+          selected_room = created.room
+          is_new_room = created.is_new_room
+        }
+      }
+
+      if (
+        selected_participant?.room_uuid &&
+        selected_room?.room_uuid &&
+        selected_participant.participant_uuid
+      ) {
+        await resolve_bot_participant(selected_room.room_uuid)
+
+        await emit_chat_room_resolve_event(
+          'chat_room_participant_lookup_succeeded',
+          {
+            ...base,
+            channel,
+            selected_source,
+            room_uuid: selected_room.room_uuid,
+            participant_uuid: selected_participant.participant_uuid,
+          },
+        )
+
+        if (is_new_room) {
+          await emit_chat_room_resolve_event('chat_room_created', {
+            ...base,
+            channel,
+            selected_source,
+            room_uuid: selected_room.room_uuid,
+          })
+          await emit_chat_room_resolve_event(
+            'chat_room_participant_created',
+            {
+              ...base,
+              channel,
+              selected_source,
+              participant_uuid: selected_participant.participant_uuid,
+            },
+          )
+        }
+
+        if (user_uuid) {
+          await emit_chat_room_resolve_event('chat_room_user_attached', {
+            ...base,
+            channel,
+            selected_source,
+            room_uuid: selected_room.room_uuid,
+            participant_uuid: selected_participant.participant_uuid,
+          })
+        }
+
+        await emit_chat_room_resolve_event('chat_room_resolve_succeeded', {
+          ...base,
+          channel,
+          selected_source,
+          room_uuid: selected_room.room_uuid,
+          participant_uuid: selected_participant.participant_uuid,
+        })
+
+        return {
+          ok: true,
+          room_uuid: selected_room.room_uuid,
+          participant_uuid: selected_participant.participant_uuid,
+          mode: parse_room_mode(selected_room.mode),
+          channel,
+          is_new_room,
+          selected_source,
+        }
+      }
+
+      last_reason = 'selected_participant_missing_room_or_participant_uuid'
+    } catch (error) {
+      const fields = supabase_error_fields(error)
+
+      await emit_chat_room_resolve_event('chat_room_resolve_failed', {
         ...base,
         channel,
-        room_uuid: room_result.room.room_uuid,
-        participant_uuid: room_result.room.participant_uuid,
+        reason: 'resolve_user_room_exception',
+        room_uuid: null,
+        participant_uuid: null,
+        ...fields,
       })
 
       return {
-        ok: true,
-        room_uuid: room_result.room.room_uuid,
-        participant_uuid: room_result.room.participant_uuid,
-        mode: room_result.room.mode,
-        channel,
-        is_new_room: room_result.is_new_room,
+        ok: false,
+        reason: 'resolve_user_room_exception',
+        room_uuid: null,
+        participant_uuid: null,
+        error_code: fields.error_code,
+        error_message: fields.error_message,
+        error_details: fields.error_details,
+        error_hint: fields.error_hint,
       }
     }
 
-    last_reason = room_result.ok
-      ? 'missing_room_or_participant_uuid'
-      : 'resolve_chat_room_not_ok'
   }
 
   await emit_chat_room_resolve_event('chat_room_resolve_failed', {

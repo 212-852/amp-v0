@@ -81,10 +81,6 @@ export async function POST() {
   }
 
   return NextResponse.json({
-    ok: true,
-    room_uuid: outcome.room_uuid,
-    participant_uuid: outcome.participant_uuid,
-    mode: outcome.mode,
-    channel: outcome.channel,
+    ...outcome,
   })
 }
