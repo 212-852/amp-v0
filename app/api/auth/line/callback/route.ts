@@ -46,6 +46,25 @@ function redirect_return_path(return_path: string | null | undefined) {
   return NextResponse.redirect(`${origin}${return_path ?? '/'}`)
 }
 
+function redirect_pwa_line_link_landing(
+  request: Request,
+  outcome: 'completed' | 'failed',
+) {
+  let origin = get_app_origin_from_callback_env()
+
+  if (!origin) {
+    try {
+      origin = new URL(request.url).origin
+    } catch {
+      origin = ''
+    }
+  }
+
+  return NextResponse.redirect(
+    `${origin}/auth/pwa-line-callback?result=${outcome}`,
+  )
+}
+
 async function debug_line_login_failed(
   reason: string,
   data?: Record<string, unknown>,
@@ -93,7 +112,7 @@ export async function GET(request: Request) {
     })
 
     if (status !== 'open') {
-      return redirect_return_path('/')
+      return redirect_pwa_line_link_landing(request, 'failed')
     }
 
     if (error) {
@@ -103,7 +122,7 @@ export async function GET(request: Request) {
         error_message: error,
       })
 
-      return redirect_return_path('/')
+      return redirect_pwa_line_link_landing(request, 'failed')
     }
 
     if (!code || !state) {
@@ -113,7 +132,7 @@ export async function GET(request: Request) {
         error_message: 'missing code or state',
       })
 
-      return redirect_return_path('/')
+      return redirect_pwa_line_link_landing(request, 'failed')
     }
 
     try {
@@ -125,7 +144,7 @@ export async function GET(request: Request) {
           error_code: 'line_token_exchange_failed',
         })
 
-        return redirect_return_path('/')
+        return redirect_pwa_line_link_landing(request, 'failed')
       }
 
       const profile = await fetch_line_oauth_profile(access_token)
@@ -137,7 +156,7 @@ export async function GET(request: Request) {
           error_code: 'missing_line_user_id',
         })
 
-        return redirect_return_path('/')
+        return redirect_pwa_line_link_landing(request, 'failed')
       }
 
       const out = await run_line_callback_for_pwa_one_time_pass({
@@ -159,7 +178,7 @@ export async function GET(request: Request) {
         })
       }
 
-      const response = redirect_return_path(out.return_path)
+      const response = redirect_pwa_line_link_landing(request, 'completed')
 
       response.cookies.set(
         visitor_cookie_name,
@@ -180,7 +199,7 @@ export async function GET(request: Request) {
             : String(link_error),
       })
 
-      return redirect_return_path('/')
+      return redirect_pwa_line_link_landing(request, 'failed')
     }
   }
 

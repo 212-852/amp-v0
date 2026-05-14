@@ -9,6 +9,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 import { is_line_in_app_browser } from '@/lib/auth/context'
 import { pwa_line_link_purpose } from '@/lib/auth/pwa/link/rules'
@@ -18,6 +19,10 @@ import {
   is_standalone_pwa,
   post_pwa_debug,
 } from '@/lib/pwa/client'
+import {
+  clear_pwa_line_link_error_flags,
+  set_pwa_line_link_failed_flags,
+} from '@/lib/pwa/line_link_storage'
 import { pending_pwa_line_pass_storage_key } from '@/lib/pwa/link_return_client'
 import {
   build_session_restore_headers,
@@ -151,6 +156,7 @@ export default function ConnectModal({
   connected_providers,
   on_close,
 }: connect_props) {
+  const router = useRouter()
   const [view, set_view] = useState<'list' | 'email'>('list')
   const [email, set_email] = useState('')
   const [email_status, set_email_status] = useState<
@@ -169,6 +175,18 @@ export default function ConnectModal({
   const is_email_loading = email_status === 'sending'
   const has_connected_provider = connected_providers.length > 0
   const is_line_polling = line_status === 'checking'
+  const line_is_connected = connected_providers.includes('line')
+
+  useEffect(() => {
+    if (!line_is_connected) {
+      return
+    }
+
+    clear_pwa_line_link_error_flags()
+    set_line_status((previous) =>
+      previous === 'failed' || previous === 'timeout' ? 'idle' : previous,
+    )
+  }, [line_is_connected])
 
   function clear_poll_timer() {
     if (poll_timer_ref.current !== null) {
@@ -178,6 +196,8 @@ export default function ConnectModal({
   }
 
   async function refresh_session_and_reload(visitor: string) {
+    clear_pwa_line_link_error_flags()
+
     post_pwa_debug({
       event: 'pwa_session_refresh_started',
       phase: 'link_session_refresh',
@@ -215,6 +235,9 @@ export default function ConnectModal({
         ...build_pwa_diagnostic_payload(),
       })
 
+      clear_pwa_line_link_error_flags()
+      router.refresh()
+
       post_pwa_debug({
         event: 'pwa_reload_triggered',
         phase: 'link_session_reload',
@@ -226,6 +249,7 @@ export default function ConnectModal({
 
       window.location.reload()
     } catch (error) {
+      set_pwa_line_link_failed_flags()
       set_line_status('failed')
       post_pwa_debug({
         event: 'pwa_session_refresh_failed',
@@ -253,6 +277,7 @@ export default function ConnectModal({
 
       if (Date.now() - started_at >= 60_000) {
         clear_poll_timer()
+        set_pwa_line_link_failed_flags()
         set_line_status('timeout')
         post_pwa_debug({
           event: 'pwa_line_link_poll_failed',
@@ -284,6 +309,7 @@ export default function ConnectModal({
 
       if (status === 'completed') {
         clear_poll_timer()
+        clear_pwa_line_link_error_flags()
         set_line_status('completed')
         post_pwa_debug({
           event: 'pwa_line_link_poll_completed',
@@ -307,6 +333,7 @@ export default function ConnectModal({
         !response.ok
       ) {
         clear_poll_timer()
+        set_pwa_line_link_failed_flags()
         set_line_status(status === 'expired' ? 'timeout' : 'failed')
         post_pwa_debug({
           event: 'pwa_line_link_poll_failed',
@@ -355,6 +382,7 @@ export default function ConnectModal({
 
     set_line_status('checking')
     clear_poll_timer()
+    clear_pwa_line_link_error_flags()
 
     const standalone = is_standalone_pwa()
     const auth_window = standalone ? null : window.open('', '_blank')
@@ -531,6 +559,7 @@ export default function ConnectModal({
       void poll_link_status(payload.visitor_uuid)
     } catch (error) {
       auth_window?.close()
+      set_pwa_line_link_failed_flags()
       set_line_status('failed')
 
       post_pwa_debug({

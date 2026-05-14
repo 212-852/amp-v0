@@ -6,6 +6,7 @@ import {
   build_pwa_diagnostic_payload,
   post_pwa_debug,
 } from '@/lib/pwa/client'
+import { clear_pwa_line_link_error_flags } from '@/lib/pwa/line_link_storage'
 import {
   pending_pwa_line_pass_storage_key,
   poll_pwa_line_link_status_client,
@@ -113,6 +114,7 @@ export default function PwaLinkReturnProbe() {
           ...build_pwa_diagnostic_payload(),
         })
 
+        clear_pwa_line_link_error_flags()
         window.location.reload()
       } catch (error) {
         post_pwa_debug({
