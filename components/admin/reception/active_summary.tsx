@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-import { use_admin_reception_support_presence } from '@/components/admin/reception/admin_support_presence'
 import {
   format_admin_room_unread_label,
   normalize_reception_channel,
@@ -48,14 +47,6 @@ export default function AdminReceptionActiveSummary({
     user_is_typing: room?.user_is_typing ?? false,
     user_typing_at: room?.user_typing_at ?? null,
     admin_support_staff: room?.admin_support_staff ?? [],
-  })
-
-  use_admin_reception_support_presence({
-    room_uuid,
-    staff_participant_uuid,
-    staff_user_uuid,
-    staff_tier,
-    enabled: Boolean(staff_participant_uuid.trim()),
   })
 
   useEffect(() => {

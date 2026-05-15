@@ -5,7 +5,10 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import type { archived_message } from '@/lib/chat/archive'
 import type { message_bundle } from '@/lib/chat/message'
-import type { chat_room_timeline_message } from '@/lib/chat/timeline_display'
+import {
+  normalize_chat_timeline_messages,
+  type chat_room_timeline_message,
+} from '@/lib/chat/timeline_display'
 
 import { send_chat_realtime_debug } from './client'
 
@@ -227,12 +230,29 @@ function chat_action_debug_payload(
   }
 }
 
+export function append_chat_action_to_admin_timeline(
+  previous: chat_room_timeline_message[],
+  action: chat_action_realtime_payload,
+): { rows: chat_room_timeline_message[]; appended: boolean } {
+  if (previous.some((row) => row.message_uuid === action.action_uuid)) {
+    return { rows: previous, appended: false }
+  }
+
+  const system_row = chat_action_to_admin_timeline_row(action)
+
+  return {
+    rows: normalize_chat_timeline_messages([...previous, system_row]),
+    appended: true,
+  }
+}
+
 export function subscribe_chat_actions_realtime(input: {
   supabase: SupabaseClient
   room_uuid: string
   scope: chat_actions_realtime_scope
   source_channel?: string | null
   on_action: (action: chat_action_realtime_payload, inserted_index: number) => void
+  on_subscribed?: () => void
 }): RealtimeChannel {
   const channel_name = chat_actions_realtime_channel_name(
     input.room_uuid,
@@ -240,6 +260,18 @@ export function subscribe_chat_actions_realtime(input: {
   )
   const postgres_filter = `room_uuid=eq.${input.room_uuid}`
   let inserted_index = 0
+
+  send_chat_realtime_debug({
+    event: 'support_action_realtime_subscribe_started',
+    room_uuid: input.room_uuid,
+    active_room_uuid: input.room_uuid,
+    source_channel: input.source_channel ?? 'web',
+    channel_name,
+    schema: 'public',
+    table: 'chat_actions',
+    filter: postgres_filter,
+    phase: 'subscribe_chat_actions_realtime',
+  })
 
   send_chat_realtime_debug({
     event: 'chat_action_realtime_subscribe_started',
@@ -418,6 +450,10 @@ export function subscribe_chat_actions_realtime(input: {
         error_message: err ? String(err) : null,
         phase: 'subscribe_chat_actions_realtime',
       })
+
+      if (status === 'SUBSCRIBED') {
+        input.on_subscribed?.()
+      }
     })
 
   return channel

@@ -83,7 +83,7 @@ export async function leave_support_room(input: {
   next_active_room_uuid: string | null
   support_session_key?: string | null
   debug_event_name?: string | null
-}) {
+}): Promise<import('@/lib/chat/action').record_admin_support_left_result> {
   await debug_event({
     category: 'admin_chat',
     event: 'leave_support_room_started',
@@ -119,11 +119,11 @@ export async function leave_support_room(input: {
       },
     })
 
-    return
+    return { ok: false }
   }
 
   try {
-    await record_admin_support_left_session({
+    const left = await record_admin_support_left_session({
       room_uuid: input.room_uuid,
       staff_participant_uuid: input.staff_participant_uuid,
       leave_reason: input.leave_reason,
@@ -154,6 +154,8 @@ export async function leave_support_room(input: {
         error_message: null,
       },
     })
+
+    return left
   } catch (error) {
     await debug_event({
       category: 'admin_chat',

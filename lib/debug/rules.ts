@@ -665,6 +665,7 @@ export function resolve_debug_rule(input: {
     'support_left_realtime_received',
     'support_left_realtime_rendered',
     'support_left_realtime_ignored',
+    'support_action_realtime_subscribe_started',
     'support_action_realtime_received',
     'support_action_realtime_rendered',
     'support_action_realtime_ignored',

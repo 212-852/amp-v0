@@ -23,12 +23,16 @@ import {
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
 import {
-  chat_action_to_admin_timeline_row,
+  append_chat_action_to_admin_timeline,
   cleanup_chat_actions_realtime,
   emit_chat_action_realtime_rendered,
   subscribe_chat_actions_realtime,
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
+import {
+  call_enter_support_room,
+  support_room_api_action_to_realtime,
+} from '@/lib/chat/realtime/support_room_client'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { handle_chat_message_toast } from '@/lib/output/toast'
 import {
@@ -183,6 +187,7 @@ export default function AdminChatTimeline({
 
   const subscribed_room_uuid_ref = useRef<string | null>(null)
   const subscribed_chat_actions_room_ref = useRef<string | null>(null)
+  const support_enter_session_ref = useRef<string | null>(null)
   const show_jump_button_ref = useRef(false)
 
   useEffect(() => {
@@ -266,12 +271,168 @@ export default function AdminChatTimeline({
     }
   }, [room_uuid, staff_participant_uuid, staff_tier, staff_user_uuid])
 
+  const apply_support_action_to_timeline = useCallback(
+    (
+      action: chat_action_realtime_payload,
+      source: 'realtime' | 'enter_api' | 'leave_api',
+      inserted_index: number | null = null,
+    ) => {
+      const locked_room = latest_room_uuid_ref.current
+
+      if (action.room_uuid !== locked_room) {
+        send_chat_realtime_debug({
+          event: 'support_action_realtime_ignored',
+          room_uuid: action.room_uuid,
+          active_room_uuid: locked_room,
+          action_uuid: action.action_uuid,
+          event_type: action.action_type,
+          ignored_reason: 'active_room_mismatch',
+          phase: `admin_chat_support_action_${source}`,
+        })
+
+        return
+      }
+
+      const near_bottom_before = compute_message_list_near_bottom(
+        message_list_scroll_ref.current,
+      )
+
+      set_rows((previous) => {
+        const merged = append_chat_action_to_admin_timeline(previous, action)
+
+        if (!merged.appended) {
+          send_chat_realtime_debug({
+            event: 'support_action_realtime_ignored',
+            room_uuid: locked_room,
+            active_room_uuid: locked_room,
+            action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            ignored_reason: 'action_uuid_dedupe',
+            phase: `admin_chat_support_action_${source}`,
+          })
+
+          return previous
+        }
+
+        send_chat_realtime_debug({
+          event: 'admin_active_chat_message_appended',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          action_uuid: action.action_uuid,
+          event_type: action.action_type,
+          actor_name: action.actor_display_name,
+          inserted_index,
+          prev_count: previous.length,
+          next_count: merged.rows.length,
+          phase: `admin_chat_support_action_${source}`,
+        })
+
+        return merged.rows
+      })
+
+      emit_chat_action_realtime_rendered({
+        room_uuid: locked_room,
+        active_room_uuid: locked_room,
+        action,
+        inserted_index: inserted_index ?? 0,
+        source_channel: 'admin',
+        phase: `admin_chat_support_action_${source}`,
+      })
+
+      if (near_bottom_before) {
+        bottom_ref.current?.scrollIntoView({
+          block: 'end',
+          behavior: 'smooth',
+        })
+      }
+    },
+    [],
+  )
+
+  const run_enter_support_room = useCallback(async () => {
+    const locked_room = latest_room_uuid_ref.current
+    const participant_uuid = staff_participant_uuid_ref.current
+
+    if (!locked_room || !participant_uuid) {
+      return
+    }
+
+    const session_key = `${locked_room}|${participant_uuid}`
+
+    send_chat_realtime_debug({
+      event: 'admin_support_enter_call_started',
+      room_uuid: locked_room,
+      active_room_uuid: locked_room,
+      participant_uuid,
+      admin_user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+      user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+      role: 'admin',
+      tier: admin_rt_ctx_ref.current.staff_tier,
+      source_channel: 'admin',
+      phase: 'admin_support_enter',
+    })
+
+    try {
+      const result = await call_enter_support_room(locked_room)
+
+      if (result.ok && result.action) {
+        apply_support_action_to_timeline(
+          support_room_api_action_to_realtime(result.action),
+          'enter_api',
+        )
+      }
+
+      send_chat_realtime_debug({
+        event: result.ok
+          ? 'admin_support_enter_call_succeeded'
+          : 'admin_support_enter_call_failed',
+        room_uuid: locked_room,
+        active_room_uuid: locked_room,
+        participant_uuid,
+        admin_user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        role: 'admin',
+        tier: admin_rt_ctx_ref.current.staff_tier,
+        source_channel: 'admin',
+        skip_reason: result.ok && result.skipped ? 'duplicate' : null,
+        error_code: result.ok ? null : result.error,
+        error_message: result.ok ? null : result.error,
+        phase: 'admin_support_enter',
+      })
+
+      if (result.ok) {
+        support_enter_session_ref.current = session_key
+      }
+    } catch (error) {
+      send_chat_realtime_debug({
+        event: 'admin_support_enter_call_failed',
+        room_uuid: locked_room,
+        active_room_uuid: locked_room,
+        participant_uuid,
+        admin_user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        role: 'admin',
+        tier: admin_rt_ctx_ref.current.staff_tier,
+        source_channel: 'admin',
+        error_code: 'support_enter_call_failed',
+        error_message: error instanceof Error ? error.message : String(error),
+        phase: 'admin_support_enter',
+      })
+    }
+  }, [apply_support_action_to_timeline])
+
   use_admin_reception_support_presence({
     room_uuid,
     staff_participant_uuid,
     staff_user_uuid,
     staff_tier,
     enabled: Boolean(staff_participant_uuid.trim()),
+    on_support_action: (action) => {
+      apply_support_action_to_timeline(action, 'leave_api')
+    },
+    on_recover_enter: () => {
+      void run_enter_support_room()
+    },
   })
 
   useEffect(() => {
@@ -831,86 +992,31 @@ export default function AdminChatTimeline({
     let actions_channel = chat_actions_channel_ref.current
 
     if (!actions_already_subscribed) {
+      support_enter_session_ref.current = null
+
       actions_channel = subscribe_chat_actions_realtime({
         supabase,
         room_uuid: locked_room,
         scope: 'admin_active',
         source_channel: 'admin',
-        on_action: (action: chat_action_realtime_payload, inserted_index) => {
-          const near_bottom_before = compute_message_list_near_bottom(
-            message_list_scroll_ref.current,
-          )
-          const system_row = chat_action_to_admin_timeline_row(action)
+        on_subscribed: () => {
+          const session_key = `${locked_room}|${staff_participant_uuid_ref.current}`
 
-          set_rows((previous) => {
-            if (
-              previous.some((row) => row.message_uuid === action.action_uuid)
-            ) {
-              send_chat_realtime_debug({
-                event: 'chat_action_realtime_ignored',
-                room_uuid: locked_room,
-                active_room_uuid: locked_room,
-                action_uuid: action.action_uuid,
-                event_type: action.action_type,
-                actor_name: action.actor_display_name,
-                inserted_index,
-                ignored_reason: 'action_uuid_dedupe',
-                phase: 'admin_chat_support_action',
-              })
-
-              if (action.action_type === 'support_left') {
-                send_chat_realtime_debug({
-                  event: 'support_left_realtime_ignored',
-                  room_uuid: action.room_uuid,
-                  active_room_uuid: locked_room,
-                  action_uuid: action.action_uuid,
-                  action_type: action.action_type,
-                  ignored_reason: 'action_uuid_dedupe',
-                  phase: 'admin_chat_support_action',
-                })
-              }
-
-              return previous
-            }
-
-            const result = merge_timeline_rows(previous, [system_row])
-
-            send_chat_realtime_debug({
-              event: 'admin_active_chat_message_appended',
-              room_uuid: locked_room,
-              active_room_uuid: locked_room,
-              action_uuid: action.action_uuid,
-              event_type: action.action_type,
-              actor_name: action.actor_display_name,
-              inserted_index,
-              prev_count: result.prev_message_count,
-              next_count: result.next_message_count,
-              phase: 'admin_chat_support_action',
-            })
-
-            return result.rows
-          })
-
-          emit_chat_action_realtime_rendered({
-            room_uuid: locked_room,
-            active_room_uuid: locked_room,
-            action,
-            inserted_index,
-            source_channel: 'admin',
-            phase: 'admin_chat_support_action',
-          })
-
-          if (near_bottom_before) {
-            bottom_ref.current?.scrollIntoView({
-              block: 'end',
-              behavior: 'smooth',
-            })
+          if (support_enter_session_ref.current === session_key) {
+            return
           }
+
+          void run_enter_support_room()
+        },
+        on_action: (action: chat_action_realtime_payload, inserted_index) => {
+          apply_support_action_to_timeline(action, 'realtime', inserted_index)
         },
       })
 
       subscribed_chat_actions_room_ref.current = locked_room
       chat_actions_channel_ref.current = actions_channel
+    } else if (support_enter_session_ref.current !== `${locked_room}|${staff_participant_uuid_ref.current}`) {
+      void run_enter_support_room()
     }
 
     const typing_channel = supabase.channel(
@@ -984,6 +1090,7 @@ export default function AdminChatTimeline({
 
       if (subscribed_chat_actions_room_ref.current === locked_room) {
         subscribed_chat_actions_room_ref.current = null
+        support_enter_session_ref.current = null
       }
 
       if (realtime_channel_ref.current === channel) {
@@ -994,7 +1101,12 @@ export default function AdminChatTimeline({
         chat_actions_channel_ref.current = null
       }
     }
-  }, [room_uuid, room_display_title])
+  }, [
+    apply_support_action_to_timeline,
+    room_display_title,
+    room_uuid,
+    run_enter_support_room,
+  ])
 
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {

@@ -2,7 +2,12 @@
 
 import { useEffect, useRef } from 'react'
 
+import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
 import { send_chat_realtime_debug } from '@/lib/chat/realtime/client'
+import {
+  call_leave_support_room,
+  support_room_api_action_to_realtime,
+} from '@/lib/chat/realtime/support_room_client'
 
 const heartbeat_interval_ms = 20_000
 const visibility_hidden_leave_delay_ms = 10_000
@@ -80,6 +85,7 @@ async function post_admin_support_leave(input: {
   leave_reason: string
   action?: 'admin_support_leave' | 'admin_support_page_unload'
   keepalive?: boolean
+  on_support_action?: (action: chat_action_realtime_payload) => void
 }) {
   leave_trigger_debug({
     event: 'admin_support_leave_call_started',
@@ -93,14 +99,20 @@ async function post_admin_support_leave(input: {
   })
 
   try {
-    await post_admin_support_presence({
+    const result = await call_leave_support_room({
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
-      action: input.action ?? 'admin_support_leave',
-      keepalive: input.keepalive,
       leave_reason: input.leave_reason,
       support_session_key: input.support_session_key,
+      action: input.action,
+      keepalive: input.keepalive,
     })
+
+    if (result.ok && result.action) {
+      input.on_support_action?.(
+        support_room_api_action_to_realtime(result.action),
+      )
+    }
 
     leave_trigger_debug({
       event: 'admin_support_leave_call_succeeded',
@@ -110,7 +122,7 @@ async function post_admin_support_leave(input: {
       admin_user_uuid: input.admin_user_uuid,
       admin_participant_uuid: input.participant_uuid,
       leave_reason: input.leave_reason,
-      reason: input.leave_reason,
+      reason: result.ok && result.skipped ? 'skipped' : input.leave_reason,
     })
   } catch (error) {
     leave_trigger_debug({
@@ -128,90 +140,26 @@ async function post_admin_support_leave(input: {
   }
 }
 
-async function post_admin_support_enter(input: {
-  room_uuid: string
-  participant_uuid: string
-  admin_user_uuid: string | null
-  support_session_key: string
-}) {
-  leave_trigger_debug({
-    event: 'admin_support_enter_detected',
-    room_uuid: input.room_uuid,
-    previous_room_uuid: null,
-    next_room_uuid: input.room_uuid,
-    admin_user_uuid: input.admin_user_uuid,
-    admin_participant_uuid: input.participant_uuid,
-    leave_reason: '',
-    reason: 'active_room_ready',
-  })
-
-  leave_trigger_debug({
-    event: 'admin_support_enter_call_started',
-    room_uuid: input.room_uuid,
-    previous_room_uuid: null,
-    next_room_uuid: input.room_uuid,
-    admin_user_uuid: input.admin_user_uuid,
-    admin_participant_uuid: input.participant_uuid,
-    leave_reason: '',
-    reason: 'active_room_ready',
-  })
-
-  try {
-    const response = await fetch('/api/chat/reception/open', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ room_uuid: input.room_uuid }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`enter_${response.status}`)
-    }
-
-    leave_trigger_debug({
-      event: 'admin_support_enter_call_succeeded',
-      room_uuid: input.room_uuid,
-      previous_room_uuid: null,
-      next_room_uuid: input.room_uuid,
-      admin_user_uuid: input.admin_user_uuid,
-      admin_participant_uuid: input.participant_uuid,
-      leave_reason: '',
-      reason: 'active_room_ready',
-    })
-  } catch (error) {
-    leave_trigger_debug({
-      event: 'admin_support_enter_call_failed',
-      room_uuid: input.room_uuid,
-      previous_room_uuid: null,
-      next_room_uuid: input.room_uuid,
-      admin_user_uuid: input.admin_user_uuid,
-      admin_participant_uuid: input.participant_uuid,
-      leave_reason: '',
-      reason: 'active_room_ready',
-      error_code: 'support_enter_call_failed',
-      error_message: error instanceof Error ? error.message : String(error),
-    })
-  } finally {
-    void post_admin_support_presence({
-      room_uuid: input.room_uuid,
-      participant_uuid: input.participant_uuid,
-      action: 'admin_support_join',
-      support_session_key: input.support_session_key,
-    }).catch(() => {})
-  }
-}
-
 export function use_admin_reception_support_presence(input: {
   room_uuid: string
   staff_participant_uuid: string
   staff_user_uuid: string | null
   staff_tier: string | null
   enabled: boolean
+  on_support_action?: (action: chat_action_realtime_payload) => void
+  on_recover_enter?: () => void
 }) {
   const idle_leave_timer_ref = useRef<number | null>(null)
   const was_hidden_ref = useRef(false)
   const support_session_key_ref = useRef<string>('')
   const prev_room_for_change_ref = useRef<string | null>(null)
+  const on_support_action_ref = useRef(input.on_support_action)
+  const on_recover_enter_ref = useRef(input.on_recover_enter)
+
+  useEffect(() => {
+    on_support_action_ref.current = input.on_support_action
+    on_recover_enter_ref.current = input.on_recover_enter
+  }, [input.on_recover_enter, input.on_support_action])
 
   useEffect(() => {
     if (
@@ -270,6 +218,7 @@ export function use_admin_reception_support_presence(input: {
         keepalive: true,
         leave_reason: 'beforeunload',
         support_session_key: support_session_key_ref.current,
+        on_support_action: on_support_action_ref.current,
       })
     }
 
@@ -287,12 +236,7 @@ export function use_admin_reception_support_presence(input: {
       }).catch(() => {})
     }
 
-    void post_admin_support_enter({
-      room_uuid,
-      participant_uuid,
-      admin_user_uuid: input.staff_user_uuid,
-      support_session_key: support_session_key_ref.current,
-    })
+    post('admin_support_join')
 
     const heartbeat = window.setInterval(() => {
       if (document.visibilityState !== 'visible') {
@@ -361,6 +305,7 @@ export function use_admin_reception_support_presence(input: {
             keepalive: true,
             leave_reason: 'visibility_hidden_timeout',
             support_session_key: support_session_key_ref.current,
+            on_support_action: on_support_action_ref.current,
           })
         }, visibility_hidden_leave_delay_ms)
       } else {
@@ -380,12 +325,8 @@ export function use_admin_reception_support_presence(input: {
             }),
           }).catch(() => {})
         }
-        void post_admin_support_enter({
-          room_uuid,
-          participant_uuid,
-          admin_user_uuid: input.staff_user_uuid,
-          support_session_key: support_session_key_ref.current,
-        })
+        post('admin_support_join')
+        on_recover_enter_ref.current?.()
       }
     }
 
@@ -416,6 +357,7 @@ export function use_admin_reception_support_presence(input: {
         keepalive: true,
         leave_reason: 'pagehide',
         support_session_key: support_session_key_ref.current,
+        on_support_action: on_support_action_ref.current,
       })
     }
 
@@ -454,6 +396,7 @@ export function use_admin_reception_support_presence(input: {
         keepalive: true,
         leave_reason: 'route_change',
         support_session_key: support_session_key_ref.current,
+        on_support_action: on_support_action_ref.current,
       })
       prev_room_for_change_ref.current = null
     }

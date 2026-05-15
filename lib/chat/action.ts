@@ -2368,9 +2368,42 @@ async function emit_chat_realtime_support_debug(input: {
   })
 }
 
+export type support_room_action_api_payload = {
+  room_uuid: string
+  action_uuid: string
+  action_type: string
+  body: string | null
+  created_at: string
+  actor_display_name: string
+  actor_user_uuid: string
+  source_channel: string
+}
+
 export type admin_reception_room_open_result =
-  | { ok: true; skipped?: boolean }
+  | { ok: true; skipped?: boolean; action?: support_room_action_api_payload }
   | { ok: false; error: string }
+
+function build_support_room_action_api_payload(input: {
+  room_uuid: string
+  action_uuid: string
+  action_type: 'support_started' | 'support_left'
+  body: string
+  created_at: string
+  actor_display_name: string
+  actor_user_uuid: string
+  source_channel: string
+}): support_room_action_api_payload {
+  return {
+    room_uuid: input.room_uuid,
+    action_uuid: input.action_uuid,
+    action_type: input.action_type,
+    body: input.body,
+    created_at: input.created_at,
+    actor_display_name: input.actor_display_name,
+    actor_user_uuid: input.actor_user_uuid,
+    source_channel: input.source_channel,
+  }
+}
 
 export async function handle_admin_reception_room_opened(
   request: Request,
@@ -2860,12 +2893,37 @@ export async function handle_admin_reception_room_opened(
         error: merge_meta.error,
       })
     }
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        action: build_support_room_action_api_payload({
+          room_uuid,
+          action_uuid,
+          action_type: 'support_started',
+          body: text,
+          created_at,
+          actor_display_name: display_name,
+          actor_user_uuid: admin_uuid,
+          source_channel: 'web',
+        }),
+      },
+    }
   }
 
   return {
     status: 200,
     body: { ok: true },
   }
+}
+
+export type record_admin_support_left_result = {
+  ok: true
+  skipped: boolean
+  action?: support_room_action_api_payload
+} | {
+  ok: false
 }
 
 export async function record_admin_support_left_session(input: {
@@ -2875,7 +2933,7 @@ export async function record_admin_support_left_session(input: {
   previous_active_room_uuid?: string | null
   next_active_room_uuid?: string | null
   support_session_key?: string | null
-}) {
+}): Promise<record_admin_support_left_result> {
   const room_uuid = clean_uuid(input.room_uuid)
   const staff_participant_uuid = clean_uuid(input.staff_participant_uuid)
   const support_session_key =
@@ -2885,7 +2943,7 @@ export async function record_admin_support_left_session(input: {
       : null
 
   if (!room_uuid || !staff_participant_uuid) {
-    return
+    return { ok: false }
   }
 
   await debug_event({
@@ -3006,7 +3064,7 @@ export async function record_admin_support_left_session(input: {
   if (!admin_uuid || !user_participant_uuid) {
     await decision_skip('missing_admin_or_customer_participant', false)
 
-    return
+    return { ok: true, skipped: true }
   }
 
   async function session_support_left_duplicate_exists(): Promise<boolean> {
@@ -3057,7 +3115,7 @@ export async function record_admin_support_left_session(input: {
       },
     })
 
-    return
+    return { ok: true, skipped: true }
   }
 
   const recent_cutoff_ms = support_session_key ? 15_000 : 45_000
@@ -3084,7 +3142,7 @@ export async function record_admin_support_left_session(input: {
       },
     })
 
-    return
+    return { ok: true, skipped: true }
   }
 
   await debug_event({
@@ -3223,7 +3281,7 @@ export async function record_admin_support_left_session(input: {
       },
     })
 
-    return
+    return { ok: false }
   }
 
   await debug_event({
@@ -3276,6 +3334,21 @@ export async function record_admin_support_left_session(input: {
     source_channel: 'admin',
     left_at: inserted.created_at,
   })
+
+  return {
+    ok: true,
+    skipped: false,
+    action: build_support_room_action_api_payload({
+      room_uuid,
+      action_uuid: inserted.action_row_id,
+      action_type: 'support_left',
+      body: text,
+      created_at: inserted.created_at,
+      actor_display_name: display_name,
+      actor_user_uuid: admin_uuid,
+      source_channel: 'admin',
+    }),
+  }
 }
 
 export async function handle_chat_message_request(
