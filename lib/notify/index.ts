@@ -550,10 +550,17 @@ async function post_support_lifecycle_discord(input: {
   room_uuid: string
   discord_thread_action_id: string | null
   content_line: string
+  /** When true, never create a new forum thread (support_left must target existing thread). */
+  require_existing_thread?: boolean
 }) {
   const normalized = normalize_discord_thread_action_id(
     input.discord_thread_action_id,
   )
+
+  if (input.require_existing_thread && !normalized) {
+    return null
+  }
+
   const result = await sync_discord_action_context({
     title: `Support - ${short_room_uuid(input.room_uuid)}`,
     content: input.content_line,
@@ -774,7 +781,29 @@ async function deliver_support_left(
     event.discord_thread_action_id,
   )
 
+  const base_debug_payload = {
+    room_uuid: event.room_uuid,
+    action_uuid: event.action_uuid,
+    admin_user_uuid: event.admin_user_uuid,
+    discord_id_exists: Boolean(normalized_thread_action_id),
+    discord_id: mask_discord_action_id_for_log(
+      normalized_thread_action_id ?? event.discord_thread_action_id,
+    ),
+    phase: 'deliver_support_left',
+  }
+
+  await emit_support_started_admin_chat_debug(
+    'support_left_notify_started',
+    base_debug_payload,
+  )
+
   if (!should_send_notify(event)) {
+    await emit_support_started_admin_chat_debug('support_left_notify_failed', {
+      ...base_debug_payload,
+      error_code: 'notify_rule_disabled',
+      error_message: 'support_left notify disabled',
+    })
+
     return support_started_notify_run([], {
       outcome: 'skipped',
       transport: 'none',
@@ -783,14 +812,38 @@ async function deliver_support_left(
     })
   }
 
+  if (!normalized_thread_action_id) {
+    await emit_support_started_admin_chat_debug('support_left_notify_failed', {
+      ...base_debug_payload,
+      error_code: 'discord_thread_missing',
+      error_message: 'rooms.action_id discord thread required for support_left',
+    })
+
+    return support_started_notify_run([], {
+      outcome: 'failed',
+      transport: 'discord_action_webhook',
+      error_code: 'discord_thread_missing',
+      error_message: 'rooms.action_id discord thread required for support_left',
+    })
+  }
+
   const content_line = format_support_left_notify_content(event)
   const discord_result = await post_support_lifecycle_discord({
     room_uuid: event.room_uuid,
     discord_thread_action_id: normalized_thread_action_id,
     content_line,
+    require_existing_thread: true,
   })
 
   if (discord_result?.action_id) {
+    await emit_support_started_admin_chat_debug(
+      'support_left_notify_succeeded',
+      {
+        ...base_debug_payload,
+        notification_channel: 'discord_action_thread',
+      },
+    )
+
     return support_started_notify_run(
       [{ channel: 'discord', action_id: discord_result.action_id }],
       {
@@ -799,6 +852,12 @@ async function deliver_support_left(
       },
     )
   }
+
+  await emit_support_started_admin_chat_debug('support_left_notify_failed', {
+    ...base_debug_payload,
+    error_code: 'discord_action_thread_failed',
+    error_message: 'support_left discord thread post failed',
+  })
 
   return support_started_notify_run([], {
     outcome: 'failed',

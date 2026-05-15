@@ -383,6 +383,28 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const support_left_lifecycle = new Set([
+    'support_left_action_create_started',
+    'support_left_action_create_succeeded',
+    'support_left_action_create_failed',
+    'support_left_notify_started',
+    'support_left_notify_succeeded',
+    'support_left_notify_failed',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    support_left_lifecycle.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: input.event.endsWith('_failed') ? 'error' : 'info',
+      channels: debug_control.support_started_debug_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
   const pwa_problem_events = new Set([
     'pwa_install_failed',
     'pwa_service_worker_register_failed',

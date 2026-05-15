@@ -21,10 +21,12 @@ import {
   typing_timestamp_is_fresh,
 } from '@/lib/chat/presence/rules'
 import {
+  chat_room_realtime_channel_name,
   cleanup_chat_room_realtime,
   send_chat_realtime_debug,
   subscribe_chat_room_realtime,
   type chat_presence_payload,
+  type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
 import { resolve_realtime_message_subtitle_for_toast } from '@/lib/chat/realtime/toast_decision'
 import { archived_message_to_timeline_message } from '@/lib/chat/timeline_display'
@@ -100,13 +102,7 @@ function room_summary(row: reception_room) {
 }
 
 function room_summary_line(row: reception_room) {
-  const summary = room_summary(row)
-
-  if (!summary.summary_text) {
-    return ''
-  }
-
-  return `${reception_channel_label(row.last_incoming_channel)} ・ ${summary.summary_text}`
+  return room_summary(row).summary_text
 }
 
 function send_room_card_summary_debug(input: {
@@ -257,6 +253,7 @@ export default function AdminReceptionRoomListLive({
     }
 
     const channels: RealtimeChannel[] = []
+    const typing_channels: RealtimeChannel[] = []
     const timeout_sweep = window.setInterval(() => {
       for (const room_uuid of room_uuids) {
         void fetch('/api/chat/presence', {
@@ -490,6 +487,16 @@ export default function AdminReceptionRoomListLive({
           })
         },
         on_support_action: (action) => {
+          send_chat_realtime_debug({
+            event: 'admin_support_action_received',
+            room_uuid: action.room_uuid,
+            active_room_uuid: null,
+            action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            source_channel: action.source_channel ?? 'admin',
+            phase: 'admin_room_list_support_action',
+          })
+
           const activity_at = action.created_at ?? new Date().toISOString()
           const body_text = action.body?.trim() ?? ''
 
@@ -724,6 +731,76 @@ export default function AdminReceptionRoomListLive({
         },
       })
 
+      const typing_channel = supabase.channel(
+        chat_room_realtime_channel_name(room_uuid),
+        { config: { broadcast: { self: true } } },
+      )
+
+      typing_channel
+        .on('broadcast', { event: 'typing' }, (payload) => {
+          const raw = payload.payload
+
+          if (!raw || typeof raw !== 'object') {
+            return
+          }
+
+          const typing = raw as chat_typing_payload
+
+          if (typing.room_uuid !== room_uuid) {
+            return
+          }
+
+          const role = typing.role?.trim().toLowerCase() ?? ''
+
+          if (role !== 'user' && role !== 'driver') {
+            return
+          }
+
+          const is_typing = typing.is_typing === true
+          const typing_at = typing.sent_at ?? typing.typed_at ?? null
+
+          set_rooms((previous) => {
+            let matched = false
+            const next = previous.map((row) => {
+              if (row.room_uuid !== room_uuid) {
+                return row
+              }
+
+              matched = true
+              const activity_at =
+                is_typing && typing_at
+                  ? typing_at
+                  : row.latest_activity_at ?? row.updated_at ?? null
+              const next_row = {
+                ...row,
+                user_is_typing: is_typing,
+                user_typing_at: typing_at,
+                latest_activity_at: activity_at,
+                updated_at: activity_at ?? row.updated_at,
+              }
+
+              send_chat_realtime_debug({
+                event: 'admin_room_typing_state_updated',
+                room_uuid,
+                active_room_uuid: null,
+                participant_uuid: typing.participant_uuid,
+                user_uuid: typing.user_uuid ?? null,
+                source_channel: 'admin',
+                is_typing,
+                typing_at,
+                ignored_reason: null,
+                phase: 'admin_room_list_typing_broadcast',
+              })
+
+              return next_row
+            })
+
+            return matched ? sort_room_cards(next) : previous
+          })
+        })
+        .subscribe()
+
+      typing_channels.push(typing_channel)
       channels.push(channel)
     })
 
@@ -983,6 +1060,9 @@ export default function AdminReceptionRoomListLive({
           source_channel: 'admin',
           cleanup_reason: 'admin_reception_room_list_unmount',
         })
+      })
+      typing_channels.forEach((ch) => {
+        void supabase.removeChannel(ch)
       })
       window.clearInterval(timeout_sweep)
       void supabase.removeChannel(rooms_unread_channel)

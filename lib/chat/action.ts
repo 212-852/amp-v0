@@ -2845,7 +2845,7 @@ export async function record_admin_support_left_session(input: {
       null,
   )
 
-  if (!admin_uuid || !user_participant_uuid || !bot_participant_uuid) {
+  if (!admin_uuid || !user_participant_uuid) {
     return
   }
 
@@ -2858,19 +2858,21 @@ export async function record_admin_support_left_session(input: {
     admin_user_uuid: admin_uuid,
   })
 
-  try {
-    await archive_message_bundles({
-      room_uuid,
-      participant_uuid: user_participant_uuid,
-      bot_participant_uuid,
-      channel: 'web',
-      bundles: [bundle],
-    })
-  } catch (error) {
-    console.error('[admin_support_left] archive_failed', {
-      room_uuid,
-      error: error instanceof Error ? error.message : String(error),
-    })
+  if (bot_participant_uuid) {
+    try {
+      await archive_message_bundles({
+        room_uuid,
+        participant_uuid: user_participant_uuid,
+        bot_participant_uuid,
+        channel: 'web',
+        bundles: [bundle],
+      })
+    } catch (error) {
+      console.error('[admin_support_left] archive_failed', {
+        room_uuid,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   const room_pick = await supabase
@@ -2883,6 +2885,17 @@ export async function record_admin_support_left_session(input: {
     room_pick.data?.action_id ?? null,
   )
   const subject = await resolve_room_subject(room_uuid)
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'support_left_action_create_started',
+    payload: {
+      room_uuid,
+      admin_user_uuid: admin_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      discord_id_exists: Boolean(discord_thread_action_id),
+    },
+  })
 
   const inserted = await insert_support_left_action(supabase, {
     room_uuid,
@@ -2904,8 +2917,29 @@ export async function record_admin_support_left_session(input: {
       room_uuid,
       error: inserted.error,
     })
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'support_left_action_create_failed',
+      payload: {
+        room_uuid,
+        admin_user_uuid: admin_uuid,
+        error: inserted.error,
+      },
+    })
+
     return
   }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'support_left_action_create_succeeded',
+    payload: {
+      room_uuid,
+      action_uuid: inserted.action_row_id,
+      admin_user_uuid: admin_uuid,
+    },
+  })
 
   await notify({
     event: 'support_left',

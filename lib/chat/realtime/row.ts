@@ -58,6 +58,44 @@ function parse_messages_row_body(
  * Client-safe parse of `messages.body` (same shape as server archive insert).
  * Supabase Realtime often delivers JSON/JSONB `body` as an object; `load_archived_messages` uses a string.
  */
+function bundle_from_flat_message_body(
+  flat: Record<string, unknown>,
+  message_uuid: string,
+): message_bundle | null {
+  const nested = flat.bundle
+
+  if (
+    nested &&
+    typeof nested === 'object' &&
+    !Array.isArray(nested) &&
+    typeof (nested as { bundle_type?: unknown }).bundle_type === 'string'
+  ) {
+    return nested as message_bundle
+  }
+
+  const text_raw = typeof flat.text === 'string' ? flat.text.trim() : ''
+
+  if (!text_raw) {
+    return null
+  }
+
+  const sr = typeof flat.sender_role === 'string' ? flat.sender_role : null
+  const at = typeof flat.actor_type === 'string' ? flat.actor_type : null
+  const sender: 'user' | 'bot' =
+    sr === 'bot' || at === 'bot' ? 'bot' : 'user'
+
+  return {
+    bundle_uuid: message_uuid,
+    bundle_type: 'text',
+    sender,
+    version: 1,
+    locale: 'ja',
+    payload: {
+      text: text_raw,
+    },
+  } as message_bundle
+}
+
 export function archived_message_from_message_row(
   row: message_insert_row,
 ): realtime_archived_message | null {
@@ -68,32 +106,10 @@ export function archived_message_from_message_row(
   }
 
   const flat = parsed as Record<string, unknown>
-  let bundle = parsed.bundle
+  let bundle = parsed.bundle ?? bundle_from_flat_message_body(flat, row.message_uuid)
 
   if (!bundle) {
-    const text_raw = typeof flat.text === 'string' ? flat.text.trim() : ''
-
-    if (!text_raw) {
-      return null
-    }
-
-    const sr =
-      typeof flat.sender_role === 'string' ? flat.sender_role : null
-    const at =
-      typeof flat.actor_type === 'string' ? flat.actor_type : null
-    const sender: 'user' | 'bot' =
-      sr === 'bot' || at === 'bot' ? 'bot' : 'user'
-
-    bundle = {
-      bundle_uuid: row.message_uuid,
-      bundle_type: 'text',
-      sender,
-      version: 1,
-      locale: 'ja',
-      payload: {
-        text: text_raw,
-      },
-    } as message_bundle
+    return null
   }
 
   const sequence = typeof parsed.sequence === 'number' ? parsed.sequence : 0

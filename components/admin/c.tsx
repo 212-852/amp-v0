@@ -351,7 +351,7 @@ export default function AdminChatTimeline({
 
         if (mapped.room_uuid !== locked_room) {
           send_chat_realtime_debug({
-            event: 'admin_realtime_payload_ignored',
+            event: 'admin_active_chat_realtime_payload_ignored',
             room_uuid: locked_room,
             active_room_uuid: locked_room,
             participant_uuid: admin_rt_ctx_ref.current.staff_participant_uuid,
@@ -543,7 +543,7 @@ export default function AdminChatTimeline({
           const dbg = admin_rt_ctx_ref.current
 
           send_chat_realtime_debug({
-            event: 'admin_realtime_payload_ignored',
+            event: 'admin_active_chat_realtime_payload_ignored',
             room_uuid: locked_room,
             active_room_uuid: locked_room,
             participant_uuid: dbg.staff_participant_uuid,
