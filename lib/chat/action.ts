@@ -2801,6 +2801,9 @@ export async function handle_admin_reception_room_opened(
 export async function record_admin_support_left_session(input: {
   room_uuid: string
   staff_participant_uuid: string
+  leave_reason?: string | null
+  previous_active_room_uuid?: string | null
+  next_active_room_uuid?: string | null
 }) {
   const room_uuid = clean_uuid(input.room_uuid)
   const staff_participant_uuid = clean_uuid(input.staff_participant_uuid)
@@ -2877,7 +2880,7 @@ export async function record_admin_support_left_session(input: {
 
   const room_pick = await supabase
     .from('rooms')
-    .select('action_id')
+    .select('action_id, mode')
     .eq('room_uuid', room_uuid)
     .maybeSingle()
 
@@ -2885,6 +2888,52 @@ export async function record_admin_support_left_session(input: {
     room_pick.data?.action_id ?? null,
   )
   const subject = await resolve_room_subject(room_uuid)
+  const support_mode =
+    typeof room_pick.data?.mode === 'string' ? room_pick.data.mode : null
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_auto_leave_detected',
+    payload: {
+      room_uuid,
+      admin_user_uuid: admin_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      leave_reason: input.leave_reason ?? 'unknown',
+      previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
+      next_active_room_uuid: input.next_active_room_uuid ?? null,
+      support_mode,
+    },
+  })
+
+  const recent_cutoff = new Date(Date.now() - 30_000).toISOString()
+  const recent = await supabase
+    .from('chat_actions')
+    .select('action_uuid, created_at')
+    .eq('room_uuid', room_uuid)
+    .eq('action_type', 'support_left')
+    .eq('actor_participant_uuid', staff_participant_uuid)
+    .gte('created_at', recent_cutoff)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (!recent.error && (recent.data ?? []).length > 0) {
+    await debug_event({
+      category: 'admin_chat',
+      event: 'support_left_action_create_skipped',
+      payload: {
+        room_uuid,
+        admin_user_uuid: admin_uuid,
+        admin_participant_uuid: staff_participant_uuid,
+        leave_reason: input.leave_reason ?? 'unknown',
+        previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
+        next_active_room_uuid: input.next_active_room_uuid ?? null,
+        support_mode,
+        skipped_reason: 'recent_support_left_exists',
+      },
+    })
+
+    return
+  }
 
   await debug_event({
     category: 'admin_chat',
@@ -2894,6 +2943,10 @@ export async function record_admin_support_left_session(input: {
       admin_user_uuid: admin_uuid,
       admin_participant_uuid: staff_participant_uuid,
       discord_id_exists: Boolean(discord_thread_action_id),
+      leave_reason: input.leave_reason ?? 'unknown',
+      previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
+      next_active_room_uuid: input.next_active_room_uuid ?? null,
+      support_mode,
     },
   })
 

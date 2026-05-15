@@ -21,6 +21,9 @@ type presence_request_body = {
   action?: unknown
   last_channel?: unknown
   typing_phase?: unknown
+  leave_reason?: unknown
+  previous_active_room_uuid?: unknown
+  next_active_room_uuid?: unknown
 }
 
 export async function POST(request: Request) {
@@ -105,6 +108,18 @@ export async function POST(request: Request) {
       await record_admin_support_left_session({
         room_uuid,
         staff_participant_uuid: participant_uuid,
+        leave_reason:
+          typeof body.leave_reason === 'string'
+            ? body.leave_reason
+            : 'admin_support_leave',
+        previous_active_room_uuid:
+          typeof body.previous_active_room_uuid === 'string'
+            ? body.previous_active_room_uuid
+            : room_uuid,
+        next_active_room_uuid:
+          typeof body.next_active_room_uuid === 'string'
+            ? body.next_active_room_uuid
+            : null,
       })
     } else if (body?.action === 'admin_support_page_unload') {
       await mark_admin_support_leave({
@@ -115,6 +130,18 @@ export async function POST(request: Request) {
       await record_admin_support_left_session({
         room_uuid,
         staff_participant_uuid: participant_uuid,
+        leave_reason:
+          typeof body.leave_reason === 'string'
+            ? body.leave_reason
+            : 'page_unload',
+        previous_active_room_uuid:
+          typeof body.previous_active_room_uuid === 'string'
+            ? body.previous_active_room_uuid
+            : room_uuid,
+        next_active_room_uuid:
+          typeof body.next_active_room_uuid === 'string'
+            ? body.next_active_room_uuid
+            : null,
       })
     } else if (body?.action === 'admin_support_idle') {
       await mark_admin_support_idle_notice({ room_uuid, participant_uuid })

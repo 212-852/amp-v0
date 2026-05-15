@@ -28,6 +28,10 @@ import {
   type chat_presence_payload,
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
+import {
+  archived_message_from_message_row,
+  type message_insert_row,
+} from '@/lib/chat/realtime/row'
 import { resolve_realtime_message_subtitle_for_toast } from '@/lib/chat/realtime/toast_decision'
 import { archived_message_to_timeline_message } from '@/lib/chat/timeline_display'
 import { create_browser_supabase } from '@/lib/db/browser'
@@ -127,6 +131,24 @@ function send_room_card_summary_debug(input: {
   })
 }
 
+async function fetch_admin_room_card(room_uuid: string) {
+  const response = await fetch(`/api/admin/reception/${room_uuid}`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    return null
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { ok?: boolean; room?: reception_room }
+    | null
+
+  return payload?.ok && payload.room ? payload.room : null
+}
+
 export default function AdminReceptionRoomListLive({
   initial_rooms,
   limit,
@@ -166,7 +188,7 @@ export default function AdminReceptionRoomListLive({
     typeof limit === 'number' ? rooms.slice(0, Math.max(0, limit)) : rooms
 
   useEffect(() => {
-    if (session?.role !== 'admin' || room_key.length === 0) {
+    if (session?.role !== 'admin') {
       return
     }
 
@@ -236,15 +258,11 @@ export default function AdminReceptionRoomListLive({
   }, [room_key, session?.role])
 
   useEffect(() => {
-    if (session?.role !== 'admin' || room_key.length === 0) {
+    if (session?.role !== 'admin') {
       return
     }
 
     const room_uuids = room_key.split(',').filter(Boolean)
-
-    if (room_uuids.length === 0) {
-      return
-    }
 
     const supabase = create_browser_supabase()
 
@@ -268,6 +286,258 @@ export default function AdminReceptionRoomListLive({
         }).catch(() => {})
       }
     }, 10_000)
+
+    send_chat_realtime_debug({
+      event: 'admin_top_realtime_subscribe_started',
+      room_uuid: null,
+      source_channel: 'admin',
+      channel_name: 'admin_top_messages_global',
+      prev_count: room_uuids.length,
+      next_count: room_uuids.length,
+      phase: 'admin_top_messages_global',
+    })
+
+    const global_messages_channel = supabase
+      .channel('admin_top_messages_global')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+        },
+        (payload) => {
+          const message = archived_message_from_message_row(
+            payload.new as message_insert_row,
+          )
+
+          if (!message) {
+            const raw = payload.new as Record<string, unknown>
+
+            send_chat_realtime_debug({
+              event: 'admin_top_message_insert_ignored',
+              room_uuid:
+                typeof raw.room_uuid === 'string' ? raw.room_uuid : null,
+              message_uuid:
+                typeof raw.message_uuid === 'string'
+                  ? raw.message_uuid
+                  : null,
+              ignored_reason: 'unparseable_message_row',
+              phase: 'admin_top_messages_global',
+            })
+            return
+          }
+
+          const source_channel =
+            message.body_source_channel ?? message.insert_row_channel ?? null
+          const channel = message.insert_row_channel ?? source_channel
+          const direction = message.body_direction ?? null
+          const created_at = message.created_at ?? new Date().toISOString()
+          const row_msg = archived_message_to_timeline_message({
+            archive_uuid: message.archive_uuid,
+            room_uuid: message.room_uuid,
+            sequence: message.sequence,
+            created_at: message.created_at,
+            bundle: message.bundle,
+          })
+          const latest_text =
+            row_msg.text && row_msg.text.trim().length > 0
+              ? row_msg.text.trim()
+              : null
+
+          send_chat_realtime_debug({
+            event: 'admin_top_message_insert_received',
+            room_uuid: message.room_uuid,
+            message_uuid: message.archive_uuid,
+            source_channel: source_channel ?? 'web',
+            channel,
+            direction,
+            created_at,
+            phase: 'admin_top_messages_global',
+          })
+
+          void (async () => {
+            let should_fetch = false
+
+            set_rooms((previous) => {
+              const card_exists = previous.some(
+                (row) => row.room_uuid === message.room_uuid,
+              )
+              const next_channel =
+                direction === 'incoming' ? source_channel ?? channel : null
+
+              send_chat_realtime_debug({
+                event: card_exists
+                  ? 'admin_top_message_insert_accepted'
+                  : 'admin_top_message_insert_ignored',
+                room_uuid: message.room_uuid,
+                message_uuid: message.archive_uuid,
+                card_exists,
+                source_channel: source_channel ?? 'web',
+                channel,
+                direction,
+                created_at,
+                ignored_reason: card_exists ? null : 'room_not_in_current_list',
+                prev_count: previous.length,
+                next_count: previous.length,
+                phase: 'admin_top_messages_global',
+              })
+
+              if (!card_exists) {
+                should_fetch = true
+                return previous
+              }
+
+              let previous_preview: string | null = null
+              let next_preview: string | null = null
+              const mapped = previous.map((row) => {
+                if (row.room_uuid !== message.room_uuid) {
+                  return row
+                }
+
+                previous_preview = row.preview
+
+                const next_row = {
+                  ...row,
+                  preview: latest_text ?? row.preview,
+                  updated_at: created_at,
+                  latest_activity_at: created_at,
+                  last_incoming_channel:
+                    normalize_reception_channel(next_channel) ??
+                    row.last_incoming_channel,
+                  unread_count:
+                    direction === 'incoming'
+                      ? (row.unread_count ?? 0) + 1
+                      : row.unread_count ?? 0,
+                }
+                next_preview = next_row.preview
+
+                send_room_card_summary_debug({
+                  event: 'room_card_summary_build_started',
+                  room: next_row,
+                })
+                send_room_card_summary_debug({
+                  event: 'room_card_summary_updated',
+                  room: next_row,
+                })
+
+                return next_row
+              })
+              const sorted = sort_room_cards(mapped)
+              const updated = sorted.find(
+                (row) => row.room_uuid === message.room_uuid,
+              )
+
+              send_chat_realtime_debug({
+                event: 'admin_top_room_card_updated',
+                room_uuid: message.room_uuid,
+                message_uuid: message.archive_uuid,
+                card_exists: true,
+                source_channel: source_channel ?? 'web',
+                channel,
+                direction,
+                created_at,
+                previous_preview,
+                next_preview,
+                unread_count: updated?.unread_count ?? null,
+                latest_activity_at: created_at,
+                prev_count: previous.length,
+                next_count: sorted.length,
+                phase: 'admin_top_messages_global',
+              })
+              send_chat_realtime_debug({
+                event: 'admin_top_room_cards_sorted',
+                room_uuid: message.room_uuid,
+                message_uuid: message.archive_uuid,
+                card_exists: true,
+                source_channel: source_channel ?? 'web',
+                channel,
+                direction,
+                created_at,
+                prev_count: previous.length,
+                next_count: sorted.length,
+                phase: 'admin_top_messages_global',
+              })
+
+              return sorted
+            })
+
+            if (!should_fetch) {
+              return
+            }
+
+            const fetched = await fetch_admin_room_card(message.room_uuid)
+
+            if (!fetched) {
+              send_chat_realtime_debug({
+                event: 'admin_top_message_insert_ignored',
+                room_uuid: message.room_uuid,
+                message_uuid: message.archive_uuid,
+                card_exists: false,
+                source_channel: source_channel ?? 'web',
+                channel,
+                direction,
+                created_at,
+                ignored_reason: 'room_summary_fetch_failed',
+                phase: 'admin_top_messages_global',
+              })
+              return
+            }
+
+            set_rooms((previous) => {
+              if (previous.some((row) => row.room_uuid === fetched.room_uuid)) {
+                return previous
+              }
+
+              const next_row = {
+                ...fetched,
+                preview: latest_text ?? fetched.preview,
+                updated_at: created_at,
+                latest_activity_at: created_at,
+                last_incoming_channel:
+                  normalize_reception_channel(
+                    direction === 'incoming' ? source_channel ?? channel : null,
+                  ) ?? fetched.last_incoming_channel,
+              }
+              const sorted = sort_room_cards([...previous, next_row])
+
+              send_chat_realtime_debug({
+                event: 'admin_top_room_card_inserted',
+                room_uuid: message.room_uuid,
+                message_uuid: message.archive_uuid,
+                card_exists: false,
+                source_channel: source_channel ?? 'web',
+                channel,
+                direction,
+                created_at,
+                previous_preview: null,
+                next_preview: next_row.preview,
+                unread_count: next_row.unread_count ?? 0,
+                latest_activity_at: created_at,
+                prev_count: previous.length,
+                next_count: sorted.length,
+                phase: 'admin_top_messages_global',
+              })
+              send_chat_realtime_debug({
+                event: 'admin_top_room_cards_sorted',
+                room_uuid: message.room_uuid,
+                message_uuid: message.archive_uuid,
+                card_exists: false,
+                source_channel: source_channel ?? 'web',
+                channel,
+                direction,
+                created_at,
+                prev_count: previous.length,
+                next_count: sorted.length,
+                phase: 'admin_top_messages_global',
+              })
+
+              return sorted
+            })
+          })()
+        },
+      )
+      .subscribe()
 
     room_uuids.forEach((room_uuid) => {
       const list_title =
@@ -809,17 +1079,19 @@ export default function AdminReceptionRoomListLive({
         ? `room_uuid=eq.${room_uuids[0]}`
         : `room_uuid=in.(${room_uuids.join(',')})`
 
-    const rooms_unread_channel = supabase
-      .channel(`admin_reception_rooms_unread:${room_key}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'rooms',
-          filter: rooms_filter,
-        },
-        (payload) => {
+    const rooms_unread_channel =
+      room_uuids.length > 0
+        ? supabase
+            .channel(`admin_reception_rooms_unread:${room_key}`)
+            .on(
+              'postgres_changes',
+              {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'rooms',
+                filter: rooms_filter,
+              },
+              (payload) => {
           const new_row = payload.new as Record<string, unknown>
           const ru =
             typeof new_row.room_uuid === 'string' ? new_row.room_uuid : null
@@ -1042,9 +1314,10 @@ export default function AdminReceptionRoomListLive({
 
             return sorted
           })
-        },
-      )
-      .subscribe()
+              },
+            )
+            .subscribe()
+        : null
 
     return () => {
       channels.forEach((ch, index) => {
@@ -1065,7 +1338,10 @@ export default function AdminReceptionRoomListLive({
         void supabase.removeChannel(ch)
       })
       window.clearInterval(timeout_sweep)
-      void supabase.removeChannel(rooms_unread_channel)
+      void supabase.removeChannel(global_messages_channel)
+      if (rooms_unread_channel) {
+        void supabase.removeChannel(rooms_unread_channel)
+      }
     }
   }, [room_key, session?.role, session?.tier, session?.user_uuid])
 

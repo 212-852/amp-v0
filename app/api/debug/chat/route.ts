@@ -20,6 +20,8 @@ type chat_debug_body = {
   table?: unknown
   filter?: unknown
   message_uuid?: unknown
+  created_at?: unknown
+  card_exists?: unknown
   payload_message_uuid?: unknown
   payload_action_uuid?: unknown
   payload_room_uuid?: unknown
@@ -84,6 +86,8 @@ type chat_debug_body = {
   prev_count?: unknown
   next_count?: unknown
   latest_activity_at?: unknown
+  previous_preview?: unknown
+  next_preview?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -125,6 +129,9 @@ export async function POST(request: Request) {
       table: string_or_null(body?.table),
       filter: string_or_null(body?.filter),
       message_uuid: string_or_null(body?.message_uuid),
+      created_at: string_or_null(body?.created_at),
+      card_exists:
+        typeof body?.card_exists === 'boolean' ? body.card_exists : null,
       payload_message_uuid: string_or_null(body?.payload_message_uuid),
       payload_action_uuid: string_or_null(body?.payload_action_uuid),
       payload_room_uuid: string_or_null(body?.payload_room_uuid),
@@ -203,6 +210,8 @@ export async function POST(request: Request) {
       event_type: string_or_null(body?.event_type),
       prev_count: number_or_null(body?.prev_count),
       next_count: number_or_null(body?.next_count),
+      previous_preview: string_or_null(body?.previous_preview),
+      next_preview: string_or_null(body?.next_preview),
     },
   })
 

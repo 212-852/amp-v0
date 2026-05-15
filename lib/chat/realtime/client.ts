@@ -199,6 +199,8 @@ export type chat_realtime_debug_payload = {
   table?: string | null
   filter?: string | null
   message_uuid?: string | null
+  created_at?: string | null
+  card_exists?: boolean | null
   payload_message_uuid?: string | null
   payload_action_uuid?: string | null
   payload_room_uuid?: string | null
@@ -266,6 +268,8 @@ export type chat_realtime_debug_payload = {
   prev_count?: number | null
   next_count?: number | null
   latest_activity_at?: string | null
+  previous_preview?: string | null
+  next_preview?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {

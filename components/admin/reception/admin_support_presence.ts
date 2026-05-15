@@ -7,6 +7,7 @@ function post_admin_support_presence(input: {
   participant_uuid: string
   action: string
   keepalive?: boolean
+  leave_reason?: string
 }) {
   void fetch('/api/chat/presence', {
     method: 'POST',
@@ -18,6 +19,9 @@ function post_admin_support_presence(input: {
       participant_uuid: input.participant_uuid,
       action: input.action,
       last_channel: 'admin',
+      leave_reason: input.leave_reason,
+      previous_active_room_uuid: input.room_uuid,
+      next_active_room_uuid: null,
     }),
   }).catch(() => {})
 }
@@ -109,6 +113,9 @@ export function use_admin_reception_support_presence(input: {
           participant_uuid,
           action: 'admin_support_page_unload',
           last_channel: 'admin',
+          leave_reason: 'page_unload',
+          previous_active_room_uuid: room_uuid,
+          next_active_room_uuid: null,
         }),
       }).catch(() => {})
     }
@@ -128,6 +135,7 @@ export function use_admin_reception_support_presence(input: {
         participant_uuid,
         action: 'admin_support_leave',
         keepalive: true,
+        leave_reason: 'route_change',
       })
     }
   }, [
