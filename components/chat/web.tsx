@@ -18,6 +18,12 @@ import {
   send_chat_realtime_debug,
   subscribe_chat_room_realtime,
 } from '@/lib/chat/realtime/client'
+import {
+  chat_action_to_archived_message,
+  cleanup_chat_actions_realtime,
+  emit_chat_action_realtime_rendered,
+  subscribe_chat_actions_realtime,
+} from '@/lib/chat/realtime/chat_actions'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
   faq_bundle,
@@ -320,13 +326,32 @@ function SingleCardRow({ bundle }: { bundle: initial_carousel_card }) {
   )
 }
 
+function ActionLogBubble({ text }: { text: string }) {
+  return (
+    <div className="flex justify-center px-5">
+      <div className="max-w-[92%] rounded-full bg-[#f5efe8] px-4 py-1.5 text-center text-[12px] font-medium leading-[1.45] text-[#8a7568]">
+        {text}
+      </div>
+    </div>
+  )
+}
+
 function WebChatMessageRow({ message }: { message: archived_message }) {
   const bundle = message.bundle
 
   if (bundle.bundle_type === 'room_action_log') {
-    if (!end_user_should_see_room_action_log_bundle()) {
+    if (!end_user_should_see_room_action_log_bundle(bundle)) {
       return null
     }
+
+    const text =
+      typeof bundle.payload.text === 'string' ? bundle.payload.text.trim() : ''
+
+    if (!text) {
+      return null
+    }
+
+    return <ActionLogBubble text={text} />
   }
 
   if (bundle.bundle_type === 'welcome') {
@@ -405,6 +430,10 @@ export function WebChat({
   })
 
   const subscribed_room_uuid_ref = useRef<string | null>(null)
+  const subscribed_chat_actions_room_ref = useRef<string | null>(null)
+  const chat_actions_channel_ref = useRef<ReturnType<
+    typeof subscribe_chat_actions_realtime
+  > | null>(null)
 
   const did_initial_scroll_ref = useRef(false)
   const typing_rows_ref = useRef<
@@ -522,46 +551,48 @@ export function WebChat({
       return
     }
 
-    if (
-      subscribed_room_uuid_ref.current === room_uuid &&
+    const locked_room = room_uuid
+    const ctx = web_rt_ctx_ref.current
+    const messages_already_subscribed =
+      subscribed_room_uuid_ref.current === locked_room &&
       room_realtime_channelRef.current
-    ) {
-      const ctx = web_rt_ctx_ref.current
+    const actions_already_subscribed =
+      subscribed_chat_actions_room_ref.current === locked_room &&
+      chat_actions_channel_ref.current
 
+    if (!messages_already_subscribed) {
       send_chat_realtime_debug({
-        event: 'chat_realtime_subscribe_skipped',
-        room_uuid,
+        event: 'chat_realtime_client_created',
+        room_uuid: locked_room,
         active_room_uuid: ctx.active_room_uuid,
         participant_uuid: ctx.participant_uuid,
         user_uuid: ctx.user_uuid,
         role: 'user',
         tier: ctx.tier,
         source_channel: ctx.source_channel,
-        channel_name: chat_room_realtime_channel_name(room_uuid),
-        cleanup_reason: 'duplicate_subscribe',
+        channel_name: chat_room_realtime_channel_name(locked_room),
+        phase: 'web_chat_create_browser_supabase',
+      })
+    } else {
+      send_chat_realtime_debug({
+        event: 'chat_realtime_subscribe_skipped',
+        room_uuid: locked_room,
+        active_room_uuid: ctx.active_room_uuid,
+        participant_uuid: ctx.participant_uuid,
+        user_uuid: ctx.user_uuid,
+        role: 'user',
+        tier: ctx.tier,
+        source_channel: ctx.source_channel,
+        channel_name: chat_room_realtime_channel_name(locked_room),
+        cleanup_reason: 'duplicate_messages_subscribe',
         phase: 'web_chat_realtime_guard',
       })
-
-      return
     }
 
-    const locked_room = room_uuid
-    const ctx = web_rt_ctx_ref.current
+    let channel = room_realtime_channelRef.current
 
-    send_chat_realtime_debug({
-      event: 'chat_realtime_client_created',
-      room_uuid: locked_room,
-      active_room_uuid: ctx.active_room_uuid,
-      participant_uuid: ctx.participant_uuid,
-      user_uuid: ctx.user_uuid,
-      role: 'user',
-      tier: ctx.tier,
-      source_channel: ctx.source_channel,
-      channel_name: chat_room_realtime_channel_name(locked_room),
-      phase: 'web_chat_create_browser_supabase',
-    })
-
-    const channel = subscribe_chat_room_realtime({
+    if (!messages_already_subscribed) {
+      channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid: locked_room,
       active_room_uuid: ctx.active_room_uuid,
@@ -578,7 +609,7 @@ export function WebChat({
 
         if (
           message.bundle.bundle_type === 'room_action_log' &&
-          !end_user_should_see_room_action_log_bundle()
+          !end_user_should_see_room_action_log_bundle(message.bundle)
         ) {
           return
         }
@@ -674,8 +705,83 @@ export function WebChat({
       },
     })
 
-    subscribed_room_uuid_ref.current = locked_room
-    room_realtime_channelRef.current = channel
+      subscribed_room_uuid_ref.current = locked_room
+      room_realtime_channelRef.current = channel
+    }
+
+    let actions_channel = chat_actions_channel_ref.current
+
+    if (!actions_already_subscribed) {
+      actions_channel = subscribe_chat_actions_realtime({
+        supabase,
+        room_uuid: locked_room,
+        scope: 'user_active',
+        source_channel: ctx.source_channel,
+        on_action: (action, inserted_index) => {
+          const archived = chat_action_to_archived_message(action)
+
+          if (!end_user_should_see_room_action_log_bundle(archived.bundle)) {
+            send_chat_realtime_debug({
+              event: 'chat_action_realtime_ignored',
+              room_uuid: locked_room,
+              active_room_uuid: ctx.active_room_uuid,
+              participant_uuid: ctx.participant_uuid,
+              user_uuid: ctx.user_uuid,
+              role: 'user',
+              tier: ctx.tier,
+              source_channel: ctx.source_channel,
+              action_uuid: action.action_uuid,
+              event_type: action.action_type,
+              actor_name: action.actor_display_name,
+              inserted_index,
+              ignored_reason: 'not_visible_to_user',
+              phase: 'web_chat_support_action',
+            })
+
+            return
+          }
+
+          const near_bottom_before = get_message_list_near_bottom()
+          const update_result = append_realtime_message_ref.current(archived)
+
+          if (update_result.dedupe_hit) {
+            send_chat_realtime_debug({
+              event: 'chat_action_realtime_ignored',
+              room_uuid: locked_room,
+              active_room_uuid: ctx.active_room_uuid,
+              participant_uuid: ctx.participant_uuid,
+              user_uuid: ctx.user_uuid,
+              role: 'user',
+              tier: ctx.tier,
+              source_channel: ctx.source_channel,
+              action_uuid: action.action_uuid,
+              event_type: action.action_type,
+              actor_name: action.actor_display_name,
+              inserted_index,
+              ignored_reason: 'action_uuid_dedupe',
+              phase: 'web_chat_support_action',
+            })
+
+            return
+          }
+
+          emit_chat_action_realtime_rendered({
+            room_uuid: locked_room,
+            action,
+            inserted_index,
+            source_channel: ctx.source_channel,
+            phase: 'web_chat_support_action',
+          })
+
+          if (near_bottom_before) {
+            scroll_to_bottom('smooth')
+          }
+        },
+      })
+
+      subscribed_chat_actions_room_ref.current = locked_room
+      chat_actions_channel_ref.current = actions_channel
+    }
 
     return () => {
       const cleanup_reason =
@@ -684,28 +790,48 @@ export function WebChat({
           : 'unmount'
       const dbg = web_rt_ctx_ref.current
 
-      cleanup_chat_room_realtime({
-        supabase,
-        channel,
-        room_uuid: locked_room,
-        active_room_uuid: dbg.active_room_uuid,
-        participant_uuid: dbg.participant_uuid,
-        user_uuid: dbg.user_uuid,
-        role: 'user',
-        tier: dbg.tier,
-        source_channel: dbg.source_channel,
-        cleanup_reason,
-      })
+      if (channel) {
+        cleanup_chat_room_realtime({
+          supabase,
+          channel,
+          room_uuid: locked_room,
+          active_room_uuid: dbg.active_room_uuid,
+          participant_uuid: dbg.participant_uuid,
+          user_uuid: dbg.user_uuid,
+          role: 'user',
+          tier: dbg.tier,
+          source_channel: dbg.source_channel,
+          cleanup_reason,
+        })
+      }
+
+      if (actions_channel) {
+        cleanup_chat_actions_realtime({
+          supabase,
+          channel: actions_channel,
+          room_uuid: locked_room,
+          scope: 'user_active',
+          cleanup_reason,
+        })
+      }
 
       if (subscribed_room_uuid_ref.current === locked_room) {
         subscribed_room_uuid_ref.current = null
       }
 
+      if (subscribed_chat_actions_room_ref.current === locked_room) {
+        subscribed_chat_actions_room_ref.current = null
+      }
+
       if (room_realtime_channelRef.current === channel) {
         room_realtime_channelRef.current = null
       }
+
+      if (chat_actions_channel_ref.current === actions_channel) {
+        chat_actions_channel_ref.current = null
+      }
     }
-  }, [room_uuid])
+  }, [room_uuid, scroll_to_bottom, get_message_list_near_bottom])
 
   const render_messages = active_room_uuid === room_uuid
     ? active_messages
@@ -713,7 +839,7 @@ export function WebChat({
 
   const visible_messages = render_messages.filter((message) => {
     if (message.bundle.bundle_type === 'room_action_log') {
-      return end_user_should_see_room_action_log_bundle()
+      return end_user_should_see_room_action_log_bundle(message.bundle)
     }
 
     return true

@@ -243,10 +243,39 @@ export function resolve_text_mode_switch(input: {
   return detect_switch_mode(input.text)
 }
 
+const user_visible_chat_action_types = new Set([
+  'support_started',
+  'support_left',
+  'concierge_enabled',
+  'bot_enabled',
+  'handoff',
+])
+
 /**
  * Whether end-user chat bubbles should render `room_action_log` bundles.
  * Decided in rules only; UI must not branch on content_key.
  */
-export function end_user_should_see_room_action_log_bundle(): boolean {
-  return false
+export function end_user_should_see_room_action_log_bundle(
+  bundle?: message_bundle,
+): boolean {
+  if (!bundle || bundle.bundle_type !== 'room_action_log') {
+    return false
+  }
+
+  const metadata = bundle.metadata
+
+  if (
+    !metadata ||
+    typeof metadata !== 'object' ||
+    metadata.from_chat_actions_realtime !== true
+  ) {
+    return false
+  }
+
+  const action_type = metadata.chat_action_type
+
+  return (
+    typeof action_type === 'string' &&
+    user_visible_chat_action_types.has(action_type)
+  )
 }

@@ -60,16 +60,10 @@ export function chat_realtime_postgres_channel_name(
   return chat_room_realtime_channel_name(room_uuid)
 }
 
-export type chat_support_action_payload = {
-  room_uuid: string
-  action_uuid: string
-  action_type: string
-  body: string | null
-  created_at: string | null
-  actor_user_uuid: string | null
-  actor_display_name: string | null
-  source_channel: string | null
-}
+export type {
+  chat_action_realtime_payload,
+  chat_support_action_payload,
+} from './chat_actions'
 
 const typing_companion_channels = new WeakMap<RealtimeChannel, RealtimeChannel>()
 
@@ -265,6 +259,8 @@ export type chat_realtime_debug_payload = {
   unread_count?: number | null
   action_uuid?: string | null
   event_type?: string | null
+  actor_name?: string | null
+  inserted_index?: number | null
   prev_count?: number | null
   next_count?: number | null
   latest_activity_at?: string | null
@@ -351,62 +347,6 @@ function presence_payload_from_participant_row(
   }
 }
 
-function support_action_from_chat_actions_row(
-  value: unknown,
-): chat_support_action_payload | null {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-
-  const row = value as Record<string, unknown>
-  const room_uuid =
-    typeof row.room_uuid === 'string' ? row.room_uuid.trim() : ''
-  const action_type =
-    typeof row.action_type === 'string' ? row.action_type.trim() : ''
-
-  if (!room_uuid || !action_type) {
-    return null
-  }
-
-  const action_uuid_raw =
-    row.action_uuid ?? row.uuid ?? row.id ?? row.action_id
-  const action_uuid =
-    typeof action_uuid_raw === 'string' && action_uuid_raw.trim()
-      ? action_uuid_raw.trim()
-      : ''
-
-  if (!action_uuid) {
-    return null
-  }
-
-  const actor_user_uuid =
-    typeof row.actor_user_uuid === 'string'
-      ? row.actor_user_uuid
-      : typeof row.admin_user_uuid === 'string'
-        ? row.admin_user_uuid
-        : null
-  const actor_display_name =
-    typeof row.actor_display_name === 'string'
-      ? row.actor_display_name
-      : null
-  const source_channel =
-    typeof row.source_channel === 'string' ? row.source_channel : null
-  const body = typeof row.body === 'string' ? row.body : null
-  const created_at =
-    typeof row.created_at === 'string' ? row.created_at : null
-
-  return {
-    room_uuid,
-    action_uuid,
-    action_type,
-    body,
-    created_at,
-    actor_user_uuid,
-    actor_display_name,
-    source_channel,
-  }
-}
-
 function admin_subscribe_started_event(scope: chat_realtime_listener_scope) {
   if (scope === 'admin_list') {
     return 'admin_room_list_realtime_subscribe_started'
@@ -474,7 +414,6 @@ export function subscribe_chat_room_realtime(input: {
   on_message: (message: realtime_archived_message) => void
   on_typing: (payload: chat_typing_payload) => void
   on_presence?: (payload: chat_presence_payload) => void
-  on_support_action?: (payload: chat_support_action_payload) => void
 }): RealtimeChannel {
   const listener_scope = input.listener_scope ?? 'default'
   const channel_name = chat_realtime_postgres_channel_name(
@@ -864,88 +803,6 @@ export function subscribe_chat_room_realtime(input: {
         }
 
         input.on_message(message)
-      },
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'chat_actions',
-        filter: postgres_filter,
-      },
-      (payload) => {
-        if (!input.on_support_action) {
-          return
-        }
-
-        const action = support_action_from_chat_actions_row(payload.new)
-
-        send_chat_realtime_debug({
-          event: 'admin_support_action_received',
-          ...base_debug,
-          postgres_event: 'INSERT',
-          event_name: 'INSERT',
-          table: 'chat_actions',
-          payload_room_uuid: action?.room_uuid ?? null,
-          payload_action_uuid: action?.action_uuid ?? null,
-          event_type: action?.action_type ?? null,
-          ignored_reason: action ? null : 'unparseable_chat_action_row',
-          phase: 'postgres_changes_chat_actions',
-        })
-
-        if (!action) {
-          send_chat_realtime_debug({
-            event: 'admin_support_action_ignored',
-            ...base_debug,
-            postgres_event: 'INSERT',
-            event_name: 'INSERT',
-            table: 'chat_actions',
-            payload_room_uuid: null,
-            payload_action_uuid: null,
-            event_type: null,
-            ignored_reason: 'unparseable_chat_action_row',
-            phase: 'postgres_changes_chat_actions',
-          })
-          return
-        }
-
-        if (action.room_uuid !== input.room_uuid) {
-          send_chat_realtime_debug({
-            event: 'admin_support_action_ignored',
-            ...base_debug,
-            postgres_event: 'INSERT',
-            event_name: 'INSERT',
-            table: 'chat_actions',
-            payload_room_uuid: action.room_uuid,
-            payload_action_uuid: action.action_uuid,
-            event_type: action.action_type,
-            ignored_reason: 'payload_room_uuid_mismatch',
-            phase: 'postgres_changes_chat_actions',
-          })
-          return
-        }
-
-        if (
-          action.action_type !== 'support_started' &&
-          action.action_type !== 'support_left'
-        ) {
-          send_chat_realtime_debug({
-            event: 'admin_support_action_ignored',
-            ...base_debug,
-            postgres_event: 'INSERT',
-            event_name: 'INSERT',
-            table: 'chat_actions',
-            payload_room_uuid: action.room_uuid,
-            payload_action_uuid: action.action_uuid,
-            event_type: action.action_type,
-            ignored_reason: 'unsupported_action_type',
-            phase: 'postgres_changes_chat_actions',
-          })
-          return
-        }
-
-        input.on_support_action(action)
       },
     )
     .on(

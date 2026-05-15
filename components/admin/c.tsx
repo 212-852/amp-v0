@@ -19,9 +19,15 @@ import {
   send_chat_realtime_debug,
   subscribe_chat_room_realtime,
   sync_chat_typing_presence,
-  type chat_support_action_payload,
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
+import {
+  chat_action_to_admin_timeline_row,
+  cleanup_chat_actions_realtime,
+  emit_chat_action_realtime_rendered,
+  subscribe_chat_actions_realtime,
+  type chat_action_realtime_payload,
+} from '@/lib/chat/realtime/chat_actions'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { handle_chat_message_toast } from '@/lib/output/toast'
 import {
@@ -144,6 +150,7 @@ export default function AdminChatTimeline({
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
   const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
+  const chat_actions_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_broadcast_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
@@ -174,6 +181,7 @@ export default function AdminChatTimeline({
   })
 
   const subscribed_room_uuid_ref = useRef<string | null>(null)
+  const subscribed_chat_actions_room_ref = useRef<string | null>(null)
 
   useEffect(() => {
     staff_participant_uuid_ref.current = staff_participant_uuid
@@ -274,59 +282,47 @@ export default function AdminChatTimeline({
       return
     }
 
-    if (
-      subscribed_room_uuid_ref.current === room_uuid &&
-      realtime_channel_ref.current
-    ) {
-      const ctx = admin_rt_ctx_ref.current
+    const locked_room = room_uuid
+    const ctx = admin_rt_ctx_ref.current
+    const messages_already_subscribed =
+      subscribed_room_uuid_ref.current === locked_room &&
+      Boolean(realtime_channel_ref.current)
+    const actions_already_subscribed =
+      subscribed_chat_actions_room_ref.current === locked_room &&
+      Boolean(chat_actions_channel_ref.current)
 
+    if (!messages_already_subscribed) {
       send_chat_realtime_debug({
-        event: 'chat_realtime_subscribe_skipped',
-        room_uuid,
-        active_room_uuid: room_uuid,
+        event: 'chat_realtime_client_created',
+        room_uuid: locked_room,
+        active_room_uuid: locked_room,
         participant_uuid: ctx.staff_participant_uuid,
         user_uuid: ctx.staff_user_uuid,
         role: 'admin',
         tier: ctx.staff_tier,
         source_channel: 'admin',
-        channel_name: chat_room_realtime_channel_name(room_uuid),
-        cleanup_reason: 'duplicate_subscribe',
-        phase: 'admin_chat_realtime_guard',
+        channel_name: chat_room_realtime_channel_name(locked_room),
+        phase: 'admin_chat_create_browser_supabase',
       })
 
-      return
+      send_chat_realtime_debug({
+        event: 'admin_active_chat_realtime_subscribe_started',
+        room_uuid: locked_room,
+        active_room_uuid: locked_room,
+        participant_uuid: ctx.staff_participant_uuid,
+        user_uuid: ctx.staff_user_uuid,
+        role: 'admin',
+        tier: ctx.staff_tier,
+        source_channel: 'admin',
+        channel_name: `admin_active_chat:${locked_room}`,
+        phase: 'admin_chat_realtime_guard',
+      })
     }
 
-    const locked_room = room_uuid
-    const ctx = admin_rt_ctx_ref.current
+    let channel = realtime_channel_ref.current
 
-    send_chat_realtime_debug({
-      event: 'chat_realtime_client_created',
-      room_uuid: locked_room,
-      active_room_uuid: locked_room,
-      participant_uuid: ctx.staff_participant_uuid,
-      user_uuid: ctx.staff_user_uuid,
-      role: 'admin',
-      tier: ctx.staff_tier,
-      source_channel: 'admin',
-      channel_name: chat_room_realtime_channel_name(locked_room),
-      phase: 'admin_chat_create_browser_supabase',
-    })
-
-    send_chat_realtime_debug({
-      event: 'admin_active_chat_realtime_subscribe_started',
-      room_uuid: locked_room,
-      active_room_uuid: locked_room,
-      participant_uuid: ctx.staff_participant_uuid,
-      user_uuid: ctx.staff_user_uuid,
-      role: 'admin',
-      tier: ctx.staff_tier,
-      source_channel: 'admin',
-      channel_name: `admin_active_chat:${locked_room}`,
-      phase: 'admin_chat_realtime_guard',
-    })
-
-    const channel = subscribe_chat_room_realtime({
+    if (!messages_already_subscribed) {
+      channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid: locked_room,
       active_room_uuid: locked_room,
@@ -698,88 +694,6 @@ export default function AdminChatTimeline({
           phase: 'admin_chat_realtime_state_update',
         })
       },
-      on_support_action: (action: chat_support_action_payload) => {
-        send_chat_realtime_debug({
-          event: 'admin_support_action_received',
-          room_uuid: action.room_uuid,
-          active_room_uuid: locked_room,
-          action_uuid: action.action_uuid,
-          event_type: action.action_type,
-          source_channel: action.source_channel ?? 'admin',
-          ignored_reason: null,
-          phase: 'admin_chat_support_action',
-        })
-
-        const text = action.body?.trim() ?? ''
-
-        if (!text) {
-          send_chat_realtime_debug({
-            event: 'admin_support_action_ignored',
-            room_uuid: action.room_uuid,
-            active_room_uuid: locked_room,
-            action_uuid: action.action_uuid,
-            event_type: action.action_type,
-            source_channel: action.source_channel ?? 'admin',
-            ignored_reason: 'empty_action_body',
-            phase: 'admin_chat_support_action',
-          })
-          return
-        }
-
-        const system_row: chat_room_timeline_message = {
-          message_uuid: action.action_uuid,
-          room_uuid: action.room_uuid,
-          sequence: null,
-          text,
-          created_at: action.created_at ?? new Date().toISOString(),
-          direction: 'system',
-          sender: 'system',
-          role: 'system',
-          bundle_type: 'room_action_log',
-        }
-
-        set_rows((previous) => {
-          if (previous.some((row) => row.message_uuid === action.action_uuid)) {
-            send_chat_realtime_debug({
-              event: 'admin_support_action_ignored',
-              room_uuid: action.room_uuid,
-              active_room_uuid: locked_room,
-              action_uuid: action.action_uuid,
-              event_type: action.action_type,
-              source_channel: action.source_channel ?? 'admin',
-              ignored_reason: 'action_uuid_dedupe',
-              phase: 'admin_chat_support_action',
-            })
-            return previous
-          }
-
-          const result = merge_timeline_rows(previous, [system_row])
-
-          send_chat_realtime_debug({
-            event: 'admin_active_chat_message_appended',
-            room_uuid: locked_room,
-            active_room_uuid: locked_room,
-            action_uuid: action.action_uuid,
-            event_type: action.action_type,
-            source_channel: action.source_channel ?? 'admin',
-            prev_count: result.prev_message_count,
-            next_count: result.next_message_count,
-            phase: 'admin_chat_support_action',
-          })
-
-          return result.rows
-        })
-
-        send_chat_realtime_debug({
-          event: 'admin_support_action_rendered',
-          room_uuid: action.room_uuid,
-          active_room_uuid: locked_room,
-          action_uuid: action.action_uuid,
-          event_type: action.action_type,
-          source_channel: action.source_channel ?? 'admin',
-          phase: 'admin_chat_support_action',
-        })
-      },
       on_typing: (typing) => {
         typing_rows_ref.current.set(typing.participant_uuid, typing)
         refresh_typing_lines()
@@ -810,6 +724,96 @@ export default function AdminChatTimeline({
       },
     })
 
+      subscribed_room_uuid_ref.current = locked_room
+      realtime_channel_ref.current = channel
+    } else {
+      send_chat_realtime_debug({
+        event: 'chat_realtime_subscribe_skipped',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        participant_uuid: ctx.staff_participant_uuid,
+        user_uuid: ctx.staff_user_uuid,
+        role: 'admin',
+        tier: ctx.staff_tier,
+        source_channel: 'admin',
+        channel_name: chat_room_realtime_channel_name(room_uuid),
+        cleanup_reason: 'duplicate_messages_subscribe',
+        phase: 'admin_chat_realtime_guard',
+      })
+    }
+
+    let actions_channel = chat_actions_channel_ref.current
+
+    if (!actions_already_subscribed) {
+      actions_channel = subscribe_chat_actions_realtime({
+        supabase,
+        room_uuid: locked_room,
+        scope: 'admin_active',
+        source_channel: 'admin',
+        on_action: (action: chat_action_realtime_payload, inserted_index) => {
+          const near_bottom_before = compute_message_list_near_bottom(
+            message_list_scroll_ref.current,
+          )
+          const system_row = chat_action_to_admin_timeline_row(action)
+
+          set_rows((previous) => {
+            if (
+              previous.some((row) => row.message_uuid === action.action_uuid)
+            ) {
+              send_chat_realtime_debug({
+                event: 'chat_action_realtime_ignored',
+                room_uuid: locked_room,
+                active_room_uuid: locked_room,
+                action_uuid: action.action_uuid,
+                event_type: action.action_type,
+                actor_name: action.actor_display_name,
+                inserted_index,
+                ignored_reason: 'action_uuid_dedupe',
+                phase: 'admin_chat_support_action',
+              })
+
+              return previous
+            }
+
+            const result = merge_timeline_rows(previous, [system_row])
+
+            send_chat_realtime_debug({
+              event: 'admin_active_chat_message_appended',
+              room_uuid: locked_room,
+              active_room_uuid: locked_room,
+              action_uuid: action.action_uuid,
+              event_type: action.action_type,
+              actor_name: action.actor_display_name,
+              inserted_index,
+              prev_count: result.prev_message_count,
+              next_count: result.next_message_count,
+              phase: 'admin_chat_support_action',
+            })
+
+            return result.rows
+          })
+
+          emit_chat_action_realtime_rendered({
+            room_uuid: locked_room,
+            action,
+            inserted_index,
+            source_channel: 'admin',
+            phase: 'admin_chat_support_action',
+          })
+
+          if (near_bottom_before) {
+            bottom_ref.current?.scrollIntoView({
+              block: 'end',
+              behavior: 'smooth',
+            })
+          }
+        },
+      })
+
+      subscribed_chat_actions_room_ref.current = locked_room
+      chat_actions_channel_ref.current = actions_channel
+    }
+
     const typing_channel = supabase.channel(
       chat_room_realtime_channel_name(locked_room),
       { config: { broadcast: { self: true } } },
@@ -836,8 +840,6 @@ export default function AdminChatTimeline({
       .subscribe()
 
     typing_broadcast_channel_ref.current = typing_channel
-    subscribed_room_uuid_ref.current = locked_room
-    realtime_channel_ref.current = channel
 
     return () => {
       const cleanup_reason =
@@ -852,25 +854,45 @@ export default function AdminChatTimeline({
         typing_broadcast_channel_ref.current = null
       }
 
-      cleanup_chat_room_realtime({
-        supabase,
-        channel,
-        room_uuid: locked_room,
-        active_room_uuid: locked_room,
-        participant_uuid: dbg.staff_participant_uuid,
-        user_uuid: dbg.staff_user_uuid,
-        role: 'admin',
-        tier: dbg.staff_tier,
-        source_channel: 'admin',
-        cleanup_reason,
-      })
+      if (channel) {
+        cleanup_chat_room_realtime({
+          supabase,
+          channel,
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: dbg.staff_participant_uuid,
+          user_uuid: dbg.staff_user_uuid,
+          role: 'admin',
+          tier: dbg.staff_tier,
+          source_channel: 'admin',
+          cleanup_reason,
+        })
+      }
+
+      if (actions_channel) {
+        cleanup_chat_actions_realtime({
+          supabase,
+          channel: actions_channel,
+          room_uuid: locked_room,
+          scope: 'admin_active',
+          cleanup_reason,
+        })
+      }
 
       if (subscribed_room_uuid_ref.current === locked_room) {
         subscribed_room_uuid_ref.current = null
       }
 
+      if (subscribed_chat_actions_room_ref.current === locked_room) {
+        subscribed_chat_actions_room_ref.current = null
+      }
+
       if (realtime_channel_ref.current === channel) {
         realtime_channel_ref.current = null
+      }
+
+      if (chat_actions_channel_ref.current === actions_channel) {
+        chat_actions_channel_ref.current = null
       }
     }
   }, [room_uuid, room_display_title])

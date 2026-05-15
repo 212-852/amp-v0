@@ -631,6 +631,7 @@ export function resolve_debug_rule(input: {
     'admin_support_action_received',
     'admin_support_action_rendered',
     'admin_support_action_ignored',
+    'chat_action_realtime_ignored',
   ])
 
   const chat_realtime_success_gated = new Set([
@@ -690,6 +691,12 @@ export function resolve_debug_rule(input: {
     'admin_active_chat_message_appended',
     'admin_support_action_received',
     'admin_support_action_rendered',
+    'chat_action_realtime_subscribe_started',
+    'chat_action_realtime_subscribe_status',
+    'chat_action_realtime_received',
+    'chat_action_realtime_accepted',
+    'chat_action_realtime_rendered',
+    'chat_action_realtime_cleanup_started',
   ])
 
   const chat_realtime_server_failed = new Set([
