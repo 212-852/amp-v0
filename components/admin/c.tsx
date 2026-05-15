@@ -698,6 +698,7 @@ export default function AdminChatTimeline({
         room_uuid,
         participant_uuid: staff_participant_uuid,
         is_typing: action === 'typing_start',
+        source_channel: 'admin',
       })
 
       publish_chat_typing({

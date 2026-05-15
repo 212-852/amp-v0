@@ -8,8 +8,10 @@ import { debug_event } from '@/lib/debug'
 import { participant_idle_status } from '@/lib/chat/participant/rules'
 import {
   is_missing_room_last_incoming_columns_error,
+  is_missing_room_optional_select_columns_error,
   room_select_fields,
   room_select_fields_core,
+  room_select_fields_with_last_incoming,
 } from '@/lib/chat/room/schema'
 
 export type chat_channel =
@@ -62,6 +64,10 @@ type room_row = {
   action_id: string | null
   last_incoming_channel?: string | null
   last_incoming_at?: string | null
+  unread_admin_count?: number | null
+  admin_last_read_at?: string | null
+  last_message_at?: string | null
+  last_message_body?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -465,7 +471,18 @@ export async function load_room_row(room_uuid: string) {
 
   if (
     result.error &&
-    is_missing_room_last_incoming_columns_error(result.error)
+    is_missing_room_optional_select_columns_error(result.error)
+  ) {
+    result = await supabase
+      .from('rooms')
+      .select(room_select_fields_with_last_incoming)
+      .eq('room_uuid', room_uuid)
+      .maybeSingle()
+  }
+
+  if (
+    result.error &&
+    is_missing_room_optional_select_columns_error(result.error)
   ) {
     await debug_event({
       category: 'chat_room',
@@ -473,7 +490,7 @@ export async function load_room_row(room_uuid: string) {
       payload: {
         room_uuid,
         phase: 'load_room_row',
-        reason: 'last_incoming_columns_absent_used_core_select',
+        reason: 'optional_room_columns_absent_used_core_select',
       },
     })
     result = await supabase
@@ -559,15 +576,16 @@ async function insert_direct_room_row(
     mode: 'bot' as const,
   }
 
-  let room_result = await supabase
+  let insert_result = await supabase
     .from('rooms')
     .insert(insert_payload_full)
-    .select(room_select_fields)
+    .select('room_uuid')
     .single()
 
   if (
-    room_result.error &&
-    is_missing_room_last_incoming_columns_error(room_result.error)
+    insert_result.error &&
+    !is_unique_violation(insert_result.error) &&
+    is_missing_room_optional_select_columns_error(insert_result.error)
   ) {
     await debug_event({
       category: 'chat_room',
@@ -575,17 +593,17 @@ async function insert_direct_room_row(
       payload: {
         room_uuid: null,
         phase: 'insert_direct_room_row',
-        reason: 'last_incoming_columns_absent_used_core_insert',
+        reason: 'optional_room_columns_absent_used_core_insert',
       },
     })
-    room_result = await supabase
+    insert_result = await supabase
       .from('rooms')
       .insert(insert_payload_core)
-      .select(room_select_fields_core)
+      .select('room_uuid')
       .single()
   }
 
-  if (room_result.error && !is_unique_violation(room_result.error)) {
+  if (insert_result.error && !is_unique_violation(insert_result.error)) {
     await debug_event({
       category: 'chat_room',
       event: 'chat_room_create_failed',
@@ -594,14 +612,14 @@ async function insert_direct_room_row(
         room_uuid: null,
         participant_uuid: null,
         reason: 'insert_direct_room_row',
-        ...supabase_error_fields(room_result.error),
+        ...supabase_error_fields(insert_result.error),
       },
     })
 
-    throw room_result.error
+    throw insert_result.error
   }
 
-  if (is_unique_violation(room_result.error)) {
+  if (is_unique_violation(insert_result.error)) {
     const existing_participant =
       await find_canonical_user_participant(input)
 
@@ -614,11 +632,11 @@ async function insert_direct_room_row(
           room_uuid: null,
           participant_uuid: existing_participant?.participant_uuid ?? null,
           reason: 'insert_direct_room_unique_without_participant_room',
-          ...supabase_error_fields(room_result.error),
+          ...supabase_error_fields(insert_result.error),
         },
       })
 
-      throw room_result.error
+      throw insert_result.error
     }
 
     const existing_room = await load_room_row(existing_participant.room_uuid)
@@ -632,11 +650,11 @@ async function insert_direct_room_row(
           room_uuid: existing_participant.room_uuid,
           participant_uuid: existing_participant.participant_uuid,
           reason: 'insert_direct_room_unique_existing_room_missing',
-          ...supabase_error_fields(room_result.error),
+          ...supabase_error_fields(insert_result.error),
         },
       })
 
-      throw room_result.error
+      throw insert_result.error
     }
 
     return {
@@ -645,9 +663,11 @@ async function insert_direct_room_row(
     }
   }
 
-  const inserted = room_result.data as room_row | null
+  const inserted_uuid = clean_uuid(
+    (insert_result.data as { room_uuid?: string } | null)?.room_uuid ?? null,
+  )
 
-  if (!inserted?.room_uuid) {
+  if (!inserted_uuid) {
     await debug_event({
       category: 'chat_room',
       event: 'chat_room_create_failed',
@@ -664,6 +684,27 @@ async function insert_direct_room_row(
     })
 
     throw new Error('insert_direct_room_row: no row returned')
+  }
+
+  const inserted = await load_room_row(inserted_uuid)
+
+  if (!inserted?.room_uuid) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'chat_room_create_failed',
+      payload: {
+        ...identity,
+        room_uuid: inserted_uuid,
+        participant_uuid: null,
+        reason: 'insert_direct_room_load_after_insert_failed',
+        error_code: 'no_room_row',
+        error_message: 'insert_direct_room_row load_room_row returned empty',
+        error_details: null,
+        error_hint: null,
+      },
+    })
+
+    throw new Error('insert_direct_room_row: load after insert returned no row')
   }
 
   await debug_event({
@@ -717,7 +758,7 @@ export async function update_room_last_incoming_channel(input: {
 
   const skipped_due_to_missing_columns =
     Boolean(result.error) &&
-    is_missing_room_last_incoming_columns_error(result.error)
+    is_missing_room_optional_select_columns_error(result.error)
 
   if (skipped_due_to_missing_columns) {
     await debug_event({
@@ -1108,7 +1149,7 @@ async function touch_direct_participant_and_room(
 
   if (
     room_result.error &&
-    is_missing_room_last_incoming_columns_error(room_result.error)
+    is_missing_room_optional_select_columns_error(room_result.error)
   ) {
     await debug_event({
       category: 'chat_room',
@@ -1810,7 +1851,7 @@ export async function resolve_admin_reception_send_context(input: {
 
   if (
     last_incoming_select.error &&
-    is_missing_room_last_incoming_columns_error(last_incoming_select.error)
+    is_missing_room_optional_select_columns_error(last_incoming_select.error)
   ) {
     row_last_incoming = null
   } else if (last_incoming_select.error) {

@@ -7,14 +7,21 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { use_session_profile } from '@/components/session/profile'
 import {
+  format_admin_room_unread_label,
+  normalize_reception_channel,
   reception_channel_label,
+  reception_presence_label,
   type reception_room,
 } from '@/lib/admin/reception/display'
-import { resolve_chat_room_list_preview_text } from '@/lib/chat/presence/rules'
+import {
+  resolve_chat_room_list_preview_text,
+  typing_timestamp_is_fresh,
+} from '@/lib/chat/presence/rules'
 import {
   cleanup_chat_room_realtime,
   send_chat_realtime_debug,
   subscribe_chat_room_realtime,
+  type chat_presence_payload,
 } from '@/lib/chat/realtime/client'
 import { resolve_realtime_message_subtitle_for_toast } from '@/lib/chat/realtime/toast_decision'
 import { archived_message_to_timeline_message } from '@/lib/chat/timeline_display'
@@ -43,6 +50,30 @@ function format_time(iso: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function presence_status_for_room(room: reception_room) {
+  return reception_presence_label({
+    is_typing: room.user_is_typing,
+    is_online: room.user_is_online,
+    last_seen_at: room.user_last_seen_at,
+  })
+}
+
+function user_presence_patch(presence: chat_presence_payload) {
+  const is_typing = typing_timestamp_is_fresh(
+    presence.typing_at,
+    presence.is_typing,
+    new Date(),
+  )
+
+  return {
+    user_participant_uuid: presence.participant_uuid,
+    user_is_typing: is_typing,
+    user_is_online: presence.is_active,
+    user_last_seen_at: presence.last_seen_at,
+    presence_source_channel: presence.source_channel,
+  }
 }
 
 export default function AdminReceptionRoomListLive({
@@ -158,7 +189,6 @@ export default function AdminReceptionRoomListLive({
             direction === 'incoming'
               ? source_channel ?? channel
               : null
-          const is_incoming = direction === 'incoming'
 
           send_chat_realtime_debug({
             event: 'admin_room_list_realtime_payload_accepted',
@@ -202,9 +232,6 @@ export default function AdminReceptionRoomListLive({
                 preview: next_preview,
                 updated_at: last_message_at,
                 mode: row.mode,
-                unread_count: is_incoming
-                  ? (row.unread_count ?? 0) + 1
-                  : row.unread_count ?? 0,
                 last_incoming_channel:
                   next_channel ?? row.last_incoming_channel,
               }
@@ -291,10 +318,273 @@ export default function AdminReceptionRoomListLive({
           })
         },
         on_typing: () => {},
+        on_presence: (presence) => {
+          if (presence.role !== 'user') {
+            return
+          }
+
+          set_rooms((previous) => {
+            let matched = false
+            const next = previous.map((row) => {
+              if (row.room_uuid !== presence.room_uuid) {
+                return row
+              }
+
+              matched = true
+              return {
+                ...row,
+                ...user_presence_patch(presence),
+                last_incoming_channel:
+                  presence.source_channel ?? row.last_incoming_channel,
+              }
+            })
+
+            send_chat_realtime_debug({
+              event: 'admin_presence_state_updated',
+              room_uuid: presence.room_uuid,
+              participant_uuid: presence.participant_uuid,
+              role: presence.role,
+              source_channel: presence.source_channel ?? 'web',
+              is_active: presence.is_active,
+              is_typing: presence.is_typing,
+              last_seen_at: presence.last_seen_at,
+              typing_at: presence.typing_at,
+              ignored_reason: matched ? null : 'room_not_in_current_list',
+              phase: 'admin_room_list_presence',
+            })
+
+            return matched ? next : previous
+          })
+        },
       })
 
       channels.push(channel)
     })
+
+    const rooms_filter =
+      room_uuids.length === 1
+        ? `room_uuid=eq.${room_uuids[0]}`
+        : `room_uuid=in.(${room_uuids.join(',')})`
+
+    const rooms_unread_channel = supabase
+      .channel(`admin_reception_rooms_unread:${room_key}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rooms',
+          filter: rooms_filter,
+        },
+        (payload) => {
+          const new_row = payload.new as Record<string, unknown>
+          const ru =
+            typeof new_row.room_uuid === 'string' ? new_row.room_uuid : null
+
+          if (!ru) {
+            return
+          }
+
+          const unread_admin_count =
+            typeof new_row.unread_admin_count === 'number'
+              ? Math.max(0, Math.floor(new_row.unread_admin_count))
+              : null
+          const admin_last_read_at =
+            typeof new_row.admin_last_read_at === 'string'
+              ? new_row.admin_last_read_at
+              : null
+          const updated_at_row =
+            typeof new_row.updated_at === 'string' ? new_row.updated_at : null
+          const last_inc = normalize_reception_channel(
+            new_row.last_incoming_channel,
+          )
+          const preview_body =
+            typeof new_row.last_message_body === 'string' &&
+            new_row.last_message_body.trim()
+              ? new_row.last_message_body.trim()
+              : null
+
+          send_chat_realtime_debug({
+            event: 'room_unread_realtime_received',
+            room_uuid: ru,
+            active_room_uuid: null,
+            participant_uuid: null,
+            user_uuid: session.user_uuid ?? null,
+            role: 'admin',
+            tier: session.tier ?? null,
+            source_channel: 'admin',
+            subscribe_status: null,
+            channel_name: null,
+            event_name: null,
+            schema: 'public',
+            postgres_event: 'UPDATE',
+            table: 'rooms',
+            filter: rooms_filter,
+            message_uuid: null,
+            payload_message_uuid: null,
+            payload_action_uuid: null,
+            payload_room_uuid: ru,
+            sender_user_uuid: null,
+            sender_participant_uuid: null,
+            active_participant_uuid: null,
+            active_user_uuid: session.user_uuid ?? null,
+            active_role: 'admin',
+            sender_role: null,
+            display_name: null,
+            is_typing: null,
+            is_active: null,
+            last_seen_at: null,
+            typing_at: null,
+            ignored_reason: null,
+            error_code: null,
+            error_message: null,
+            error_details: null,
+            error_hint: null,
+            prev_message_count: null,
+            next_message_count: null,
+            prev_room_count: null,
+            next_room_count: null,
+            dedupe_hit: null,
+            phase: 'admin_room_list_rooms_realtime',
+            cleanup_reason: null,
+            is_self_sender: null,
+            comparison_strategy: null,
+            guest_strategy_used: null,
+            channel_topic: null,
+            listener_registered: null,
+            client_instance_id: null,
+            payload_preview: null,
+            visibility_state: null,
+            is_scrolled_to_bottom: null,
+            skip_reason: null,
+            message_channel: null,
+            message_source_channel: null,
+            message_direction: null,
+            channel: null,
+            direction: null,
+            last_message_at: updated_at_row,
+            payload_channel: null,
+            payload_source_channel: null,
+            payload_direction: null,
+            message_count_before: null,
+            message_count_after: null,
+            oldest_created_at: null,
+            newest_created_at: null,
+            realtime_message_uuid: null,
+            realtime_created_at: null,
+            unread_admin_count,
+            admin_last_read_at,
+            actor_admin_user_uuid: session.user_uuid ?? null,
+          })
+
+          set_rooms((previous) => {
+            let matched = false
+            const mapped = previous.map((row) => {
+              if (row.room_uuid !== ru) {
+                return row
+              }
+
+              matched = true
+
+              return {
+                ...row,
+                unread_count:
+                  unread_admin_count !== null
+                    ? unread_admin_count
+                    : (row.unread_count ?? 0),
+                updated_at: updated_at_row ?? row.updated_at,
+                last_incoming_channel:
+                  last_inc !== null ? last_inc : row.last_incoming_channel,
+                preview: preview_body ?? row.preview,
+              }
+            })
+
+            send_chat_realtime_debug({
+              event: 'admin_room_badge_updated',
+              room_uuid: ru,
+              active_room_uuid: null,
+              participant_uuid: null,
+              user_uuid: session.user_uuid ?? null,
+              role: 'admin',
+              tier: session.tier ?? null,
+              source_channel: 'admin',
+              subscribe_status: null,
+              channel_name: null,
+              event_name: null,
+              schema: 'public',
+              postgres_event: 'UPDATE',
+              table: 'rooms',
+              filter: rooms_filter,
+              message_uuid: null,
+              payload_message_uuid: null,
+              payload_action_uuid: null,
+              payload_room_uuid: ru,
+              sender_user_uuid: null,
+              sender_participant_uuid: null,
+              active_participant_uuid: null,
+              active_user_uuid: session.user_uuid ?? null,
+              active_role: 'admin',
+              sender_role: null,
+              display_name: null,
+              is_typing: null,
+              is_active: null,
+              last_seen_at: null,
+              typing_at: null,
+              ignored_reason: matched ? null : 'room_not_in_current_list',
+              error_code: null,
+              error_message: null,
+              error_details: null,
+              error_hint: null,
+              prev_message_count: null,
+              next_message_count: null,
+              prev_room_count: previous.length,
+              next_room_count: matched ? previous.length : null,
+              dedupe_hit: null,
+              phase: 'admin_room_list_rooms_realtime',
+              cleanup_reason: null,
+              is_self_sender: null,
+              comparison_strategy: null,
+              guest_strategy_used: null,
+              channel_topic: null,
+              listener_registered: null,
+              client_instance_id: null,
+              payload_preview: null,
+              visibility_state: null,
+              is_scrolled_to_bottom: null,
+              skip_reason: null,
+              message_channel: null,
+              message_source_channel: null,
+              message_direction: null,
+              channel: null,
+              direction: null,
+              last_message_at: updated_at_row,
+              payload_channel: null,
+              payload_source_channel: null,
+              payload_direction: null,
+              message_count_before: null,
+              message_count_after: null,
+              oldest_created_at: null,
+              newest_created_at: null,
+              realtime_message_uuid: null,
+              realtime_created_at: null,
+              unread_admin_count,
+              admin_last_read_at,
+              actor_admin_user_uuid: session.user_uuid ?? null,
+            })
+
+            if (!matched) {
+              return previous
+            }
+
+            return [...mapped].sort(
+              (a, b) =>
+                new Date(b.updated_at ?? 0).getTime() -
+                new Date(a.updated_at ?? 0).getTime(),
+            )
+          })
+        },
+      )
+      .subscribe()
 
     return () => {
       channels.forEach((ch, index) => {
@@ -311,6 +601,7 @@ export default function AdminReceptionRoomListLive({
           cleanup_reason: 'admin_reception_room_list_unmount',
         })
       })
+      void supabase.removeChannel(rooms_unread_channel)
     }
   }, [room_key, session?.role, session?.tier, session?.user_uuid])
 
@@ -322,24 +613,31 @@ export default function AdminReceptionRoomListLive({
             href={`/admin/reception/${room.room_uuid}`}
             className="flex w-full items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-3 transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
           >
-            <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-100 text-neutral-700"
-              aria-hidden
-            >
-              {room.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={room.avatar_url}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : room.display_name ? (
-                <span className="text-[12px] font-semibold">
-                  {room.display_name.slice(0, 1)}
+            <div className="relative shrink-0" aria-hidden>
+              <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-neutral-100 text-neutral-700">
+                {room.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={room.avatar_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : room.display_name ? (
+                  <span className="text-[12px] font-semibold">
+                    {room.display_name.slice(0, 1)}
+                  </span>
+                ) : (
+                  <MessageCircle className="h-4 w-4" strokeWidth={2} />
+                )}
+              </div>
+              {(room.unread_count ?? 0) > 0 ? (
+                <span
+                  className="absolute -left-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white"
+                  aria-label={`未読 ${format_admin_room_unread_label(room.unread_count ?? 0)}`}
+                >
+                  {format_admin_room_unread_label(room.unread_count ?? 0)}
                 </span>
-              ) : (
-                <MessageCircle className="h-4 w-4" strokeWidth={2} />
-              )}
+              ) : null}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
@@ -365,11 +663,9 @@ export default function AdminReceptionRoomListLive({
                 <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-white">
                   {reception_channel_label(room.last_incoming_channel)}
                 </span>
-                {(room.unread_count ?? 0) > 0 ? (
-                  <span className="rounded-full bg-red-600 px-2 py-0.5 text-white">
-                    {room.unread_count}
-                  </span>
-                ) : null}
+                <span className="text-neutral-500">
+                  {presence_status_for_room(room)}
+                </span>
               </div>
             </div>
           </Link>

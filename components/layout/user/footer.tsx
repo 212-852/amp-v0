@@ -260,6 +260,7 @@ export default function UserFooter() {
         room_uuid: chat.room_uuid,
         participant_uuid: chat.participant_uuid,
         is_typing: action === 'typing_start',
+        source_channel: session?.source_channel ?? 'web',
       })
 
       publish_chat_typing({

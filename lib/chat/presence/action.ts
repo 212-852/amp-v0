@@ -3,6 +3,7 @@ import 'server-only'
 import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
+import { debug_event } from '@/lib/debug'
 
 import {
   decide_active_participants,
@@ -207,12 +208,33 @@ export async function mark_room_left(input: {
 export async function mark_typing_started(input: {
   room_uuid: string
   participant_uuid: string
+  last_channel?: participant_surface_channel | null
 }) {
+  const typing_at = new Date().toISOString()
+  const patch: Record<string, unknown> = {
+    is_typing: true,
+    typing_at,
+  }
+
+  if (input.last_channel) {
+    patch.last_channel = input.last_channel
+  }
+
   await update_participant_presence({
-    ...input,
-    patch: {
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    patch,
+  })
+
+  await debug_event({
+    category: 'chat_realtime',
+    event: 'presence_typing_started',
+    payload: {
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
       is_typing: true,
-      typing_at: new Date().toISOString(),
+      last_seen_at: null,
+      source_channel: input.last_channel ?? null,
     },
   })
 }
@@ -220,12 +242,32 @@ export async function mark_typing_started(input: {
 export async function mark_typing_stopped(input: {
   room_uuid: string
   participant_uuid: string
+  last_channel?: participant_surface_channel | null
 }) {
+  const patch: Record<string, unknown> = {
+    is_typing: false,
+    typing_at: null,
+  }
+
+  if (input.last_channel) {
+    patch.last_channel = input.last_channel
+  }
+
   await update_participant_presence({
-    ...input,
-    patch: {
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    patch,
+  })
+
+  await debug_event({
+    category: 'chat_realtime',
+    event: 'presence_typing_stopped',
+    payload: {
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
       is_typing: false,
-      typing_at: null,
+      last_seen_at: null,
+      source_channel: input.last_channel ?? null,
     },
   })
 }

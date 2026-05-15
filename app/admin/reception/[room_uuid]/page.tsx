@@ -15,6 +15,7 @@ import {
 import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
 import { resolve_admin_reception_send_context } from '@/lib/chat/room'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
+import { mark_reception_room_read_for_admin } from '@/lib/chat/room/admin_unread'
 
 export const dynamic = 'force-dynamic'
 
@@ -116,6 +117,10 @@ export default async function AdminReceptionRoomPage({
 }: AdminReceptionRoomPageProps) {
   const { room_uuid } = await params
   const access = await require_admin_route_access('/admin/reception')
+  await mark_reception_room_read_for_admin({
+    room_uuid,
+    actor_admin_user_uuid: access.user_uuid,
+  })
   const send_context = await resolve_admin_reception_send_context({
     room_uuid,
     staff_user_uuid: access.user_uuid,

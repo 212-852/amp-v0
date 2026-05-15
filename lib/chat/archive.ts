@@ -10,6 +10,7 @@ import {
   update_room_last_incoming_channel,
   type chat_channel,
 } from './room'
+import { apply_admin_unread_increment_after_archive } from '@/lib/chat/room/admin_unread'
 import type { bundle_sender, message_bundle } from './message'
 
 /** DB table used for chat archive rows (must match Realtime `postgres_changes` table). */
@@ -740,25 +741,21 @@ export async function archive_message_bundles(
     })
   }
 
-  if (input.bundles.some((bundle) => bundle.sender === 'user')) {
-    try {
-      await update_room_last_incoming_channel({
-        room_uuid: sanitized_room_uuid,
-        channel: input.channel,
-        message_uuid: first_row?.message_uuid ?? null,
-        sender_role: 'user',
-      })
-    } catch (persist_error) {
-      console.error('[archive_message_bundles] incoming_channel_update_failed', {
-        room_uuid: sanitized_room_uuid,
-        message_uuid: first_row?.message_uuid ?? null,
-        channel: input.channel,
-        error:
-          persist_error instanceof Error
-            ? persist_error.message
-            : String(persist_error),
-      })
+  for (let i = 0; i < inserted.length; i += 1) {
+    const row = inserted[i]
+    const bundle = input.bundles[i]
+
+    if (!row || !bundle) {
+      continue
     }
+
+    await apply_admin_unread_increment_after_archive({
+      room_uuid: sanitized_room_uuid,
+      message_uuid: row.message_uuid,
+      message_created_at: row.created_at,
+      source_channel: input.channel,
+      bundle,
+    })
   }
 
   if (control.debug.chat_room) {

@@ -225,6 +225,25 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const admin_room_unread_debug_events = new Set([
+    'room_unread_incremented',
+    'room_unread_mark_read_started',
+    'room_unread_mark_read_succeeded',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    admin_room_unread_debug_events.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.admin_chat_room_list_debug_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
   if (
     input.category === 'admin_chat' &&
     input.event === 'admin_chat_schema_columns_loaded'
@@ -594,6 +613,8 @@ export function resolve_debug_rule(input: {
     'chat_messages_sorted',
     'realtime_message_merge_started',
     'realtime_message_merge_succeeded',
+    'room_unread_realtime_received',
+    'admin_room_badge_updated',
   ])
 
   const chat_realtime_server_failed = new Set([

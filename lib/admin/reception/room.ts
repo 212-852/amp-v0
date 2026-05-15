@@ -3,7 +3,10 @@ import 'server-only'
 import { debug_control } from '@/lib/debug/control'
 import { debug_event } from '@/lib/debug/index'
 import { load_archived_messages } from '@/lib/chat/archive'
-import { resolve_chat_room_list_preview_text } from '@/lib/chat/presence/rules'
+import {
+  resolve_chat_room_list_preview_text,
+  typing_timestamp_is_fresh,
+} from '@/lib/chat/presence/rules'
 import {
   archived_messages_to_reception_timeline,
   type chat_room_timeline_message,
@@ -20,20 +23,26 @@ import {
 } from '@/lib/chat/identity/admin_list_customer_name'
 import {
   is_missing_room_last_incoming_columns_error,
+  is_missing_room_optional_select_columns_error,
   room_select_fields,
   room_select_fields_core,
+  room_select_fields_with_last_incoming,
 } from '@/lib/chat/room/schema'
 import { supabase } from '@/lib/db/supabase'
 
 import {
+  format_admin_room_unread_label,
   normalize_reception_channel,
   reception_channel_label,
+  reception_presence_label,
   type reception_room,
 } from '@/lib/admin/reception/display'
 
 export {
+  format_admin_room_unread_label,
   normalize_reception_channel,
   reception_channel_label,
+  reception_presence_label,
   type reception_room,
 } from '@/lib/admin/reception/display'
 
@@ -68,6 +77,10 @@ type room_row = {
   action_id: string | null
   last_incoming_channel?: string | null
   last_incoming_at?: string | null
+  unread_admin_count?: number | null
+  admin_last_read_at?: string | null
+  last_message_at?: string | null
+  last_message_body?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -81,6 +94,11 @@ type participant_row = {
   display_name?: string | null
   nickname?: string | null
   label?: string | null
+  is_active?: boolean | null
+  is_typing?: boolean | null
+  last_seen_at?: string | null
+  typing_at?: string | null
+  last_channel?: string | null
 }
 
 type customer_identity_resolve_debug_event =
@@ -94,6 +112,11 @@ type room_card_enrichment = {
   tier: string | null
   avatar_url: string | null
   preview: string | null
+  user_participant_uuid: string | null
+  user_is_typing: boolean
+  user_is_online: boolean
+  user_last_seen_at: string | null
+  presence_source_channel: string | null
 }
 
 type admin_chat_list_debug_event =
@@ -149,7 +172,7 @@ async function emit_admin_chat_list_debug(input: {
   error?: unknown
   phase: string
   support_mode_filter?: reception_room_mode | null
-  rooms_select_shape?: 'full' | 'core' | null
+  rooms_select_shape?: 'full' | 'with_last_incoming' | 'core' | null
 }) {
   await debug_event({
     category: 'admin_chat',
@@ -198,6 +221,31 @@ const guest_subject: reception_room_subject = {
   visitor_uuid: null,
 }
 
+function reception_preview_from_room_row(
+  row: room_row,
+  enrichment_preview: string | null | undefined,
+): string {
+  const from_enrichment =
+    typeof enrichment_preview === 'string' && enrichment_preview.trim()
+      ? enrichment_preview.trim()
+      : null
+
+  if (from_enrichment) {
+    return from_enrichment
+  }
+
+  const from_row =
+    typeof row.last_message_body === 'string' && row.last_message_body.trim()
+      ? row.last_message_body.trim()
+      : null
+
+  if (from_row) {
+    return from_row
+  }
+
+  return '対応が必要です'
+}
+
 function normalize_room(
   row: room_row,
   enrichment: room_card_enrichment | null = null,
@@ -212,6 +260,11 @@ function normalize_room(
     enrichment?.display_name ??
     (mode === 'concierge' ? concierge_name_fallback : 'Bot room')
 
+  const unread_raw =
+    typeof row.unread_admin_count === 'number' && Number.isFinite(row.unread_admin_count)
+      ? row.unread_admin_count
+      : 0
+
   return {
     room_uuid: row.room_uuid,
     display_name,
@@ -219,11 +272,18 @@ function normalize_room(
     tier: enrichment?.tier ?? null,
     avatar_url: enrichment?.avatar_url ?? null,
     title: display_name,
-    preview: enrichment?.preview ?? '対応が必要です',
+    preview: reception_preview_from_room_row(row, enrichment?.preview),
     updated_at: row.updated_at,
     mode,
     last_incoming_channel: normalize_reception_channel(row.last_incoming_channel),
-    unread_count: 0,
+    unread_count: Math.max(0, Math.floor(unread_raw)),
+    user_participant_uuid: enrichment?.user_participant_uuid ?? null,
+    user_is_typing: enrichment?.user_is_typing ?? false,
+    user_is_online: enrichment?.user_is_online ?? false,
+    user_last_seen_at: enrichment?.user_last_seen_at ?? null,
+    presence_source_channel: normalize_reception_channel(
+      enrichment?.presence_source_channel,
+    ),
   }
 }
 
@@ -673,7 +733,13 @@ async function enrich_room_cards(
     const preview_resolved = resolve_chat_room_list_preview_text({
       audience: 'admin_inbox',
       latest_message_text: base_preview,
-      typing_user_active: false,
+      typing_user_active:
+        customer?.role === 'user' &&
+        typing_timestamp_is_fresh(
+          customer.typing_at ?? null,
+          customer.is_typing ?? null,
+          new Date(),
+        ),
       typing_staff_lines: [],
       typing_placeholder_ja: '入力中...',
       fallback_when_empty: '対応が必要です',
@@ -787,6 +853,17 @@ async function enrich_room_cards(
       tier: pick_string(customer_user?.['tier']),
       avatar_url: pick_string(customer_user?.['image_url']),
       preview: preview_resolved,
+      user_participant_uuid: string_value(customer?.participant_uuid ?? null),
+      user_is_typing:
+        customer?.role === 'user' &&
+        typing_timestamp_is_fresh(
+          customer.typing_at ?? null,
+          customer.is_typing ?? null,
+          new Date(),
+        ),
+      user_is_online: customer?.is_active === true,
+      user_last_seen_at: string_value(customer?.last_seen_at ?? null),
+      presence_source_channel: normalize_reception_channel(customer?.last_channel),
     })
   }
 
@@ -931,11 +1008,18 @@ export async function list_reception_rooms({
     rooms_select_shape: null,
   })
 
-  let rooms_select_shape: 'full' | 'core' = 'full'
+  let rooms_select_shape: 'full' | 'with_last_incoming' | 'core' = 'full'
 
   const query_full = supabase
     .from('rooms')
     .select(room_select_fields)
+    .eq('mode', mode)
+    .order('updated_at', { ascending: false })
+    .limit(fetch_limit)
+
+  const query_mid = supabase
+    .from('rooms')
+    .select(room_select_fields_with_last_incoming)
     .eq('mode', mode)
     .order('updated_at', { ascending: false })
     .limit(fetch_limit)
@@ -954,7 +1038,15 @@ export async function list_reception_rooms({
 
     if (
       result.error &&
-      is_missing_room_last_incoming_columns_error(result.error)
+      is_missing_room_optional_select_columns_error(result.error)
+    ) {
+      rooms_select_shape = 'with_last_incoming'
+      result = await query_mid
+    }
+
+    if (
+      result.error &&
+      is_missing_room_optional_select_columns_error(result.error)
     ) {
       rooms_select_shape = 'core'
       result = await query_core
@@ -1084,7 +1176,7 @@ export async function list_reception_rooms({
 export async function get_reception_room(
   room_uuid: string,
 ): Promise<reception_room | null> {
-  let rooms_select_shape: 'full' | 'core' = 'full'
+  let rooms_select_shape: 'full' | 'with_last_incoming' | 'core' = 'full'
 
   let result = await supabase
     .from('rooms')
@@ -1094,7 +1186,19 @@ export async function get_reception_room(
 
   if (
     result.error &&
-    is_missing_room_last_incoming_columns_error(result.error)
+    is_missing_room_optional_select_columns_error(result.error)
+  ) {
+    rooms_select_shape = 'with_last_incoming'
+    result = await supabase
+      .from('rooms')
+      .select(room_select_fields_with_last_incoming)
+      .eq('room_uuid', room_uuid)
+      .maybeSingle()
+  }
+
+  if (
+    result.error &&
+    is_missing_room_optional_select_columns_error(result.error)
   ) {
     rooms_select_shape = 'core'
     result = await supabase

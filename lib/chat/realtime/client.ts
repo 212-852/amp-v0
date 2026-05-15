@@ -25,6 +25,17 @@ export type chat_typing_payload = {
   typed_at?: string
 }
 
+export type chat_presence_payload = {
+  room_uuid: string
+  participant_uuid: string
+  role: string | null
+  is_active: boolean
+  is_typing: boolean
+  last_seen_at: string | null
+  typing_at: string | null
+  source_channel: string | null
+}
+
 /** User and admin must use the same topic string for broadcast + postgres_changes. */
 export function chat_room_realtime_channel_name(room_uuid: string) {
   return `room:${room_uuid}`
@@ -166,6 +177,9 @@ export type chat_realtime_debug_payload = {
   sender_role?: string | null
   display_name?: string | null
   is_typing?: boolean | null
+  is_active?: boolean | null
+  last_seen_at?: string | null
+  typing_at?: string | null
   ignored_reason?: string | null
   error_code?: string | null
   error_message?: string | null
@@ -206,6 +220,9 @@ export type chat_realtime_debug_payload = {
   newest_created_at?: string | null
   realtime_message_uuid?: string | null
   realtime_created_at?: string | null
+  unread_admin_count?: number | null
+  admin_last_read_at?: string | null
+  actor_admin_user_uuid?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -250,6 +267,36 @@ function normalize_chat_typing_payload(
   }
 }
 
+function presence_payload_from_participant_row(
+  value: unknown,
+): chat_presence_payload | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const row = value as Record<string, unknown>
+
+  if (
+    typeof row.room_uuid !== 'string' ||
+    typeof row.participant_uuid !== 'string'
+  ) {
+    return null
+  }
+
+  return {
+    room_uuid: row.room_uuid,
+    participant_uuid: row.participant_uuid,
+    role: typeof row.role === 'string' ? row.role : null,
+    is_active: row.is_active === true,
+    is_typing: row.is_typing === true,
+    last_seen_at:
+      typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+    typing_at: typeof row.typing_at === 'string' ? row.typing_at : null,
+    source_channel:
+      typeof row.last_channel === 'string' ? row.last_channel : null,
+  }
+}
+
 export function subscribe_chat_room_realtime(input: {
   supabase: SupabaseClient
   room_uuid: string
@@ -267,6 +314,7 @@ export function subscribe_chat_room_realtime(input: {
   }>
   on_message: (message: realtime_archived_message) => void
   on_typing: (payload: chat_typing_payload) => void
+  on_presence?: (payload: chat_presence_payload) => void
 }): RealtimeChannel {
   const channel_name = chat_room_realtime_channel_name(input.room_uuid)
   const postgres_filter = `room_uuid=eq.${input.room_uuid}`
@@ -562,6 +610,57 @@ export function subscribe_chat_room_realtime(input: {
         }
 
         input.on_message(message)
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'participants',
+        filter: postgres_filter,
+      },
+      (payload) => {
+        const presence = presence_payload_from_participant_row(payload.new)
+
+        if (!presence) {
+          send_chat_realtime_debug({
+            event: 'admin_presence_realtime_received',
+            ...base_debug,
+            event_name: 'UPDATE',
+            postgres_event: 'UPDATE',
+            table: 'participants',
+            ignored_reason: 'unparseable_participant_row',
+            phase: 'participants_presence_update',
+          })
+          return
+        }
+
+        send_chat_realtime_debug({
+          event: 'admin_presence_realtime_received',
+          ...base_debug,
+          event_name: 'UPDATE',
+          postgres_event: 'UPDATE',
+          table: 'participants',
+          payload_room_uuid: presence.room_uuid,
+          participant_uuid: presence.participant_uuid,
+          role: presence.role,
+          source_channel:
+            presence.source_channel ?? input.source_channel ?? 'web',
+          is_active: presence.is_active,
+          is_typing: presence.is_typing,
+          last_seen_at: presence.last_seen_at,
+          typing_at: presence.typing_at,
+          ignored_reason:
+            presence.room_uuid === input.room_uuid ? null : 'room_uuid_mismatch',
+          phase: 'participants_presence_update',
+        })
+
+        if (presence.room_uuid !== input.room_uuid) {
+          return
+        }
+
+        input.on_presence?.(presence)
       },
     )
     .on('broadcast', { event: 'typing' }, (payload) => {
@@ -1094,6 +1193,7 @@ export function sync_chat_typing_presence(input: {
   room_uuid: string
   participant_uuid: string
   is_typing: boolean
+  source_channel?: string | null
 }) {
   void fetch('/api/chat/presence', {
     method: 'POST',
@@ -1104,6 +1204,7 @@ export function sync_chat_typing_presence(input: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
       action: input.is_typing ? 'typing_start' : 'typing_stop',
+      last_channel: input.source_channel ?? undefined,
     }),
   }).catch(() => {})
 }

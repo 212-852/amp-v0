@@ -4,10 +4,15 @@ import { useEffect, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import {
+  format_admin_room_unread_label,
   reception_channel_label,
+  reception_presence_label,
   type reception_room,
 } from '@/lib/admin/reception/display'
-import { resolve_chat_room_list_preview_text } from '@/lib/chat/presence/rules'
+import {
+  resolve_chat_room_list_preview_text,
+  typing_timestamp_is_fresh,
+} from '@/lib/chat/presence/rules'
 import {
   cleanup_chat_room_realtime,
   send_chat_realtime_debug,
@@ -41,6 +46,11 @@ export default function AdminReceptionActiveSummary({
     mode: room?.mode ?? null,
     last_incoming_channel: room?.last_incoming_channel ?? null,
     unread_count: room?.unread_count ?? 0,
+    user_participant_uuid: room?.user_participant_uuid ?? null,
+    user_is_typing: room?.user_is_typing ?? false,
+    user_is_online: room?.user_is_online ?? false,
+    user_last_seen_at: room?.user_last_seen_at ?? null,
+    presence_source_channel: room?.presence_source_channel ?? null,
   })
 
   useEffect(() => {
@@ -50,6 +60,11 @@ export default function AdminReceptionActiveSummary({
       mode: room?.mode ?? null,
       last_incoming_channel: room?.last_incoming_channel ?? null,
       unread_count: room?.unread_count ?? 0,
+      user_participant_uuid: room?.user_participant_uuid ?? null,
+      user_is_typing: room?.user_is_typing ?? false,
+      user_is_online: room?.user_is_online ?? false,
+      user_last_seen_at: room?.user_last_seen_at ?? null,
+      presence_source_channel: room?.presence_source_channel ?? null,
     })
   }, [room])
 
@@ -122,10 +137,6 @@ export default function AdminReceptionActiveSummary({
               direction === 'incoming'
                 ? source_channel ?? channel_value
                 : previous.last_incoming_channel,
-            unread_count:
-              direction === 'incoming'
-                ? previous.unread_count + 1
-                : previous.unread_count,
           }
 
           send_chat_realtime_debug({
@@ -147,9 +158,91 @@ export default function AdminReceptionActiveSummary({
         })
       },
       on_typing: () => {},
+      on_presence: (presence) => {
+        if (presence.role !== 'user') {
+          return
+        }
+
+        set_summary((previous) => ({
+          ...previous,
+          user_participant_uuid: presence.participant_uuid,
+          user_is_typing: typing_timestamp_is_fresh(
+            presence.typing_at,
+            presence.is_typing,
+            new Date(),
+          ),
+          user_is_online: presence.is_active,
+          user_last_seen_at: presence.last_seen_at,
+          presence_source_channel: presence.source_channel,
+          last_incoming_channel:
+            presence.source_channel ?? previous.last_incoming_channel,
+        }))
+
+        send_chat_realtime_debug({
+          event: 'admin_presence_state_updated',
+          room_uuid: presence.room_uuid,
+          participant_uuid: presence.participant_uuid,
+          role: presence.role,
+          source_channel: presence.source_channel ?? 'web',
+          is_active: presence.is_active,
+          is_typing: presence.is_typing,
+          last_seen_at: presence.last_seen_at,
+          typing_at: presence.typing_at,
+          ignored_reason: null,
+          phase: 'admin_active_room_summary_presence',
+        })
+      },
     })
 
+    const rooms_row_channel = supabase
+      .channel(`admin_active_summary_room_row:${room_uuid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rooms',
+          filter: `room_uuid=eq.${room_uuid}`,
+        },
+        (payload) => {
+          const new_row = payload.new as Record<string, unknown>
+          const uc = new_row.unread_admin_count
+          const unread_next =
+            typeof uc === 'number' ? Math.max(0, Math.floor(uc)) : null
+          const admin_read =
+            typeof new_row.admin_last_read_at === 'string'
+              ? new_row.admin_last_read_at
+              : null
+          const updated_row =
+            typeof new_row.updated_at === 'string' ? new_row.updated_at : null
+          const preview_row =
+            typeof new_row.last_message_body === 'string' &&
+            new_row.last_message_body.trim()
+              ? new_row.last_message_body.trim()
+              : null
+
+          send_chat_realtime_debug({
+            event: 'room_unread_realtime_received',
+            room_uuid,
+            phase: 'admin_active_summary_rooms_realtime',
+            unread_admin_count: unread_next,
+            admin_last_read_at: admin_read,
+            actor_admin_user_uuid: staff_user_uuid,
+          })
+
+          set_summary((previous) => ({
+            ...previous,
+            unread_count:
+              unread_next !== null ? unread_next : previous.unread_count,
+            updated_at: updated_row ?? previous.updated_at,
+            preview: preview_row ?? previous.preview,
+          }))
+        },
+      )
+      .subscribe()
+
     return () => {
+      void supabase.removeChannel(rooms_row_channel)
       if (!channel) {
         return
       }
@@ -189,9 +282,16 @@ export default function AdminReceptionActiveSummary({
         <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-white">
           {reception_channel_label(summary.last_incoming_channel)}
         </span>
+        <span>
+          {reception_presence_label({
+            is_typing: summary.user_is_typing,
+            is_online: summary.user_is_online,
+            last_seen_at: summary.user_last_seen_at,
+          })}
+        </span>
         {summary.unread_count > 0 ? (
           <span className="rounded-full bg-red-600 px-2 py-0.5 text-white">
-            {summary.unread_count}
+            {format_admin_room_unread_label(summary.unread_count)}
           </span>
         ) : null}
       </div>
