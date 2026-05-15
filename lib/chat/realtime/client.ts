@@ -698,8 +698,39 @@ export function subscribe_chat_room_realtime(input: {
         if (is_admin_listener && input.on_presence) {
           const role = presence.role?.trim().toLowerCase() ?? ''
           const end_user = role === 'user' || role === 'driver'
+          const staff = role === 'admin' || role === 'concierge'
 
-          if (!end_user) {
+          if (end_user) {
+            send_chat_realtime_debug({
+              event: 'admin_presence_payload_accepted',
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? null,
+              participant_uuid: presence.participant_uuid,
+              user_uuid: presence.user_uuid,
+              source_channel:
+                presence.source_channel ?? input.source_channel ?? 'web',
+              is_typing: presence.is_typing,
+              ignored_reason: null,
+              phase: 'participants_presence_update',
+            })
+          } else if (staff) {
+            send_chat_realtime_debug({
+              event: 'admin_support_presence_realtime_received',
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? null,
+              participant_uuid: presence.participant_uuid,
+              user_uuid: presence.user_uuid,
+              role: presence.role,
+              source_channel:
+                presence.source_channel ?? input.source_channel ?? 'web',
+              is_active: presence.is_active,
+              is_typing: presence.is_typing,
+              last_seen_at: presence.last_seen_at,
+              typing_at: presence.typing_at,
+              ignored_reason: null,
+              phase: 'participants_presence_update',
+            })
+          } else {
             send_chat_realtime_debug({
               event: 'admin_presence_payload_ignored',
               ...base_debug,
@@ -709,24 +740,11 @@ export function subscribe_chat_room_realtime(input: {
               source_channel:
                 presence.source_channel ?? input.source_channel ?? 'web',
               is_typing: presence.is_typing,
-              ignored_reason: 'presence_role_not_end_user',
+              ignored_reason: 'presence_role_not_staff_or_end_user',
               phase: 'participants_presence_update',
             })
             return
           }
-
-          send_chat_realtime_debug({
-            event: 'admin_presence_payload_accepted',
-            ...base_debug,
-            active_room_uuid: input.active_room_uuid ?? null,
-            participant_uuid: presence.participant_uuid,
-            user_uuid: presence.user_uuid,
-            source_channel:
-              presence.source_channel ?? input.source_channel ?? 'web',
-            is_typing: presence.is_typing,
-            ignored_reason: null,
-            phase: 'participants_presence_update',
-          })
         }
 
         input.on_presence?.(presence)

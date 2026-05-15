@@ -1,12 +1,17 @@
 import 'server-only'
 
+import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
+import {
+  build_admin_support_ui_strings,
+  is_participant_role,
+  resolve_chat_room_list_preview_text,
+  typing_timestamp_is_fresh,
+  type admin_support_staff_row,
+  type participant_role,
+} from '@/lib/chat/presence/rules'
 import { debug_control } from '@/lib/debug/control'
 import { debug_event } from '@/lib/debug/index'
 import { load_archived_messages } from '@/lib/chat/archive'
-import {
-  resolve_chat_room_list_preview_text,
-  typing_timestamp_is_fresh,
-} from '@/lib/chat/presence/rules'
 import {
   archived_messages_to_reception_timeline,
   type chat_room_timeline_message,
@@ -29,6 +34,7 @@ import {
   room_select_fields_with_last_incoming,
 } from '@/lib/chat/room/schema'
 import { supabase } from '@/lib/db/supabase'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 
 import {
   format_admin_room_unread_label,
@@ -118,6 +124,10 @@ type room_card_enrichment = {
   user_last_seen_at: string | null
   presence_source_channel: string | null
   user_typing_at: string | null
+  admin_support_staff: admin_support_staff_row[]
+  admin_support_card_line: string
+  admin_support_active_header_line: string
+  admin_support_last_handled_label: string
 }
 
 type admin_chat_list_debug_event =
@@ -286,6 +296,12 @@ function normalize_room(
       enrichment?.presence_source_channel,
     ),
     user_typing_at: enrichment?.user_typing_at ?? null,
+    admin_support_staff: enrichment?.admin_support_staff ?? [],
+    admin_support_card_line: enrichment?.admin_support_card_line ?? '対応者なし',
+    admin_support_active_header_line:
+      enrichment?.admin_support_active_header_line ?? '対応者なし',
+    admin_support_last_handled_label:
+      enrichment?.admin_support_last_handled_label ?? '',
   }
 }
 
@@ -756,6 +772,29 @@ async function enrich_room_cards(
     })
   }
 
+  const staff_operator_uuids = new Set<string>()
+
+  for (const row of rows) {
+    const room_ps = participants_by_room.get(row.room_uuid) ?? []
+
+    for (const p of room_ps) {
+      const r = string_value(p.role)?.trim().toLowerCase() ?? ''
+
+      if ((r === 'admin' || r === 'concierge') && p.user_uuid) {
+        const u = string_value(p.user_uuid)
+
+        if (u) {
+          staff_operator_uuids.add(u)
+        }
+      }
+    }
+  }
+
+  const staff_display_map = await batch_resolve_admin_operator_display(
+    [...staff_operator_uuids],
+    'memo_list',
+  )
+
   for (const row of rows) {
     const room_ps = participants_by_room.get(row.room_uuid) ?? []
     const customer = choose_customer_user_participant(room_ps)
@@ -879,6 +918,56 @@ async function enrich_room_cards(
       })
     }
 
+    const staff_ps = room_ps.filter((p) => {
+      const r = string_value(p.role)?.trim().toLowerCase() ?? ''
+
+      return r === 'admin' || r === 'concierge'
+    })
+    const now_support = new Date()
+    const admin_support_staff: admin_support_staff_row[] = []
+
+    for (const p of staff_ps) {
+      const pid = string_value(p.participant_uuid)
+
+      if (!pid) {
+        continue
+      }
+
+      const uid = string_value(p.user_uuid ?? null)
+      const role_raw = string_value(p.role)
+      let pr_role: participant_role = 'admin'
+
+      if (is_participant_role(role_raw) && role_raw === 'concierge') {
+        pr_role = 'concierge'
+      } else if (is_participant_role(role_raw) && role_raw === 'admin') {
+        pr_role = 'admin'
+      }
+
+      const cleaned_uid = uid ? clean_uuid(uid) : null
+      const label =
+        cleaned_uid && staff_display_map.has(cleaned_uid)
+          ? staff_display_map.get(cleaned_uid) ?? null
+          : null
+      const display_name =
+        label ?? (pr_role === 'concierge' ? 'Concierge' : 'Admin')
+
+      admin_support_staff.push({
+        participant_uuid: pid,
+        user_uuid: uid,
+        role: pr_role,
+        display_name,
+        last_seen_at: string_value(p.last_seen_at ?? null),
+        typing_at: string_value(p.typing_at ?? null),
+        is_typing: p.is_typing === true,
+        is_active: p.is_active === true,
+      })
+    }
+
+    const support_strings = build_admin_support_ui_strings({
+      staff: admin_support_staff,
+      now: now_support,
+    })
+
     enrichments.set(row.room_uuid, {
       display_name: resolved.title,
       role:
@@ -893,6 +982,10 @@ async function enrich_room_cards(
       user_last_seen_at: string_value(customer?.last_seen_at ?? null),
       presence_source_channel: normalize_reception_channel(customer?.last_channel),
       user_typing_at: typing_snapshot.typing_at,
+      admin_support_staff,
+      admin_support_card_line: support_strings.card_line,
+      admin_support_active_header_line: support_strings.active_header_line,
+      admin_support_last_handled_label: support_strings.last_handled_label,
     })
   }
 

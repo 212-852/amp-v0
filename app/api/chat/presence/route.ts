@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 
 import {
+  mark_admin_support_heartbeat,
+  mark_admin_support_idle_notice,
+  mark_admin_support_join,
+  mark_admin_support_leave,
+  mark_admin_support_recovered_notice,
   mark_room_entered,
   mark_room_left,
   mark_typing_started,
@@ -20,10 +25,15 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as
     | presence_request_body
     | null
+  const raw_action = typeof body?.action === 'string' ? body.action : ''
+  const last_channel_raw =
+    body?.last_channel ??
+    (raw_action.startsWith('admin_support') ? 'admin' : undefined)
+
   const context = resolve_presence_mutation_context({
     room_uuid: body?.room_uuid,
     participant_uuid: body?.participant_uuid,
-    last_channel: body?.last_channel,
+    last_channel: last_channel_raw,
   })
 
   if (!context.ok) {
@@ -33,27 +43,47 @@ export async function POST(request: Request) {
     )
   }
 
+  const room_uuid = context.room_uuid
+  const participant_uuid = context.participant_uuid
+
   try {
     if (body?.action === 'enter') {
       await mark_room_entered({
-        room_uuid: context.room_uuid,
-        participant_uuid: context.participant_uuid,
+        room_uuid,
+        participant_uuid,
         last_channel: context.last_channel ?? undefined,
       })
     } else if (body?.action === 'leave') {
-      await mark_room_left(context)
+      await mark_room_left({
+        room_uuid,
+        participant_uuid,
+      })
     } else if (body?.action === 'typing_start') {
       const typing_phase =
         body?.typing_phase === 'heartbeat' ? 'heartbeat' : 'start'
 
       await mark_typing_started({
-        room_uuid: context.room_uuid,
-        participant_uuid: context.participant_uuid,
+        room_uuid,
+        participant_uuid,
         last_channel: context.last_channel ?? undefined,
         typing_phase,
       })
     } else if (body?.action === 'typing_stop') {
-      await mark_typing_stopped(context)
+      await mark_typing_stopped({
+        room_uuid,
+        participant_uuid,
+        last_channel: context.last_channel ?? undefined,
+      })
+    } else if (body?.action === 'admin_support_join') {
+      await mark_admin_support_join({ room_uuid, participant_uuid })
+    } else if (body?.action === 'admin_support_heartbeat') {
+      await mark_admin_support_heartbeat({ room_uuid, participant_uuid })
+    } else if (body?.action === 'admin_support_leave') {
+      await mark_admin_support_leave({ room_uuid, participant_uuid })
+    } else if (body?.action === 'admin_support_idle') {
+      await mark_admin_support_idle_notice({ room_uuid, participant_uuid })
+    } else if (body?.action === 'admin_support_recovered') {
+      await mark_admin_support_recovered_notice({ room_uuid, participant_uuid })
     } else {
       return NextResponse.json(
         { ok: false, error: 'invalid_presence_action' },
@@ -64,8 +94,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error('[chat_presence] update_failed', {
-      room_uuid: context.room_uuid,
-      participant_uuid: context.participant_uuid,
+      room_uuid,
+      participant_uuid,
       action: body?.action,
       error: error instanceof Error ? error.message : String(error),
     })

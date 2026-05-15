@@ -271,6 +271,24 @@ export async function mark_typing_started(input: {
       ignored_reason: null,
     },
   })
+
+  if (input.last_channel === 'admin') {
+    const snap = await load_participant_admin_support_event_payload({
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+    })
+
+    if (snap) {
+      await debug_event({
+        category: 'admin_chat',
+        event: 'admin_support_typing',
+        payload: {
+          ...snap,
+          is_typing: true,
+        },
+      })
+    }
+  }
 }
 
 export async function mark_typing_stopped(input: {
@@ -310,6 +328,182 @@ export async function mark_typing_stopped(input: {
       active_room_uuid: null,
       ignored_reason: null,
     },
+  })
+}
+
+type admin_support_event_row = {
+  user_uuid: string | null
+  role: string | null
+  is_active: boolean | null
+  is_typing: boolean | null
+  last_seen_at: string | null
+  last_channel: string | null
+}
+
+async function load_participant_admin_support_event_payload(input: {
+  room_uuid: string
+  participant_uuid: string
+}): Promise<{
+  room_uuid: string
+  participant_uuid: string
+  user_uuid: string | null
+  role: string | null
+  is_active: boolean
+  is_typing: boolean
+  last_seen_at: string | null
+  source_channel: string | null
+} | null> {
+  const snap = await supabase
+    .from('participants')
+    .select(
+      'user_uuid, role, is_active, is_typing, last_seen_at, last_channel',
+    )
+    .eq('room_uuid', input.room_uuid)
+    .eq('participant_uuid', input.participant_uuid)
+    .maybeSingle()
+
+  if (snap.error || !snap.data) {
+    return null
+  }
+
+  const row = snap.data as admin_support_event_row
+  const user_uuid =
+    typeof row.user_uuid === 'string' && row.user_uuid.trim()
+      ? row.user_uuid.trim()
+      : null
+  const role = typeof row.role === 'string' ? row.role : null
+  const last_channel =
+    typeof row.last_channel === 'string' ? row.last_channel : null
+
+  return {
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    user_uuid,
+    role,
+    is_active: row.is_active === true,
+    is_typing: row.is_typing === true,
+    last_seen_at:
+      typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+    source_channel: last_channel,
+  }
+}
+
+export async function mark_admin_support_join(input: {
+  room_uuid: string
+  participant_uuid: string
+}) {
+  await mark_room_entered({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    last_channel: 'admin',
+  })
+  const snap = await load_participant_admin_support_event_payload(input)
+
+  if (!snap) {
+    return
+  }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_presence_started',
+    payload: snap,
+  })
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_joined',
+    payload: snap,
+  })
+}
+
+export async function mark_admin_support_heartbeat(input: {
+  room_uuid: string
+  participant_uuid: string
+}) {
+  await mark_room_entered({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    last_channel: 'admin',
+  })
+  const snap = await load_participant_admin_support_event_payload(input)
+
+  if (!snap) {
+    return
+  }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_presence_heartbeat',
+    payload: snap,
+  })
+}
+
+export async function mark_admin_support_leave(input: {
+  room_uuid: string
+  participant_uuid: string
+}) {
+  await mark_room_left({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+  })
+  const snap = await load_participant_admin_support_event_payload(input)
+
+  if (!snap) {
+    return
+  }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_presence_left',
+    payload: snap,
+  })
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_left',
+    payload: snap,
+  })
+}
+
+export async function mark_admin_support_idle_notice(input: {
+  room_uuid: string
+  participant_uuid: string
+}) {
+  const snap = await load_participant_admin_support_event_payload(input)
+
+  if (!snap) {
+    return
+  }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_presence_idle',
+    payload: snap,
+  })
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_idle',
+    payload: snap,
+  })
+}
+
+export async function mark_admin_support_recovered_notice(input: {
+  room_uuid: string
+  participant_uuid: string
+}) {
+  await mark_room_entered({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    last_channel: 'admin',
+  })
+  const snap = await load_participant_admin_support_event_payload(input)
+
+  if (!snap) {
+    return
+  }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_recovered',
+    payload: snap,
   })
 }
 

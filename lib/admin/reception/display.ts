@@ -1,3 +1,5 @@
+import type { admin_support_staff_row } from '@/lib/chat/presence/rules'
+
 export type reception_room = {
   room_uuid: string
   display_name: string
@@ -17,6 +19,10 @@ export type reception_room = {
   presence_source_channel?: string | null
   /** Latest `typing_at` from customer participant; used to expire typing UI locally. */
   user_typing_at?: string | null
+  admin_support_staff?: admin_support_staff_row[]
+  admin_support_card_line?: string
+  admin_support_active_header_line?: string
+  admin_support_last_handled_label?: string
 }
 
 export function format_admin_room_unread_label(count: number): string {

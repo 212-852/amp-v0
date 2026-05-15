@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import PawIcon from '@/components/icons/paw'
+import { use_admin_reception_support_presence } from '@/components/admin/reception/admin_support_presence'
 import {
   archived_message_to_timeline_message,
   chat_timeline_time_bounds,
@@ -185,6 +186,14 @@ export default function AdminChatTimeline({
       role: 'admin',
     }
   }, [room_uuid, staff_participant_uuid, staff_tier, staff_user_uuid])
+
+  use_admin_reception_support_presence({
+    room_uuid,
+    staff_participant_uuid,
+    staff_user_uuid,
+    staff_tier,
+    enabled: Boolean(staff_participant_uuid.trim()),
+  })
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {

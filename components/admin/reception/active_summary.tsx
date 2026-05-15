@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
+import { use_admin_reception_support_presence } from '@/components/admin/reception/admin_support_presence'
 import {
   format_admin_room_unread_label,
   normalize_reception_channel,
@@ -11,6 +12,8 @@ import {
   type reception_room,
 } from '@/lib/admin/reception/display'
 import {
+  merge_admin_support_staff_from_presence,
+  reception_room_refresh_admin_support_strings,
   resolve_chat_room_list_preview_text,
   typing_timestamp_is_fresh,
 } from '@/lib/chat/presence/rules'
@@ -32,6 +35,7 @@ type AdminReceptionActiveSummaryProps = {
   }
   staff_user_uuid: string | null
   staff_tier: string | null
+  staff_participant_uuid: string
 }
 
 export default function AdminReceptionActiveSummary({
@@ -39,6 +43,7 @@ export default function AdminReceptionActiveSummary({
   room_uuid,
   staff_tier,
   staff_user_uuid,
+  staff_participant_uuid,
   subject,
 }: AdminReceptionActiveSummaryProps) {
   const [summary, set_summary] = useState({
@@ -53,6 +58,20 @@ export default function AdminReceptionActiveSummary({
     user_last_seen_at: room?.user_last_seen_at ?? null,
     presence_source_channel: room?.presence_source_channel ?? null,
     user_typing_at: room?.user_typing_at ?? null,
+    admin_support_staff: room?.admin_support_staff ?? [],
+    admin_support_card_line: room?.admin_support_card_line ?? '対応者なし',
+    admin_support_active_header_line:
+      room?.admin_support_active_header_line ?? '対応者なし',
+    admin_support_last_handled_label:
+      room?.admin_support_last_handled_label ?? '',
+  })
+
+  use_admin_reception_support_presence({
+    room_uuid,
+    staff_participant_uuid,
+    staff_user_uuid,
+    staff_tier,
+    enabled: Boolean(staff_participant_uuid.trim()),
   })
 
   useEffect(() => {
@@ -68,6 +87,12 @@ export default function AdminReceptionActiveSummary({
       user_last_seen_at: room?.user_last_seen_at ?? null,
       presence_source_channel: room?.presence_source_channel ?? null,
       user_typing_at: room?.user_typing_at ?? null,
+      admin_support_staff: room?.admin_support_staff ?? [],
+      admin_support_card_line: room?.admin_support_card_line ?? '対応者なし',
+      admin_support_active_header_line:
+        room?.admin_support_active_header_line ?? '対応者なし',
+      admin_support_last_handled_label:
+        room?.admin_support_last_handled_label ?? '',
     })
   }, [room])
 
@@ -78,23 +103,45 @@ export default function AdminReceptionActiveSummary({
 
     const tick = window.setInterval(() => {
       set_summary((previous) => {
-        if (!previous.user_is_typing && !previous.user_typing_at) {
-          return previous
+        const now = new Date()
+        let touched = false
+        let next = previous
+
+        if (previous.admin_support_staff.length > 0) {
+          const refreshed = reception_room_refresh_admin_support_strings({
+            staff: previous.admin_support_staff,
+            now,
+          })
+
+          if (
+            refreshed.admin_support_card_line !==
+              previous.admin_support_card_line ||
+            refreshed.admin_support_active_header_line !==
+              previous.admin_support_active_header_line ||
+            refreshed.admin_support_last_handled_label !==
+              previous.admin_support_last_handled_label
+          ) {
+            next = { ...previous, ...refreshed }
+            touched = true
+          }
         }
 
-        const now = new Date()
+        if (!next.user_is_typing && !next.user_typing_at) {
+          return touched ? next : previous
+        }
+
         const fresh = typing_timestamp_is_fresh(
-          previous.user_typing_at ?? null,
-          previous.user_is_typing,
+          next.user_typing_at ?? null,
+          next.user_is_typing ?? null,
           now,
         )
 
-        if (fresh === (previous.user_is_typing ?? false)) {
-          return previous
+        if (fresh === (next.user_is_typing ?? false)) {
+          return touched ? next : previous
         }
 
         return {
-          ...previous,
+          ...next,
           user_is_typing: fresh,
         }
       })
@@ -199,55 +246,91 @@ export default function AdminReceptionActiveSummary({
       on_presence: (presence) => {
         const role = presence.role?.trim().toLowerCase() ?? ''
 
-        if (role !== 'user' && role !== 'driver') {
+        if (role === 'user' || role === 'driver') {
+          const is_typing = typing_timestamp_is_fresh(
+            presence.typing_at,
+            presence.is_typing,
+            new Date(),
+          )
+
+          set_summary((previous) => ({
+            ...previous,
+            user_participant_uuid: presence.participant_uuid,
+            user_is_typing: is_typing,
+            user_is_online: presence.is_active,
+            user_last_seen_at: presence.last_seen_at,
+            presence_source_channel: normalize_reception_channel(
+              presence.source_channel,
+            ),
+            user_typing_at: presence.typing_at,
+            last_incoming_channel:
+              normalize_reception_channel(presence.source_channel) ??
+              previous.last_incoming_channel,
+          }))
+
+          send_chat_realtime_debug({
+            event: 'admin_presence_state_updated',
+            room_uuid: presence.room_uuid,
+            participant_uuid: presence.participant_uuid,
+            role: presence.role,
+            source_channel: presence.source_channel ?? 'web',
+            is_active: presence.is_active,
+            is_typing,
+            last_seen_at: presence.last_seen_at,
+            typing_at: presence.typing_at,
+            ignored_reason: null,
+            phase: 'admin_active_room_summary_presence',
+          })
+
+          send_chat_realtime_debug({
+            event: 'admin_room_typing_state_updated',
+            room_uuid: presence.room_uuid,
+            active_room_uuid: room_uuid,
+            participant_uuid: presence.participant_uuid,
+            user_uuid: presence.user_uuid,
+            source_channel: presence.source_channel ?? 'web',
+            is_typing,
+            ignored_reason: null,
+            phase: 'admin_active_room_summary_presence',
+          })
+
           return
         }
 
-        const is_typing = typing_timestamp_is_fresh(
-          presence.typing_at,
-          presence.is_typing,
-          new Date(),
-        )
+        if (role !== 'admin' && role !== 'concierge') {
+          return
+        }
 
-        set_summary((previous) => ({
-          ...previous,
-          user_participant_uuid: presence.participant_uuid,
-          user_is_typing: is_typing,
-          user_is_online: presence.is_active,
-          user_last_seen_at: presence.last_seen_at,
-          presence_source_channel: normalize_reception_channel(
-            presence.source_channel,
-          ),
-          user_typing_at: presence.typing_at,
-          last_incoming_channel:
-            normalize_reception_channel(presence.source_channel) ??
-            previous.last_incoming_channel,
-        }))
+        set_summary((previous) => {
+          const staff = merge_admin_support_staff_from_presence({
+            staff: previous.admin_support_staff,
+            presence,
+          })
+          const built = reception_room_refresh_admin_support_strings({
+            staff,
+            now: new Date(),
+          })
 
-        send_chat_realtime_debug({
-          event: 'admin_presence_state_updated',
-          room_uuid: presence.room_uuid,
-          participant_uuid: presence.participant_uuid,
-          role: presence.role,
-          source_channel: presence.source_channel ?? 'web',
-          is_active: presence.is_active,
-          is_typing,
-          last_seen_at: presence.last_seen_at,
-          typing_at: presence.typing_at,
-          ignored_reason: null,
-          phase: 'admin_active_room_summary_presence',
-        })
+          send_chat_realtime_debug({
+            event: 'admin_support_status_updated',
+            room_uuid: presence.room_uuid,
+            active_room_uuid: room_uuid,
+            participant_uuid: presence.participant_uuid,
+            user_uuid: presence.user_uuid,
+            role: presence.role,
+            source_channel: presence.source_channel ?? 'admin',
+            is_active: presence.is_active,
+            is_typing: presence.is_typing,
+            last_seen_at: presence.last_seen_at,
+            typing_at: presence.typing_at,
+            ignored_reason: null,
+            phase: 'admin_active_room_summary_support_presence',
+          })
 
-        send_chat_realtime_debug({
-          event: 'admin_room_typing_state_updated',
-          room_uuid: presence.room_uuid,
-          active_room_uuid: room_uuid,
-          participant_uuid: presence.participant_uuid,
-          user_uuid: presence.user_uuid,
-          source_channel: presence.source_channel ?? 'web',
-          is_typing,
-          ignored_reason: null,
-          phase: 'admin_active_room_summary_presence',
+          return {
+            ...previous,
+            ...built,
+          }
         })
       },
     })
@@ -342,7 +425,7 @@ export default function AdminReceptionActiveSummary({
         </span>
         <span>
           {reception_presence_label({
-            is_typing: false,
+            is_typing: summary.user_is_typing,
             is_online: summary.user_is_online,
             last_seen_at: summary.user_last_seen_at,
           })}
@@ -351,6 +434,14 @@ export default function AdminReceptionActiveSummary({
           <span className="rounded-full bg-red-600 px-2 py-0.5 text-white">
             {format_admin_room_unread_label(summary.unread_count)}
           </span>
+        ) : null}
+      </div>
+      <div className="mt-1.5 text-[11px] font-medium leading-snug text-neutral-700">
+        <div className="truncate">{summary.admin_support_active_header_line}</div>
+        {summary.admin_support_last_handled_label ? (
+          <div className="mt-0.5 truncate text-neutral-500">
+            {summary.admin_support_last_handled_label}
+          </div>
         ) : null}
       </div>
       {summary.preview ? (

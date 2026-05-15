@@ -14,6 +14,8 @@ import {
   type reception_room,
 } from '@/lib/admin/reception/display'
 import {
+  merge_admin_support_staff_from_presence,
+  reception_room_refresh_admin_support_strings,
   resolve_chat_room_list_preview_text,
   typing_timestamp_is_fresh,
 } from '@/lib/chat/presence/rules'
@@ -54,7 +56,7 @@ function format_time(iso: string | null): string {
 
 function presence_meta_line_for_room(room: reception_room) {
   return reception_presence_label({
-    is_typing: false,
+    is_typing: room.user_is_typing ?? false,
     is_online: room.user_is_online,
     last_seen_at: room.user_last_seen_at,
   })
@@ -127,24 +129,53 @@ export default function AdminReceptionRoomListLive({
         const now = new Date()
         let changed = false
         const next = previous.map((row) => {
-          if (!row.user_is_typing && !row.user_typing_at) {
-            return row
+          let out = row
+          let touched = false
+
+          if (row.admin_support_staff?.length) {
+            const refreshed = reception_room_refresh_admin_support_strings({
+              staff: row.admin_support_staff,
+              now,
+            })
+
+            if (
+              refreshed.admin_support_card_line !== row.admin_support_card_line ||
+              refreshed.admin_support_active_header_line !==
+                row.admin_support_active_header_line ||
+              refreshed.admin_support_last_handled_label !==
+                row.admin_support_last_handled_label
+            ) {
+              out = { ...row, ...refreshed }
+              touched = true
+            }
+          }
+
+          if (!out.user_is_typing && !out.user_typing_at) {
+            if (touched) {
+              changed = true
+            }
+
+            return out
           }
 
           const fresh = typing_timestamp_is_fresh(
-            row.user_typing_at ?? null,
-            row.user_is_typing ?? null,
+            out.user_typing_at ?? null,
+            out.user_is_typing ?? null,
             now,
           )
 
-          if (fresh === (row.user_is_typing ?? false)) {
-            return row
+          if (fresh === (out.user_is_typing ?? false)) {
+            if (touched) {
+              changed = true
+            }
+
+            return out
           }
 
           changed = true
 
           return {
-            ...row,
+            ...out,
             user_is_typing: fresh,
           }
         })
@@ -365,57 +396,104 @@ export default function AdminReceptionRoomListLive({
         on_presence: (presence) => {
           const role = presence.role?.trim().toLowerCase() ?? ''
 
-          if (role !== 'user' && role !== 'driver') {
+          if (role === 'user' || role === 'driver') {
+            const patch = user_presence_patch(presence)
+
+            set_rooms((previous) => {
+              let matched = false
+              const next = previous.map((row) => {
+                if (row.room_uuid !== presence.room_uuid) {
+                  return row
+                }
+
+                matched = true
+
+                return {
+                  ...row,
+                  ...patch,
+                  last_incoming_channel:
+                    normalize_reception_channel(presence.source_channel) ??
+                    row.last_incoming_channel,
+                }
+              })
+
+              send_chat_realtime_debug({
+                event: 'admin_presence_state_updated',
+                room_uuid: presence.room_uuid,
+                participant_uuid: presence.participant_uuid,
+                role: presence.role,
+                source_channel: presence.source_channel ?? 'web',
+                is_active: presence.is_active,
+                is_typing: patch.user_is_typing,
+                last_seen_at: presence.last_seen_at,
+                typing_at: presence.typing_at,
+                ignored_reason: matched ? null : 'room_not_in_current_list',
+                phase: 'admin_room_list_presence',
+              })
+
+              if (matched) {
+                send_chat_realtime_debug({
+                  event: 'admin_room_typing_state_updated',
+                  room_uuid: presence.room_uuid,
+                  active_room_uuid: null,
+                  participant_uuid: presence.participant_uuid,
+                  user_uuid: presence.user_uuid,
+                  source_channel: presence.source_channel ?? 'web',
+                  is_typing: patch.user_is_typing,
+                  ignored_reason: null,
+                  phase: 'admin_room_list_presence',
+                })
+              }
+
+              return matched ? next : previous
+            })
+
             return
           }
 
-          const patch = user_presence_patch(presence)
+          if (role !== 'admin' && role !== 'concierge') {
+            return
+          }
 
           set_rooms((previous) => {
             let matched = false
+            const now = new Date()
             const next = previous.map((row) => {
               if (row.room_uuid !== presence.room_uuid) {
                 return row
               }
 
               matched = true
+              const staff = merge_admin_support_staff_from_presence({
+                staff: row.admin_support_staff,
+                presence,
+              })
+              const built = reception_room_refresh_admin_support_strings({
+                staff,
+                now,
+              })
 
-              return {
-                ...row,
-                ...patch,
-                last_incoming_channel:
-                  normalize_reception_channel(presence.source_channel) ??
-                  row.last_incoming_channel,
-              }
-            })
-
-            send_chat_realtime_debug({
-              event: 'admin_presence_state_updated',
-              room_uuid: presence.room_uuid,
-              participant_uuid: presence.participant_uuid,
-              role: presence.role,
-              source_channel: presence.source_channel ?? 'web',
-              is_active: presence.is_active,
-              is_typing: patch.user_is_typing,
-              last_seen_at: presence.last_seen_at,
-              typing_at: presence.typing_at,
-              ignored_reason: matched ? null : 'room_not_in_current_list',
-              phase: 'admin_room_list_presence',
-            })
-
-            if (matched) {
               send_chat_realtime_debug({
-                event: 'admin_room_typing_state_updated',
+                event: 'admin_support_status_updated',
                 room_uuid: presence.room_uuid,
                 active_room_uuid: null,
                 participant_uuid: presence.participant_uuid,
                 user_uuid: presence.user_uuid,
-                source_channel: presence.source_channel ?? 'web',
-                is_typing: patch.user_is_typing,
+                role: presence.role,
+                source_channel: presence.source_channel ?? 'admin',
+                is_active: presence.is_active,
+                is_typing: presence.is_typing,
+                last_seen_at: presence.last_seen_at,
+                typing_at: presence.typing_at,
                 ignored_reason: null,
-                phase: 'admin_room_list_presence',
+                phase: 'admin_room_list_support_presence',
               })
-            }
+
+              return {
+                ...row,
+                ...built,
+              }
+            })
 
             return matched ? next : previous
           })
@@ -736,6 +814,9 @@ export default function AdminReceptionRoomListLive({
                 </span>
                 <span className="text-neutral-500">
                   {presence_meta_line_for_room(room)}
+                </span>
+                <span className="max-w-full truncate text-neutral-600">
+                  {room.admin_support_card_line ?? '対応者なし'}
                 </span>
               </div>
             </div>

@@ -347,6 +347,31 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const admin_support_presence_lifecycle = new Set([
+    'admin_support_presence_started',
+    'admin_support_presence_heartbeat',
+    'admin_support_presence_left',
+    'admin_support_presence_idle',
+    'admin_support_joined',
+    'admin_support_typing',
+    'admin_support_left',
+    'admin_support_idle',
+    'admin_support_recovered',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    admin_support_presence_lifecycle.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.admin_support_presence_debug_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
   if (
     input.category === 'admin_chat' &&
     input.event === 'support_started_notify_failed'
@@ -620,6 +645,10 @@ export function resolve_debug_rule(input: {
     'admin_presence_payload_accepted',
     'admin_presence_payload_ignored',
     'admin_room_typing_state_updated',
+    'admin_support_presence_realtime_received',
+    'admin_support_status_updated',
+    'admin_support_recovered',
+    'admin_support_presence_idle',
   ])
 
   const chat_realtime_server_failed = new Set([

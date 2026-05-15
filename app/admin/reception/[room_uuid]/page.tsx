@@ -170,6 +170,7 @@ export default async function AdminReceptionRoomPage({
               subject={subject}
               staff_user_uuid={access.user_uuid}
               staff_tier={access.tier}
+              staff_participant_uuid={staff_participant_uuid}
             />
             <AdminHandoffMemo
               room_uuid={room_uuid}

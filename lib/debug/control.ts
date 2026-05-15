@@ -7,6 +7,8 @@ export const debug_control = {
   admin_chat_room_list_debug_enabled: false,
   /** Emits gated support_started lifecycle traces to Discord (debug webhook). */
   support_started_debug_enabled: false,
+  /** Emits admin_support_* presence traces to Discord (debug webhook). */
+  admin_support_presence_debug_enabled: false,
   /**
    * User/web message send pipeline (paired chat_message + user_message events).
    * Temporary diagnostics for insert/archive failures.
