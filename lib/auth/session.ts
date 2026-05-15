@@ -468,12 +468,12 @@ export async function restore_visitor_user_link(
   if (!resolved_user || !restore_source) {
     await debug_event({
       category: 'pwa',
-      event: 'pwa_user_restore_failed',
+      event: 'pwa_user_restore_skipped_for_guest',
       payload: {
         visitor_uuid: trimmed,
         user_uuid: null,
         phase: 'restore_visitor_user_link',
-        reason: 'restore_sources_exhausted',
+        reason: 'no_user_link_for_visitor',
         restore_source: null,
       },
     })

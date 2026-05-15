@@ -349,11 +349,17 @@ export function resolve_debug_rule(input: {
   }
 
   const admin_support_presence_lifecycle = new Set([
+    'admin_presence_entered',
+    'admin_presence_heartbeat',
+    'admin_auto_leave_detected',
+    'admin_auto_leave_skipped',
+    'support_left_duplicate_skipped',
     'admin_support_presence_started',
     'admin_support_presence_heartbeat',
     'admin_support_presence_left',
     'admin_support_presence_idle',
     'admin_support_joined',
+    'admin_presence_joined',
     'admin_support_typing',
     'admin_support_left',
     'admin_support_idle',
@@ -452,6 +458,8 @@ export function resolve_debug_rule(input: {
     'pwa_beforeinstallprompt_missing',
     'pwa_session_restore_started',
     'pwa_session_restore_succeeded',
+    'pwa_guest_session_resolved',
+    'pwa_user_restore_skipped_for_guest',
     'pwa_boot_loading_started',
     'pwa_boot_loading_finished',
     'pwa_user_restore_started',

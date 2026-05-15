@@ -1,7 +1,7 @@
 export const typing_timeout_ms = 5_000
 
 /** Admin staff "in room" recency for support UI (participants.last_seen_at). */
-export const admin_support_active_within_ms = 30_000
+export const admin_support_active_within_ms = 45_000
 export const admin_support_idle_within_ms = 120_000
 
 export type participant_surface_channel = 'web' | 'pwa' | 'liff' | 'line' | 'admin'

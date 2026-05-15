@@ -423,11 +423,31 @@ export async function mark_admin_support_join(input: {
     participant_uuid: input.participant_uuid,
     last_channel: 'admin',
   })
+  const room_pick = await supabase
+    .from('rooms')
+    .select('mode')
+    .eq('room_uuid', input.room_uuid)
+    .maybeSingle()
+
+  const support_mode =
+    typeof room_pick.data?.mode === 'string' ? room_pick.data.mode : null
+
   const snap = await load_participant_admin_support_event_payload(input)
 
   if (!snap) {
     return
   }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_presence_entered',
+    payload: {
+      ...snap,
+      admin_user_uuid: snap.user_uuid,
+      last_seen_at: snap.last_seen_at,
+      support_mode,
+    },
+  })
 
   await debug_event({
     category: 'admin_chat',
@@ -465,7 +485,7 @@ export async function mark_admin_support_heartbeat(input: {
       ...snap,
       admin_user_uuid: snap.user_uuid,
       visibility_state: 'visible',
-      timeout_seconds: 10,
+      timeout_seconds: 45,
     },
   })
 

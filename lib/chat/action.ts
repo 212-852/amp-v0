@@ -2522,6 +2522,16 @@ export async function handle_admin_reception_room_opened(
 
   if (admin_participant_uuid) {
     if (admin_already_active) {
+      const room_mode_row = await supabase
+        .from('rooms')
+        .select('mode')
+        .eq('room_uuid', room_uuid)
+        .maybeSingle()
+      const support_mode_dup =
+        typeof room_mode_row.data?.mode === 'string'
+          ? room_mode_row.data.mode
+          : null
+
       await debug_event({
         category: 'admin_chat',
         event: 'support_started_duplicate_skipped',
@@ -2529,7 +2539,7 @@ export async function handle_admin_reception_room_opened(
           room_uuid,
           admin_user_uuid: admin_uuid,
           admin_participant_uuid,
-          support_mode: null,
+          support_mode: support_mode_dup,
           reason: 'same_admin_same_room_already_active',
         },
       })
@@ -2832,18 +2842,24 @@ export async function record_admin_support_left_session(input: {
   leave_reason?: string | null
   previous_active_room_uuid?: string | null
   next_active_room_uuid?: string | null
+  support_session_key?: string | null
 }) {
   const room_uuid = clean_uuid(input.room_uuid)
   const staff_participant_uuid = clean_uuid(input.staff_participant_uuid)
+  const support_session_key =
+    typeof input.support_session_key === 'string' &&
+    input.support_session_key.trim()
+      ? input.support_session_key.trim()
+      : null
 
   if (!room_uuid || !staff_participant_uuid) {
     return
   }
 
-  const [staff_pick, user_pick, bot_pick] = await Promise.all([
+  const [staff_pick, user_pick, bot_pick, room_pick] = await Promise.all([
     supabase
       .from('participants')
-      .select('participant_uuid, user_uuid')
+      .select('participant_uuid, user_uuid, last_seen_at')
       .eq('room_uuid', room_uuid)
       .eq('participant_uuid', staff_participant_uuid)
       .maybeSingle(),
@@ -2862,7 +2878,17 @@ export async function record_admin_support_left_session(input: {
       .eq('role', 'bot')
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from('rooms')
+      .select('action_id, mode')
+      .eq('room_uuid', room_uuid)
+      .maybeSingle(),
   ])
+
+  const raw_staff_seen =
+    (staff_pick.data as { last_seen_at?: unknown } | null)?.last_seen_at
+  const staff_last_seen_at =
+    typeof raw_staff_seen === 'string' ? raw_staff_seen : null
 
   const admin_uuid = clean_uuid(
     (staff_pick.data as { user_uuid?: string } | null)?.user_uuid ?? null,
@@ -2876,7 +2902,123 @@ export async function record_admin_support_left_session(input: {
       null,
   )
 
+  const support_mode =
+    typeof room_pick.data?.mode === 'string' ? room_pick.data.mode : null
+
+  const skip_payload_base = {
+    room_uuid,
+    admin_user_uuid: admin_uuid,
+    admin_participant_uuid: staff_participant_uuid,
+    leave_reason: input.leave_reason ?? 'unknown',
+    previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
+    next_active_room_uuid: input.next_active_room_uuid ?? null,
+    support_mode,
+    last_seen_at: staff_last_seen_at,
+    support_session_key,
+  }
+
   if (!admin_uuid || !user_participant_uuid) {
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_auto_leave_skipped',
+      payload: {
+        ...skip_payload_base,
+        skipped_reason: 'missing_admin_or_customer_participant',
+      },
+    })
+
+    return
+  }
+
+  async function session_support_left_duplicate_exists(): Promise<boolean> {
+    if (!support_session_key) {
+      return false
+    }
+
+    const table = public_actions_table_name()
+    const q = await supabase
+      .from(table)
+      .select('meta_json')
+      .eq('room_uuid', room_uuid)
+      .eq('action_type', 'support_left')
+      .eq('actor_participant_uuid', staff_participant_uuid)
+      .order('created_at', { ascending: false })
+      .limit(40)
+
+    if (q.error || !(q.data ?? []).length) {
+      return false
+    }
+
+    for (const row of q.data as { meta_json?: unknown }[]) {
+      const meta = row.meta_json
+
+      if (
+        meta &&
+        typeof meta === 'object' &&
+        !Array.isArray(meta) &&
+        (meta as Record<string, unknown>).support_session_key ===
+          support_session_key
+      ) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  if (await session_support_left_duplicate_exists()) {
+    await debug_event({
+      category: 'admin_chat',
+      event: 'support_left_duplicate_skipped',
+      payload: {
+        ...skip_payload_base,
+        skipped_reason: 'support_session_key_already_left',
+      },
+    })
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_auto_leave_skipped',
+      payload: {
+        ...skip_payload_base,
+        skipped_reason: 'duplicate_support_left_same_session',
+      },
+    })
+
+    return
+  }
+
+  const recent_cutoff_ms = support_session_key ? 15_000 : 45_000
+  const recent_cutoff = new Date(Date.now() - recent_cutoff_ms).toISOString()
+  const recent = await supabase
+    .from(public_actions_table_name())
+    .select('action_uuid, created_at')
+    .eq('room_uuid', room_uuid)
+    .eq('action_type', 'support_left')
+    .eq('actor_participant_uuid', staff_participant_uuid)
+    .gte('created_at', recent_cutoff)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (!recent.error && (recent.data ?? []).length > 0) {
+    await debug_event({
+      category: 'admin_chat',
+      event: 'support_left_duplicate_skipped',
+      payload: {
+        ...skip_payload_base,
+        skipped_reason: 'recent_support_left_exists',
+      },
+    })
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_auto_leave_skipped',
+      payload: {
+        ...skip_payload_base,
+        skipped_reason: 'recent_support_left_exists',
+      },
+    })
+
     return
   }
 
@@ -2906,18 +3048,10 @@ export async function record_admin_support_left_session(input: {
     }
   }
 
-  const room_pick = await supabase
-    .from('rooms')
-    .select('action_id, mode')
-    .eq('room_uuid', room_uuid)
-    .maybeSingle()
-
   const discord_thread_action_id = normalize_discord_thread_action_id(
     room_pick.data?.action_id ?? null,
   )
   const subject = await resolve_room_subject(room_uuid)
-  const support_mode =
-    typeof room_pick.data?.mode === 'string' ? room_pick.data.mode : null
 
   await debug_event({
     category: 'admin_chat',
@@ -2930,51 +3064,10 @@ export async function record_admin_support_left_session(input: {
       previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
       next_active_room_uuid: input.next_active_room_uuid ?? null,
       support_mode,
+      last_seen_at: staff_last_seen_at,
+      support_session_key,
     },
   })
-  await debug_event({
-    category: 'admin_chat',
-    event: 'admin_auto_leave_reason',
-    payload: {
-      room_uuid,
-      admin_user_uuid: admin_uuid,
-      admin_participant_uuid: staff_participant_uuid,
-      leave_reason: input.leave_reason ?? 'unknown',
-      previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
-      next_active_room_uuid: input.next_active_room_uuid ?? null,
-      support_mode,
-    },
-  })
-
-  const recent_cutoff = new Date(Date.now() - 30_000).toISOString()
-  const recent = await supabase
-    .from('chat_actions')
-    .select('action_uuid, created_at')
-    .eq('room_uuid', room_uuid)
-    .eq('action_type', 'support_left')
-    .eq('actor_participant_uuid', staff_participant_uuid)
-    .gte('created_at', recent_cutoff)
-    .order('created_at', { ascending: false })
-    .limit(1)
-
-  if (!recent.error && (recent.data ?? []).length > 0) {
-    await debug_event({
-      category: 'admin_chat',
-      event: 'support_left_action_create_skipped',
-      payload: {
-        room_uuid,
-        admin_user_uuid: admin_uuid,
-        admin_participant_uuid: staff_participant_uuid,
-        leave_reason: input.leave_reason ?? 'unknown',
-        previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
-        next_active_room_uuid: input.next_active_room_uuid ?? null,
-        support_mode,
-        skipped_reason: 'recent_support_left_exists',
-      },
-    })
-
-    return
-  }
 
   await debug_event({
     category: 'admin_chat',
@@ -2988,6 +3081,8 @@ export async function record_admin_support_left_session(input: {
       previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
       next_active_room_uuid: input.next_active_room_uuid ?? null,
       support_mode,
+      last_seen_at: staff_last_seen_at,
+      support_session_key,
     },
   })
 
@@ -3004,6 +3099,7 @@ export async function record_admin_support_left_session(input: {
     customer_display_name: subject.display_name,
     admin_internal_name: null,
     admin_display_label: display_name,
+    support_session_key,
   })
 
   if (!inserted.ok) {
@@ -3045,6 +3141,9 @@ export async function record_admin_support_left_session(input: {
       leave_reason: input.leave_reason ?? 'unknown',
       previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
       next_active_room_uuid: input.next_active_room_uuid ?? null,
+      support_mode,
+      last_seen_at: staff_last_seen_at,
+      support_session_key,
     },
   })
 

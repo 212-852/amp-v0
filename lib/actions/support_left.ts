@@ -17,6 +17,8 @@ export type insert_support_left_action_input = {
   customer_display_name: string
   admin_internal_name: string | null
   admin_display_label: string
+  /** Dedupe key for one support_left per admin viewing session (client-enter timestamp). */
+  support_session_key?: string | null
 }
 
 export type insert_support_left_action_ok = {
@@ -72,6 +74,9 @@ function build_chat_actions_row(input: insert_support_left_action_input) {
         admin_display_label: input.admin_display_label,
         ...optional_context_fields(input),
         source: 'admin_support_leave',
+        ...(input.support_session_key?.trim()
+          ? { support_session_key: input.support_session_key.trim() }
+          : {}),
       },
       ...optional_context_fields(input),
     },

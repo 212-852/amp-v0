@@ -98,6 +98,23 @@ function normalize_client_session_shape(
   }
 }
 
+function is_valid_guest_browser_session(input: {
+  visitor_uuid: string | null
+  identity_user_uuid: string | null
+  role: string
+  tier: string
+}): boolean {
+  if (!input.visitor_uuid || !input.visitor_uuid.trim()) {
+    return false
+  }
+
+  if (input.identity_user_uuid) {
+    return false
+  }
+
+  return input.role === 'guest' && input.tier === 'guest'
+}
+
 function get_client_ip(header_store: Headers) {
   const forwarded = header_store.get('x-forwarded-for')
 
@@ -321,11 +338,28 @@ async function resolve_session_payload() {
     pwa_installed = await load_user_pwa_installed(identity.user_uuid)
   }
 
+  const guest_session_ok = is_valid_guest_browser_session({
+    visitor_uuid: visitor.visitor_uuid,
+    identity_user_uuid: identity.user_uuid,
+    role,
+    tier,
+  })
+
+  const session_restore_event = session_restored
+    ? 'pwa_session_restore_succeeded'
+    : guest_session_ok
+      ? 'pwa_guest_session_resolved'
+      : 'pwa_session_restore_failed'
+
+  const session_restore_reason = session_restored
+    ? 'user_uuid_restored'
+    : guest_session_ok
+      ? 'guest_session_valid'
+      : 'user_uuid_missing'
+
   await debug_event({
     category: 'pwa',
-    event: session_restored
-      ? 'pwa_session_restore_succeeded'
-      : 'pwa_session_restore_failed',
+    event: session_restore_event,
     payload: {
       ...debug_base,
       visitor_uuid: visitor.visitor_uuid,
@@ -335,7 +369,8 @@ async function resolve_session_payload() {
       room_uuid: chat?.room_uuid ?? null,
       participant_uuid: chat?.participant_uuid ?? null,
       session_restored,
-      reason: session_restored ? 'user_uuid_restored' : 'user_uuid_missing',
+      reason: session_restore_reason,
+      guest_session: guest_session_ok,
     },
   })
 

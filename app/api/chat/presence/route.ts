@@ -24,6 +24,13 @@ type presence_request_body = {
   leave_reason?: unknown
   previous_active_room_uuid?: unknown
   next_active_room_uuid?: unknown
+  support_session_key?: unknown
+}
+
+function support_session_key_or_null(body: presence_request_body): string | null {
+  const raw = body.support_session_key
+
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
 }
 
 export async function POST(request: Request) {
@@ -132,6 +139,7 @@ export async function POST(request: Request) {
           typeof body.next_active_room_uuid === 'string'
             ? body.next_active_room_uuid
             : null,
+        support_session_key: support_session_key_or_null(body),
       })
     } else if (body?.action === 'admin_support_page_unload') {
       await mark_admin_support_leave({
@@ -154,6 +162,7 @@ export async function POST(request: Request) {
           typeof body.next_active_room_uuid === 'string'
             ? body.next_active_room_uuid
             : null,
+        support_session_key: support_session_key_or_null(body),
       })
     } else if (body?.action === 'admin_support_idle') {
       await mark_admin_support_idle_notice({ room_uuid, participant_uuid })
