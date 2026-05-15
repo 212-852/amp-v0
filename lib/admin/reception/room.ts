@@ -21,27 +21,17 @@ import {
 } from '@/lib/chat/identity/admin_list_customer_name'
 import { supabase } from '@/lib/db/supabase'
 
-type room_row = {
-  room_uuid: string
-  room_type: string | null
-  status: string | null
-  mode: string | null
-  action_id: string | null
-  created_at: string | null
-  updated_at: string | null
-}
+import {
+  normalize_reception_channel,
+  reception_channel_label,
+  type reception_room,
+} from '@/lib/admin/reception/display'
 
-export type reception_room = {
-  room_uuid: string
-  display_name: string
-  role: string | null
-  tier: string | null
-  avatar_url: string | null
-  title: string
-  preview: string
-  updated_at: string | null
-  mode: string | null
-}
+export {
+  normalize_reception_channel,
+  reception_channel_label,
+  type reception_room,
+} from '@/lib/admin/reception/display'
 
 export type reception_room_mode = 'concierge' | 'bot'
 
@@ -64,6 +54,18 @@ type memo_row = {
   handoff_memo: string | null
   handoff_memo_updated_at: string | null
   handoff_memo_updated_by: string | null
+}
+
+type room_row = {
+  room_uuid: string
+  room_type: string | null
+  status: string | null
+  mode: string | null
+  action_id: string | null
+  last_incoming_channel: string | null
+  last_incoming_at: string | null
+  created_at: string | null
+  updated_at: string | null
 }
 
 type participant_row = {
@@ -113,7 +115,7 @@ export type reception_room_memo = {
 }
 
 const room_select =
-  'room_uuid, room_type, status, mode, action_id, created_at, updated_at'
+  'room_uuid, room_type, status, mode, action_id, last_incoming_channel, last_incoming_at, created_at, updated_at'
 
 function error_field(error: unknown, key: string): string | null {
   if (!error || typeof error !== 'object') {
@@ -214,6 +216,46 @@ function normalize_room(
     preview: enrichment?.preview ?? '対応が必要です',
     updated_at: row.updated_at,
     mode,
+    last_incoming_channel: normalize_reception_channel(row.last_incoming_channel),
+  }
+}
+
+export type reception_channel_stats = {
+  messages_by_channel: Record<string, number>
+  rooms_by_last_incoming_channel: Record<string, number>
+}
+
+export async function load_reception_channel_stats(): Promise<reception_channel_stats> {
+  const [messages, rooms] = await Promise.all([
+    supabase.from('messages').select('channel'),
+    supabase.from('rooms').select('last_incoming_channel'),
+  ])
+
+  if (messages.error) {
+    throw messages.error
+  }
+
+  if (rooms.error) {
+    throw rooms.error
+  }
+
+  const messages_by_channel: Record<string, number> = {}
+  const rooms_by_last_incoming_channel: Record<string, number> = {}
+
+  for (const row of (messages.data ?? []) as Array<{ channel?: unknown }>) {
+    const key = normalize_reception_channel(row.channel) ?? 'unknown'
+    messages_by_channel[key] = (messages_by_channel[key] ?? 0) + 1
+  }
+
+  for (const row of (rooms.data ?? []) as Array<{ last_incoming_channel?: unknown }>) {
+    const key = normalize_reception_channel(row.last_incoming_channel) ?? 'unknown'
+    rooms_by_last_incoming_channel[key] =
+      (rooms_by_last_incoming_channel[key] ?? 0) + 1
+  }
+
+  return {
+    messages_by_channel,
+    rooms_by_last_incoming_channel,
   }
 }
 

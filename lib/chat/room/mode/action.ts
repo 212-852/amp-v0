@@ -24,6 +24,7 @@ import {
 import type { chat_locale } from '../../message'
 import {
   load_room_row,
+  normalize_chat_channel,
   parse_room_mode,
   type chat_channel,
   type chat_room,
@@ -602,6 +603,7 @@ export async function room_mode_resume_bot_for_room(input: {
     user_uuid: handles.user_uuid,
     visitor_uuid: handles.visitor_uuid,
     channel: input.channel,
+    last_incoming_channel: normalize_chat_channel(row.last_incoming_channel),
     mode: parse_room_mode(row.mode),
   }
 

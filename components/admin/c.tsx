@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import PawIcon from '@/components/icons/paw'
-import type { reception_room_message } from '@/lib/admin/reception/room'
 import {
   archived_message_to_timeline_message,
   compare_chat_room_timeline_messages,
+  type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
 import {
@@ -28,7 +28,7 @@ import {
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 type AdminChatTimelineProps = {
-  messages: reception_room_message[]
+  messages: chat_room_timeline_message[]
   load_failed: boolean
   room_uuid: string
   staff_participant_uuid: string
@@ -39,10 +39,10 @@ type AdminChatTimelineProps = {
 }
 
 function merge_timeline_rows(
-  previous: reception_room_message[],
-  addition: reception_room_message[],
+  previous: chat_room_timeline_message[],
+  addition: chat_room_timeline_message[],
 ): {
-  rows: reception_room_message[]
+  rows: chat_room_timeline_message[]
   prev_message_count: number
   next_message_count: number
   dedupe_hit: boolean
@@ -71,7 +71,7 @@ function merge_timeline_rows(
   }
 }
 
-function is_outgoing_message(message: reception_room_message): boolean {
+function is_outgoing_message(message: chat_room_timeline_message): boolean {
   if (message.direction === 'system') {
     return false
   }
@@ -120,7 +120,7 @@ function archived_payload_to_reception_message(row: {
   sequence: number
   created_at: string
   bundle: message_bundle_payload
-}): reception_room_message {
+}): chat_room_timeline_message {
   return archived_message_to_timeline_message({
     archive_uuid: row.archive_uuid,
     room_uuid: row.room_uuid,
@@ -325,10 +325,36 @@ export default function AdminChatTimeline({
           bundle: archived.bundle,
         })
 
+        if (mapped.room_uuid !== locked_room) {
+          send_chat_realtime_debug({
+            event: 'admin_realtime_payload_ignored',
+            room_uuid: locked_room,
+            active_room_uuid: locked_room,
+            participant_uuid: admin_rt_ctx_ref.current.staff_participant_uuid,
+            user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+            role: 'admin',
+            tier: admin_rt_ctx_ref.current.staff_tier,
+            source_channel: 'admin',
+            channel_name: chat_room_realtime_channel_name(locked_room),
+            message_uuid: mapped.message_uuid,
+            payload_room_uuid: mapped.room_uuid,
+            ignored_reason: 'active_room_uuid_mismatch',
+            prev_message_count: null,
+            next_message_count: null,
+            phase: 'admin_chat_message_append',
+          })
+
+          return
+        }
+
         const row_rt_debug = {
           message_channel: archived.insert_row_channel ?? null,
           message_source_channel: archived.body_source_channel ?? null,
           message_direction:
+            archived.body_direction ?? mapped.direction ?? null,
+          payload_channel: archived.insert_row_channel ?? null,
+          payload_source_channel: archived.body_source_channel ?? null,
+          payload_direction:
             archived.body_direction ?? mapped.direction ?? null,
           sender_participant_uuid: archived.sender_participant_uuid ?? null,
         }

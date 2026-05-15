@@ -61,6 +61,11 @@ export function resolve_debug_rule(input: {
     'user_message_send_failed',
     'chat_message_send_finished',
     'user_message_send_finished',
+    'output_reply_channel_resolved',
+    'room_last_incoming_channel_updated',
+    'admin_reply_delivery_started',
+    'admin_reply_delivery_succeeded',
+    'admin_reply_delivery_failed',
   ])
 
   if (
@@ -163,6 +168,11 @@ export function resolve_debug_rule(input: {
     'chat_message_send_blocked',
     'chat_message_send_failed',
     'chat_message_send_succeeded',
+    'output_reply_channel_resolved',
+    'room_last_incoming_channel_updated',
+    'admin_reply_delivery_started',
+    'admin_reply_delivery_succeeded',
+    'admin_reply_delivery_failed',
   ])
 
   const concierge_list_debug_events = new Set([
@@ -482,6 +492,7 @@ export function resolve_debug_rule(input: {
     'notify_line_last_channel_resolved',
     'notify_line_open_url_resolved',
     'notify_line_payload_built',
+    'admin_notify_target_resolved',
     'notification_line_sent',
     'sw_push_received',
     'sw_notification_shown',
@@ -532,7 +543,8 @@ export function resolve_debug_rule(input: {
   ) {
     const is_failed =
       input.event === 'chat_message_send_blocked' ||
-      input.event === 'chat_message_send_failed'
+      input.event === 'chat_message_send_failed' ||
+      input.event === 'admin_reply_delivery_failed'
 
     return {
       category: 'chat_message',

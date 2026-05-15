@@ -1,10 +1,13 @@
 import Link from 'next/link'
-import { MessageCircle, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 
-import AdminReceptionToastListener from '@/components/admin/reception/toast'
+import AdminReceptionRoomListLive from '@/components/admin/reception/room_list_live'
 import {
+  load_reception_channel_stats,
   list_reception_rooms,
+  reception_channel_label,
   type reception_room,
+  type reception_channel_stats,
   type reception_room_mode,
 } from '@/lib/admin/reception/room'
 
@@ -64,18 +67,35 @@ async function load_rooms(
   }
 }
 
+async function load_stats(): Promise<reception_channel_stats | null> {
+  try {
+    return await load_reception_channel_stats()
+  } catch (error) {
+    console.error('[admin_reception_page] load_channel_stats_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+
+    return null
+  }
+}
+
+function stat_text(stats: Record<string, number>) {
+  return ['line', 'liff', 'pwa', 'web']
+    .map((channel) => `${reception_channel_label(channel)} ${stats[channel] ?? 0}`)
+    .join(' / ')
+}
+
 export default async function AdminReceptionPage({
   searchParams,
 }: AdminReceptionPageProps) {
   const params = await searchParams
   const selected_mode = parse_mode(params?.mode)
   const result = await load_rooms(selected_mode)
+  const stats = await load_stats()
   const rooms = result.rooms
 
   return (
     <div className="flex flex-col gap-4">
-      <AdminReceptionToastListener rooms={rooms} />
-
       <header>
         <nav
           aria-label="Breadcrumb"
@@ -110,6 +130,13 @@ export default async function AdminReceptionPage({
         })}
       </div>
 
+      {stats ? (
+        <section className="rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-[11px] font-medium leading-[1.6] text-neutral-500">
+          <div>Messages: {stat_text(stats.messages_by_channel)}</div>
+          <div>Rooms: {stat_text(stats.rooms_by_last_incoming_channel)}</div>
+        </section>
+      ) : null}
+
       <section
         aria-label="Reception search"
         className="rounded-2xl border border-neutral-200 bg-white p-3 shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
@@ -141,59 +168,7 @@ export default async function AdminReceptionPage({
             : 'ボット対応中のルームはありません'}
         </div>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {rooms.map((room) => (
-            <li key={room.room_uuid}>
-              <Link
-                href={`/admin/reception/${room.room_uuid}`}
-                className="flex w-full items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-3 transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
-              >
-                <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-100 text-neutral-700"
-                  aria-hidden
-                >
-                  {room.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={room.avatar_url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : room.display_name ? (
-                    <span className="text-[12px] font-semibold">
-                      {room.display_name.slice(0, 1)}
-                    </span>
-                  ) : (
-                    <MessageCircle className="h-4 w-4" strokeWidth={2} />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[13px] font-semibold leading-tight text-black">
-                      {room.display_name}
-                    </span>
-                    <span className="shrink-0 text-[11px] font-medium leading-none text-neutral-400">
-                      {format_time(room.updated_at)}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-600">
-                    {room.preview}
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium leading-none text-neutral-500">
-                    <span className="font-mono text-neutral-400">
-                      {room.room_uuid.slice(0, 8)}
-                    </span>
-                    {room.mode ? (
-                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700">
-                        {room.mode}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <AdminReceptionRoomListLive initial_rooms={rooms} />
       )}
     </div>
   )

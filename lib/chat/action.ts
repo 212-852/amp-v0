@@ -52,6 +52,7 @@ import { load_room_concierge_json } from '@/lib/rooms/concierge_json'
 import {
   ensure_direct_room_for_visitor,
   load_room_row,
+  normalize_chat_channel,
   parse_room_mode,
   resolve_admin_reception_send_context,
   resolve_chat_room,
@@ -71,7 +72,10 @@ import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name, client_source_channel_header_name } from '@/lib/visitor/cookie'
 import { get_session_user } from '@/lib/auth/route'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
-import { mark_participant_last_channel } from '@/lib/chat/presence/action'
+import {
+  mark_participant_last_channel,
+  mark_room_entered,
+} from '@/lib/chat/presence/action'
 import { resolve_room_subject } from '@/lib/admin/reception/room'
 import {
   create_handoff_memo as create_handoff_memo_core,
@@ -528,6 +532,7 @@ export async function resolve_initial_chat(
                 user_uuid: input.user_uuid ?? null,
                 visitor_uuid: input.visitor_uuid,
                 channel: input.channel,
+                last_incoming_channel: null,
                 mode: 'bot' as const,
               },
               is_new_room: false as const,
@@ -543,6 +548,7 @@ export async function resolve_initial_chat(
               user_uuid: input.user_uuid ?? null,
               visitor_uuid: input.visitor_uuid,
               channel: resolved.channel,
+              last_incoming_channel: resolved.last_incoming_channel,
               mode: resolved.mode,
             },
             is_new_room: resolved.is_new_room,
@@ -1260,6 +1266,7 @@ export async function load_user_home_chat() {
     user_uuid: null,
     visitor_uuid: null,
     channel: 'web' as const,
+    last_incoming_channel: null,
     mode: 'bot' as const,
   }
   const fallback_result: initial_chat_result = make_initial_chat_result({
@@ -2035,6 +2042,8 @@ async function resolve_web_chat_room_for_request(input: {
     }
   }
 
+  const room_row = await load_room_row(input.room_uuid)
+
   return {
     ok: true,
     chat_room: {
@@ -2044,6 +2053,9 @@ async function resolve_web_chat_room_for_request(input: {
       user_uuid: clean_uuid(participant_result.data.user_uuid),
       visitor_uuid: input.visitor_uuid,
       channel,
+      last_incoming_channel: room_row
+        ? normalize_chat_channel(room_row.last_incoming_channel)
+        : null,
       mode: input.mode,
     },
   }
@@ -2117,6 +2129,8 @@ async function validate_web_chat_room_from_request_body(input: {
     }
   }
 
+  const room_row = await load_room_row(input.room_uuid)
+
   return {
     ok: true,
     chat_room: {
@@ -2128,6 +2142,9 @@ async function validate_web_chat_room_from_request_body(input: {
         clean_uuid(participant_result.data.visitor_uuid) ??
         clean_uuid(input.visitor_uuid),
       channel: await resolve_request_chat_channel(),
+      last_incoming_channel: room_row
+        ? normalize_chat_channel(room_row.last_incoming_channel)
+        : null,
       mode: input.mode,
     },
   }
@@ -2497,6 +2514,14 @@ export async function handle_admin_reception_room_opened(
       status: 400,
       body: { ok: false, error: 'invalid_room' },
     }
+  }
+
+  if (admin_participant_uuid) {
+    await mark_room_entered({
+      room_uuid,
+      participant_uuid: admin_participant_uuid,
+      last_channel: 'web',
+    }).catch(() => undefined)
   }
 
   const display_name = await resolve_handoff_memo_saved_by_name(
@@ -2984,22 +3009,23 @@ export async function handle_chat_message_request(
       },
     })
 
-    if (resolved.data.user_uuid) {
-      after(() =>
-        notify({
-          event: 'new_chat',
-          user_uuid: resolved.data.user_uuid ?? '',
-          room_uuid: resolved.data.room_uuid,
-          participant_uuid: resolved.data.user_participant_uuid,
-          message_uuid: archived_messages[0]?.archive_uuid ?? null,
-          message: text_value,
-          sender_internal_name: sender_display_name,
-          sender_user_uuid: clean_uuid(session.user_uuid),
-          sender_role: session.role ?? null,
-          source_channel: 'web',
-        }),
-      )
-    }
+    const reply_channel = resolved.data.last_incoming_channel ?? 'web'
+
+    await output_chat_bundles({
+      room: {
+        room_uuid: resolved.data.room_uuid,
+        participant_uuid: resolved.data.user_participant_uuid,
+        bot_participant_uuid: resolved.data.bot_participant_uuid,
+        user_uuid: resolved.data.user_uuid,
+        visitor_uuid: null,
+        channel: reply_channel,
+        last_incoming_channel: reply_channel,
+        mode: 'concierge',
+      },
+      channel: reply_channel,
+      messages: archived_messages,
+      sender_role: resolved.data.staff_sender_role,
+    })
 
     return {
       status: 200,
@@ -3461,6 +3487,21 @@ export async function handle_chat_message_request(
       phase: 'archive_message_bundles_ok',
     },
   })
+
+  if (web_mode_for_bot === 'concierge') {
+    after(() =>
+      notify({
+        event: 'admin_notification',
+        admin_event: 'new_user_message',
+        room_uuid: chat_room.room_uuid,
+        message_uuid: archived_messages[0]?.archive_uuid ?? null,
+        title: 'New user message',
+        message: text_value,
+        actor_user_uuid: clean_uuid(session.user_uuid),
+        source_channel: chat_room.channel,
+      }),
+    )
+  }
 
   try {
     await mark_participant_last_channel({

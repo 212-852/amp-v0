@@ -14,6 +14,8 @@ visitor_uuid,
 status,
 source_channel,
 action_id,
+last_incoming_channel,
+last_incoming_at,
 created_at,
 updated_at
 `

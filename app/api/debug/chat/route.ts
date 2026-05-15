@@ -53,6 +53,9 @@ type chat_debug_body = {
   message_channel?: unknown
   message_source_channel?: unknown
   message_direction?: unknown
+  payload_channel?: unknown
+  payload_source_channel?: unknown
+  payload_direction?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -139,6 +142,9 @@ export async function POST(request: Request) {
       message_channel: string_or_null(body?.message_channel),
       message_source_channel: string_or_null(body?.message_source_channel),
       message_direction: string_or_null(body?.message_direction),
+      payload_channel: string_or_null(body?.payload_channel),
+      payload_source_channel: string_or_null(body?.payload_source_channel),
+      payload_direction: string_or_null(body?.payload_direction),
     },
   })
 

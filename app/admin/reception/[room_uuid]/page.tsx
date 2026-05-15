@@ -6,6 +6,7 @@ import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import {
   list_reception_room_messages,
   read_reception_room,
+  reception_channel_label,
   resolve_room_subject,
   type reception_room,
   type reception_room_message,
@@ -174,6 +175,9 @@ export default async function AdminReceptionRoomPage({
                 ) : null}
                 <span aria-hidden>{'/'}</span>
                 <span className="font-mono">{room_uuid.slice(0, 8)}</span>
+                <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-white">
+                  {reception_channel_label(room?.last_incoming_channel)}
+                </span>
               </div>
             </div>
             <AdminHandoffMemo

@@ -6,7 +6,10 @@ import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import { emit_message_send_diagnostic_pair } from '@/lib/debug/message_send_diagnostic'
 import { mark_participant_last_channel } from '@/lib/chat/presence/action'
-import type { chat_channel } from './room'
+import {
+  update_room_last_incoming_channel,
+  type chat_channel,
+} from './room'
 import type { bundle_sender, message_bundle } from './message'
 
 /** DB table used for chat archive rows (must match Realtime `postgres_changes` table). */
@@ -389,9 +392,15 @@ export async function archive_incoming_line_text(
         participant_uuid: sanitized_participant_uuid,
         last_channel: 'line',
       })
+      await update_room_last_incoming_channel({
+        room_uuid: sanitized_room_uuid,
+        channel: 'line',
+        message_uuid: row.message_uuid,
+        sender_role: 'user',
+      })
     } catch (persist_error) {
       console.error(
-        '[archive_incoming_line_text] last_channel_update_failed',
+        '[archive_incoming_line_text] incoming_channel_update_failed',
         debug_incoming_line_archive_payload(input, row.message_uuid),
         persist_error,
       )
@@ -624,6 +633,8 @@ export async function archive_message_bundles(
         actor_type,
         sender_role: bundle.sender,
         direction: archive_direction_for_sender(bundle.sender),
+        source_channel: input.channel,
+        channel: input.channel,
         locale: bundle.locale,
         content_key: bundle.content_key,
         sequence: next_sequence + index,
@@ -725,6 +736,27 @@ export async function archive_message_bundles(
       inserted_room_uuid: first_row.room_uuid,
       channel: input.channel,
     })
+  }
+
+  if (input.bundles.some((bundle) => bundle.sender === 'user')) {
+    try {
+      await update_room_last_incoming_channel({
+        room_uuid: sanitized_room_uuid,
+        channel: input.channel,
+        message_uuid: first_row?.message_uuid ?? null,
+        sender_role: 'user',
+      })
+    } catch (persist_error) {
+      console.error('[archive_message_bundles] incoming_channel_update_failed', {
+        room_uuid: sanitized_room_uuid,
+        message_uuid: first_row?.message_uuid ?? null,
+        channel: input.channel,
+        error:
+          persist_error instanceof Error
+            ? persist_error.message
+            : String(persist_error),
+      })
+    }
   }
 
   if (control.debug.chat_room) {

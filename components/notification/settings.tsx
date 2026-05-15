@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 
 import type { locale_key } from '@/lib/locale/action'
+import OverlayRoot from '@/components/overlay/root'
+import Pwa_install_modal_body from '@/components/pwa/install_modal_body'
 import { post_pwa_debug, register_push_subscription } from '@/lib/pwa/client'
 
 type notification_kind_key = 'chat' | 'reservation' | 'announcement'
@@ -220,6 +222,7 @@ export default function NotificationSettings(props: notification_settings_props)
     useState<notification_preferences>(default_preferences)
   const [is_saving, set_is_saving] = useState(false)
   const [message, set_message] = useState<string | null>(null)
+  const [install_guide_open, set_install_guide_open] = useState(false)
 
   const debug_payload = useCallback(
     (
@@ -431,6 +434,7 @@ export default function NotificationSettings(props: notification_settings_props)
 
     if (!standalone) {
       set_message(content.standalone_required[props.locale])
+      set_install_guide_open(true)
       return
     }
 
@@ -521,21 +525,22 @@ export default function NotificationSettings(props: notification_settings_props)
     ].join(' ')
 
   return (
-    <div className="relative w-[92%] max-w-[430px] overflow-hidden rounded-[24px] bg-[#fdfaf8] px-6 py-6 shadow-[0_12px_40px_rgba(42,29,24,0.12)]">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="text-[21px] font-semibold leading-[1.35] text-[#2a1d18]">
-          {content.title[props.locale]}
-        </h2>
+    <>
+      <div className="relative w-[92%] max-w-[430px] overflow-hidden rounded-[24px] bg-[#fdfaf8] px-6 py-6 shadow-[0_12px_40px_rgba(42,29,24,0.12)]">
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-[21px] font-semibold leading-[1.35] text-[#2a1d18]">
+            {content.title[props.locale]}
+          </h2>
 
-        <button
-          type="button"
-          onClick={props.on_close}
-          aria-label="close"
-          className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.94]"
-        >
-          <X className="h-[24px] w-[24px] stroke-[2.1] text-[#2a1d18]" />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={props.on_close}
+            aria-label="close"
+            className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.94]"
+          >
+            <X className="h-[24px] w-[24px] stroke-[2.1] text-[#2a1d18]" />
+          </button>
+        </div>
 
       <div className="mt-5 flex rounded-[10px] bg-[#f2e7df] p-1">
         <button
@@ -621,6 +626,22 @@ export default function NotificationSettings(props: notification_settings_props)
           ) : null}
         </>
       )}
-    </div>
+      </div>
+
+      <OverlayRoot
+        open={install_guide_open}
+        on_close={() => set_install_guide_open(false)}
+        variant="center"
+      >
+        <Pwa_install_modal_body
+          role={props.role}
+          tier={props.tier}
+          session_locale={props.locale}
+          client_locale_fallback={props.locale}
+          source_channel={props.source_channel ?? 'web'}
+          on_close={() => set_install_guide_open(false)}
+        />
+      </OverlayRoot>
+    </>
   )
 }

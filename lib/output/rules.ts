@@ -13,7 +13,7 @@ export function cap_line_messages_for_reply<T>(messages: T[]): T[] {
 export function resolve_output_delivery_target(
   channel: chat_channel,
 ): output_delivery_target {
-  if (channel === 'line') {
+  if (channel === 'line' || channel === 'liff') {
     return 'line'
   }
 

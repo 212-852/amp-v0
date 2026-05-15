@@ -16,6 +16,7 @@ import { next_public_liff_id } from '@/lib/config/line/env'
 import { resolve_chat_external_notification_decision } from '@/lib/notification/rules'
 import {
   load_concierge_recipients,
+  load_admin_notify_recipients,
   load_line_provider_id_for_user,
   load_participant_last_channel,
   read_requester_display_name,
@@ -64,6 +65,15 @@ type personal_delivery_outcome = {
   channel: 'push' | 'line' | 'none'
   ok: boolean
   reason?: string
+}
+
+type admin_notification_route_result = {
+  outcome: 'skipped' | 'delivered' | 'failed'
+  transport: 'toast' | 'push' | 'discord_action_webhook' | 'none'
+  deliveries: notify_delivery_result[]
+  error_code?: string | null
+  error_message?: string | null
+  http_status?: number | null
 }
 
 export async function notify(
@@ -270,6 +280,20 @@ export async function notify(
     return deliver_support_started(event)
   }
 
+  if (event.event === 'admin_notification') {
+    const result = await deliver_admin_notification({
+      admin_event: event.admin_event,
+      room_uuid: event.room_uuid ?? null,
+      message_uuid: event.message_uuid ?? null,
+      title: event.title ?? admin_notification_default_title(event.admin_event),
+      message: event.message,
+      actor_user_uuid: event.actor_user_uuid ?? null,
+      source_channel: event.source_channel,
+    })
+
+    return { deliveries: result.deliveries }
+  }
+
   const rule = resolve_notify_rule(event)
 
   const deliveries = rule.channels.map((channel) => {
@@ -323,6 +347,198 @@ async function notification_route_trace(
     debug_event,
     payload,
   })
+}
+
+function admin_notification_default_title(
+  admin_event: Extract<
+    notify_event,
+    { event: 'admin_notification' }
+  >['admin_event'],
+) {
+  if (admin_event === 'support_started') {
+    return 'Support started'
+  }
+
+  if (admin_event === 'new_user_message') {
+    return 'New user message'
+  }
+
+  if (admin_event === 'review_needed') {
+    return 'Review needed'
+  }
+
+  return 'System alert'
+}
+
+function admin_notification_discord_content(input: {
+  admin_event: string
+  title: string
+  message: string
+  room_uuid: string | null
+  message_uuid: string | null
+}) {
+  return [
+    `[${input.title.toUpperCase()}]`,
+    '',
+    input.message,
+    '',
+    `admin_event: ${input.admin_event}`,
+    `room_uuid: ${input.room_uuid ?? 'none'}`,
+    `message_uuid: ${input.message_uuid ?? 'none'}`,
+  ].join('\n')
+}
+
+async function deliver_admin_notification(input: {
+  admin_event: Extract<
+    notify_event,
+    { event: 'admin_notification' }
+  >['admin_event']
+  room_uuid: string | null
+  message_uuid: string | null
+  title: string
+  message: string
+  actor_user_uuid: string | null
+  source_channel: string
+}): Promise<admin_notification_route_result> {
+  let recipients
+
+  try {
+    recipients = await load_admin_notify_recipients({
+      room_uuid: input.room_uuid,
+      exclude_user_uuid: input.actor_user_uuid,
+    })
+  } catch (error) {
+    await notification_route_trace('admin_notify_target_resolved', {
+      admin_event: input.admin_event,
+      room_uuid: input.room_uuid,
+      message_uuid: input.message_uuid,
+      notification_route: 'skip',
+      skipped_reason: 'admin_targets_load_failed',
+      error_message: error instanceof Error ? error.message : String(error),
+      phase: 'admin_notify_target_resolved',
+    })
+
+    return {
+      outcome: 'skipped',
+      transport: 'none',
+      deliveries: [],
+      error_code: 'admin_targets_load_failed',
+      error_message: error instanceof Error ? error.message : String(error),
+    }
+  }
+
+  if (recipients.has_active_admin_page) {
+    await notification_route_trace('admin_notify_target_resolved', {
+      admin_event: input.admin_event,
+      room_uuid: input.room_uuid,
+      message_uuid: input.message_uuid,
+      notification_route: 'toast',
+      active_admin_count: recipients.active_admin_count,
+      target_count: recipients.admins.length,
+      skipped_reason: 'admin_page_open',
+      phase: 'open -> toast',
+    })
+
+    return {
+      outcome: 'skipped',
+      transport: 'toast',
+      deliveries: [],
+      error_code: 'admin_page_open',
+      error_message: 'open -> toast',
+    }
+  }
+
+  await notification_route_trace('admin_notify_target_resolved', {
+    admin_event: input.admin_event,
+    room_uuid: input.room_uuid,
+    message_uuid: input.message_uuid,
+    notification_route: 'push',
+    active_admin_count: recipients.active_admin_count,
+    target_count: recipients.admins.length,
+    skipped_reason: null,
+    phase: 'admin closed -> PWA push',
+  })
+
+  const push_results = await Promise.allSettled(
+    recipients.admins.map((recipient) =>
+      send_push_notify({
+        user_uuid: recipient.user_uuid,
+        title: input.title,
+        message: input.message,
+        room_uuid: input.room_uuid,
+        message_uuid: input.message_uuid,
+        kind: 'chat',
+        url: input.room_uuid
+          ? `/admin/reception/${encodeURIComponent(input.room_uuid)}`
+          : '/admin/reception',
+      }),
+    ),
+  )
+  const push_delivered = push_results.some(
+    (result) =>
+      result.status === 'fulfilled' &&
+      result.value.ok &&
+      result.value.available,
+  )
+
+  if (push_delivered) {
+    return {
+      outcome: 'delivered',
+      transport: 'push',
+      deliveries: [{ channel: 'push' }],
+    }
+  }
+
+  if (discord_action_webhook_configured()) {
+    await notification_route_trace('admin_notify_target_resolved', {
+      admin_event: input.admin_event,
+      room_uuid: input.room_uuid,
+      message_uuid: input.message_uuid,
+      notification_route: 'discord_action_webhook',
+      target_count: recipients.admins.length,
+      skipped_reason: 'pwa_push_unavailable',
+      phase: 'no PWA -> Discord fallback',
+    })
+
+    const webhook_result = await post_discord_action_webhook_message({
+      content: admin_notification_discord_content(input),
+    })
+
+    if (webhook_result.ok) {
+      return {
+        outcome: 'delivered',
+        transport: 'discord_action_webhook',
+        deliveries: [{ channel: 'discord' }],
+      }
+    }
+
+    return {
+      outcome: 'failed',
+      transport: 'discord_action_webhook',
+      deliveries: [],
+      http_status: webhook_result.http_status ?? null,
+      error_code: 'discord_action_webhook_non_ok',
+      error_message: webhook_result.error_text ?? 'webhook_post_failed',
+    }
+  }
+
+  await notification_route_trace('admin_notify_target_resolved', {
+    admin_event: input.admin_event,
+    room_uuid: input.room_uuid,
+    message_uuid: input.message_uuid,
+    notification_route: 'skip',
+    target_count: recipients.admins.length,
+    skipped_reason: 'no_pwa_or_discord_fallback',
+    phase: 'none -> skip',
+  })
+
+  return {
+    outcome: 'skipped',
+    transport: 'none',
+    deliveries: [],
+    error_code: 'no_pwa_or_discord_fallback',
+    error_message: 'none -> skip',
+  }
 }
 
 async function deliver_support_started(
@@ -413,254 +629,77 @@ async function deliver_support_started(
   }
 
   const content = format_support_started_notify_content(event)
+  const admin_route = await deliver_admin_notification({
+    admin_event: 'support_started',
+    room_uuid: event.room_uuid,
+    message_uuid: null,
+    title: 'Support started',
+    message: content,
+    actor_user_uuid: event.admin_user_uuid,
+    source_channel: event.source_channel,
+  })
 
-  try {
-    if (webhook_exists) {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_route_decided',
-        {
-          ...base_debug_payload,
-          notification_channel: 'discord_action_webhook',
-        },
-      )
-
-      const webhook_result = await post_discord_action_webhook_message({
-        content,
-      })
-
-      if (webhook_result.ok) {
-        await emit_support_started_admin_chat_debug(
-          'support_started_notify_succeeded',
-          {
-            ...base_debug_payload,
-            notification_channel: 'discord_action_webhook',
-          },
-        )
-
-        return support_started_notify_run([{ channel: 'discord' }], {
-          outcome: 'delivered',
-          transport: 'discord_action_webhook',
-        })
-      }
-
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_failed',
-        {
-          ...base_debug_payload,
-          notification_channel: 'discord_action_webhook',
-          error_code: 'discord_action_webhook_non_ok',
-          error_message:
-            webhook_result.error_text ??
-            (typeof webhook_result.http_status === 'number'
-              ? `http_${webhook_result.http_status}`
-              : 'webhook_post_failed'),
-          phase: 'discord_action_webhook',
-        },
-      )
-
-      return support_started_notify_run([], {
-        outcome: 'failed',
-        transport: 'discord_action_webhook',
-        http_status:
-          typeof webhook_result.http_status === 'number'
-            ? webhook_result.http_status
-            : null,
-        error_code: 'discord_action_webhook_non_ok',
-        error_message:
-          webhook_result.error_text ??
-          (typeof webhook_result.http_status === 'number'
-            ? `http_${webhook_result.http_status}`
-            : 'webhook_post_failed'),
-      })
-    }
-
-    if (normalized_thread_action_id) {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_route_decided',
-        {
-          ...base_debug_payload,
-          notification_channel: 'discord_action_thread',
-        },
-      )
-
-      const result = await sync_discord_action_context({
-        title: '[SUPPORT STARTED]',
-        content,
-        action_id: normalized_thread_action_id,
-      })
-
-      if (!result) {
-        await emit_support_started_admin_chat_debug(
-          'support_started_notify_failed',
-          {
-            ...base_debug_payload,
-            notification_channel: 'discord_action_thread',
-            error_code: 'discord_thread_sync_failed',
-            error_message:
-              'sync_discord_action_context returned null (reopen or post failed)',
-            phase: 'discord_action_thread',
-          },
-        )
-
-        return support_started_notify_run([], {
-          outcome: 'failed',
-          transport: 'discord_action_thread',
-          error_code: 'discord_thread_sync_failed',
-          error_message:
-            'sync_discord_action_context returned null (reopen or post failed)',
-        })
-      }
-
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_succeeded',
-        {
-          ...base_debug_payload,
-          notification_channel: 'discord_action_thread',
-        },
-      )
-
-      return support_started_notify_run(
-        [
-          {
-            channel: 'discord',
-            action_id: result.action_id ?? normalized_thread_action_id,
-          },
-        ],
-        {
-          outcome: 'delivered',
-          transport: 'discord_action_thread',
-        },
-      )
-    }
-
-    if (raw_discord_id) {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_discord_id_missing',
-        {
-          ...base_debug_payload,
-          discord_id_exists: false,
-          discord_id: mask_discord_action_id_for_log(raw_discord_id),
-          notification_channel: 'none',
-          error_code: 'discord_thread_action_id_unusable',
-          error_message:
-            'rooms.action_id was set but could not be normalized to discord:<snowflake>',
-          phase: 'discord_thread_action_id',
-        },
-      )
-    }
-
-    const notify_wolf_configured = Boolean(
-      process.env.DISCORD_NOTIFY_WEBHOOK_URL?.trim(),
+  if (admin_route.outcome === 'delivered') {
+    await emit_support_started_admin_chat_debug(
+      'support_started_notify_succeeded',
+      {
+        ...base_debug_payload,
+        notification_channel: admin_route.transport,
+      },
     )
 
-    if (notify_wolf_configured) {
-      await emit_support_started_admin_chat_debug(
-        'support_started_notify_route_decided',
-        {
-          ...base_debug_payload,
-          notification_channel: 'notify_wolf_webhook',
-        },
-      )
+    return support_started_notify_run(admin_route.deliveries, {
+      outcome: 'delivered',
+      transport: admin_route.transport,
+    })
+  }
 
-      const sent = await send_discord_notify(event)
-
-      if (sent?.ok === true) {
-        await emit_support_started_admin_chat_debug(
-          'support_started_notify_succeeded',
-          {
-            ...base_debug_payload,
-            notification_channel: 'notify_wolf_webhook',
-          },
-        )
-
-        return support_started_notify_run([{ channel: 'discord' }], {
-          outcome: 'delivered',
-          transport: 'notify_wolf_webhook',
-        })
-      }
-
-      if (sent?.ok === false) {
-        await emit_support_started_admin_chat_debug(
-          'support_started_notify_failed',
-          {
-            ...base_debug_payload,
-            notification_channel: 'notify_wolf_webhook',
-            http_status: sent.http_status ?? null,
-            error_text: sent.error_text ?? null,
-            error_code: 'discord_webhook_non_ok',
-            error_message: 'DISCORD_NOTIFY_WEBHOOK_URL returned non-2xx',
-            phase: 'notify_wolf_webhook',
-          },
-        )
-
-        return support_started_notify_run([], {
-          outcome: 'failed',
-          transport: 'notify_wolf_webhook',
-          http_status: sent.http_status ?? null,
-          error_code: 'discord_webhook_non_ok',
-          error_message: 'DISCORD_NOTIFY_WEBHOOK_URL returned non-2xx',
-        })
-      } else {
-        await emit_support_started_admin_chat_debug(
-          'support_started_notify_failed',
-          {
-            ...base_debug_payload,
-            notification_channel: 'notify_wolf_webhook',
-            error_code: 'discord_webhook_skipped_or_empty',
-            error_message:
-              'send_discord_notify returned null (missing URL, empty content, or transport skip)',
-            phase: 'notify_wolf_webhook',
-          },
-        )
-
-        return support_started_notify_run([], {
-          outcome: 'failed',
-          transport: 'notify_wolf_webhook',
-          error_code: 'discord_webhook_skipped_or_empty',
-          error_message:
-            'send_discord_notify returned null (missing URL, empty content, or transport skip)',
-        })
-      }
-    }
-
+  if (admin_route.transport === 'toast' || admin_route.transport === 'none') {
     await emit_support_started_admin_chat_debug(
       'support_started_notify_skipped',
       {
         ...base_debug_payload,
-        notification_channel: 'none',
-        error_code: 'no_discord_transport',
-        error_message:
-          'missing DISCORD_ACTION_WEBHOOK_URL, thread action id, and DISCORD_NOTIFY_WEBHOOK_URL',
-        phase: 'deliver_support_started',
+        notification_channel: admin_route.transport,
+        error_code: admin_route.error_code ?? null,
+        error_message: admin_route.error_message ?? null,
       },
     )
 
     return support_started_notify_run([], {
       outcome: 'skipped',
-      transport: 'none',
-      error_code: 'no_discord_transport',
-      error_message:
-        'missing DISCORD_ACTION_WEBHOOK_URL, thread action id, and DISCORD_NOTIFY_WEBHOOK_URL',
+      transport: admin_route.transport,
+      error_code: admin_route.error_code ?? null,
+      error_message: admin_route.error_message ?? null,
     })
-  } catch (error) {
+  }
+
+  if (admin_route.outcome === 'failed') {
     await emit_support_started_admin_chat_debug(
       'support_started_notify_failed',
       {
         ...base_debug_payload,
-        error_code: 'support_started_notify_exception',
-        error_message:
-          error instanceof Error ? error.message : String(error),
-        phase: 'deliver_support_started',
+        notification_channel: admin_route.transport,
+        http_status: admin_route.http_status ?? null,
+        error_code: admin_route.error_code ?? null,
+        error_message: admin_route.error_message ?? null,
       },
     )
+
     return support_started_notify_run([], {
       outcome: 'failed',
-      transport: null,
-      error_code: 'support_started_notify_exception',
-      error_message:
-        error instanceof Error ? error.message : String(error),
+      transport: admin_route.transport,
+      http_status: admin_route.http_status ?? null,
+      error_code: admin_route.error_code ?? null,
+      error_message: admin_route.error_message ?? null,
     })
   }
+
+  return support_started_notify_run([], {
+    outcome: 'skipped',
+    transport: 'none',
+    error_code: 'admin_notification_route_unresolved',
+    error_message: 'admin notification route ended without delivery',
+  })
 }
 
 export async function sync_room_action_context(input: {

@@ -123,6 +123,21 @@ function extract_admin_realtime_insert_fields(raw: Record<string, unknown>) {
   }
 }
 
+function admin_realtime_message_field_payload(input: {
+  message_channel: string | null
+  message_source_channel: string | null
+  message_direction: string | null
+}) {
+  return {
+    message_channel: input.message_channel,
+    message_source_channel: input.message_source_channel,
+    message_direction: input.message_direction,
+    payload_channel: input.message_channel,
+    payload_source_channel: input.message_source_channel,
+    payload_direction: input.message_direction,
+  }
+}
+
 type chat_realtime_debug_payload = {
   event: string
   room_uuid: string | null
@@ -174,6 +189,12 @@ type chat_realtime_debug_payload = {
   message_channel?: string | null
   message_source_channel?: string | null
   message_direction?: string | null
+  /** `messages.channel` (e.g. line); distinct from listener `source_channel`. */
+  payload_channel?: string | null
+  /** Body `source_channel` (e.g. line). */
+  payload_source_channel?: string | null
+  /** Body `direction` (e.g. incoming). */
+  payload_direction?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -332,9 +353,9 @@ export function subscribe_chat_room_realtime(input: {
             payload_room_uuid: admin_insert.payload_room_uuid,
             message_uuid: admin_insert.message_uuid,
             payload_message_uuid: admin_insert.message_uuid,
-            message_channel: admin_insert.message_channel,
-            message_source_channel: admin_insert.message_source_channel,
-            message_direction: admin_insert.message_direction,
+            ...admin_realtime_message_field_payload(admin_insert),
+            prev_message_count: null,
+            next_message_count: null,
             phase: 'postgres_changes_insert_admin',
           })
         }
@@ -380,10 +401,11 @@ export function subscribe_chat_room_realtime(input: {
               payload_room_uuid,
               message_uuid,
               payload_message_uuid: message_uuid,
-              message_channel: admin_insert.message_channel,
-              message_source_channel: admin_insert.message_source_channel,
-              message_direction: admin_insert.message_direction,
+              ...admin_realtime_message_field_payload(admin_insert),
+              sender_participant_uuid: null,
               ignored_reason: 'payload_room_uuid_mismatch',
+              prev_message_count: null,
+              next_message_count: null,
               phase: 'postgres_changes_insert_admin',
             })
           }
@@ -418,10 +440,11 @@ export function subscribe_chat_room_realtime(input: {
               payload_room_uuid,
               message_uuid,
               payload_message_uuid: message_uuid,
-              message_channel: admin_insert.message_channel,
-              message_source_channel: admin_insert.message_source_channel,
-              message_direction: admin_insert.message_direction,
+              ...admin_realtime_message_field_payload(admin_insert),
+              sender_participant_uuid: null,
               ignored_reason: 'unparseable_message_row',
+              prev_message_count: null,
+              next_message_count: null,
               phase: 'postgres_changes_insert_admin',
             })
           }
@@ -466,10 +489,11 @@ export function subscribe_chat_room_realtime(input: {
             payload_room_uuid,
             message_uuid: message.archive_uuid,
             payload_message_uuid: message.archive_uuid,
-            message_channel: admin_insert.message_channel,
-            message_source_channel: admin_insert.message_source_channel,
-            message_direction: admin_insert.message_direction,
+            ...admin_realtime_message_field_payload(admin_insert),
             sender_participant_uuid: message.sender_participant_uuid ?? null,
+            ignored_reason: null,
+            prev_message_count: null,
+            next_message_count: null,
             phase: 'postgres_changes_insert_admin',
           })
         }

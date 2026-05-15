@@ -1,7 +1,10 @@
 import Link from 'next/link'
 import { ArrowRight, MessageCircle } from 'lucide-react'
 
-import type { reception_room } from '@/lib/admin/reception/room'
+import {
+  reception_channel_label,
+  type reception_room,
+} from '@/lib/admin/reception/room'
 
 type AdminReceptionProps = {
   rooms: reception_room[]
@@ -93,6 +96,11 @@ export default function AdminReception({ rooms, state }: AdminReceptionProps) {
                 <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-600">
                   {room.preview}
                 </p>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium leading-none text-neutral-500">
+                  <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-white">
+                    {reception_channel_label(room.last_incoming_channel)}
+                  </span>
+                </div>
               </div>
             </Link>
           </li>

@@ -23,6 +23,7 @@ export type chat_room = {
   user_uuid: string | null
   visitor_uuid: string | null
   channel: chat_channel
+  last_incoming_channel: chat_channel | null
   mode: room_mode
 }
 
@@ -55,6 +56,8 @@ type room_row = {
   status: string | null
   mode: string | null
   action_id: string | null
+  last_incoming_channel?: string | null
+  last_incoming_at?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -86,8 +89,17 @@ function fallback_chat_room(input: resolve_room_input): chat_room {
     user_uuid: clean_uuid(input.user_uuid),
     visitor_uuid: clean_uuid(input.visitor_uuid),
     channel: input.channel,
+    last_incoming_channel: null,
     mode: 'bot',
   }
+}
+
+export function normalize_chat_channel(value: unknown): chat_channel | null {
+  if (value === 'web' || value === 'line' || value === 'liff' || value === 'pwa') {
+    return value
+  }
+
+  return null
 }
 
 function normalize_room(
@@ -105,6 +117,7 @@ function normalize_room(
     visitor_uuid:
       clean_uuid(input.visitor_uuid) ?? clean_uuid(participant.visitor_uuid),
     channel: input.channel,
+    last_incoming_channel: normalize_chat_channel(row.last_incoming_channel),
     mode: parse_room_mode(row.mode),
   }
 }
@@ -512,6 +525,8 @@ async function insert_direct_room_row(
       room_type: 'direct',
       status: 'active',
       updated_at: now,
+      last_incoming_channel: input.channel,
+      last_incoming_at: now,
       mode: 'bot',
     })
     .select(room_select_fields)
@@ -627,6 +642,46 @@ async function touch_room_row(room_uuid: string) {
 
   if (room_result.error) {
     throw room_result.error
+  }
+}
+
+export async function update_room_last_incoming_channel(input: {
+  room_uuid: string
+  channel: chat_channel
+  message_uuid?: string | null
+  sender_role?: string | null
+}) {
+  const now = new Date().toISOString()
+  const result = await supabase
+    .from('rooms')
+    .update({
+      last_incoming_channel: input.channel,
+      last_incoming_at: now,
+      updated_at: now,
+      status: 'active',
+    })
+    .eq('room_uuid', input.room_uuid)
+
+  const payload = {
+    room_uuid: input.room_uuid,
+    message_uuid: input.message_uuid ?? null,
+    last_incoming_channel: input.channel,
+    selected_output_channel: null,
+    sender_role: input.sender_role ?? 'user',
+    receiver_user_uuid: null,
+    receiver_participant_uuid: null,
+    error_code: result.error ? result.error.code : null,
+    error_message: result.error ? result.error.message : null,
+  }
+
+  await debug_event({
+    category: 'chat_message',
+    event: 'room_last_incoming_channel_updated',
+    payload,
+  })
+
+  if (result.error) {
+    throw result.error
   }
 }
 
@@ -970,6 +1025,8 @@ async function touch_direct_participant_and_room(
     .update({
       status: 'active',
       updated_at: now,
+      last_incoming_channel: input.channel,
+      last_incoming_at: now,
     })
     .eq('room_uuid', room.room_uuid)
 
@@ -1537,6 +1594,7 @@ export type admin_reception_send_resolve_ok = {
   bot_participant_uuid: string
   staff_participant_uuid: string
   staff_sender_role: 'admin' | 'concierge'
+  last_incoming_channel: chat_channel | null
 }
 
 async function ensure_staff_participant(input: {
@@ -1632,7 +1690,7 @@ export async function resolve_admin_reception_send_context(input: {
 
   const room_result = await supabase
     .from('rooms')
-    .select('room_uuid, mode')
+    .select('room_uuid, mode, last_incoming_channel')
     .eq('room_uuid', room_uuid)
     .maybeSingle()
 
@@ -1652,7 +1710,7 @@ export async function resolve_admin_reception_send_context(input: {
   const [user_result, bot_result, staff_result] = await Promise.all([
     supabase
       .from('participants')
-      .select('participant_uuid, user_uuid')
+      .select('participant_uuid, user_uuid, last_channel')
       .eq('room_uuid', room_uuid)
       .eq('role', 'user')
       .order('created_at', { ascending: true })
@@ -1695,6 +1753,9 @@ export async function resolve_admin_reception_send_context(input: {
     (user_result.data as { user_uuid?: string | null } | null)?.user_uuid ??
       null,
   )
+  const user_last_channel = normalize_chat_channel(
+    (user_result.data as { last_channel?: unknown } | null)?.last_channel,
+  )
   const bot_participant_uuid = clean_uuid(
     (bot_result.data as { participant_uuid?: string } | null)
       ?.participant_uuid ?? null,
@@ -1729,6 +1790,10 @@ export async function resolve_admin_reception_send_context(input: {
       bot_participant_uuid,
       staff_participant_uuid: ensured_staff_participant_uuid,
       staff_sender_role,
+      last_incoming_channel: normalize_chat_channel(
+        (room_result.data as { last_incoming_channel?: unknown })
+          .last_incoming_channel,
+      ) ?? user_last_channel,
     },
   }
 }
@@ -1749,6 +1814,7 @@ export type resolve_user_room_ok = {
   room_uuid: string
   participant_uuid: string
   bot_participant_uuid: string
+  last_incoming_channel: chat_channel | null
   mode: room_mode
   channel: chat_channel
   is_new_room: boolean
@@ -1841,6 +1907,7 @@ async function complete_resolve_user_room_success(input: {
     room_uuid: room.room_uuid,
     participant_uuid,
     bot_participant_uuid: bot_participant.participant_uuid,
+    last_incoming_channel: normalize_chat_channel(room.last_incoming_channel),
     mode: parse_room_mode(room.mode),
     channel,
     is_new_room,

@@ -26,6 +26,7 @@ export default async function AdminLayout({
             image_url={access.image_url}
             role={access.role}
             tier={access.tier}
+            user_uuid={access.user_uuid}
           />
         </div>
       </div>

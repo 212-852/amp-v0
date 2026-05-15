@@ -211,6 +211,44 @@ async function post_line_reply_messages(input: {
   return response.status
 }
 
+async function post_line_push_messages(input: {
+  line_user_id: string
+  messages: line_api_message[]
+}) {
+  const access_token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN
+
+  if (!access_token) {
+    const err = new Error(
+      'missing LINE_MESSAGING_CHANNEL_ACCESS_TOKEN',
+    ) as line_reply_error
+    throw err
+  }
+
+  const response = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${access_token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      to: input.line_user_id,
+      messages: input.messages,
+    }),
+  })
+
+  if (!response.ok) {
+    const body_text = await response.text()
+    const err = new Error(
+      `line push failed: ${response.status}`,
+    ) as line_reply_error
+    err.line_status = response.status
+    err.line_body = truncate(body_text, 2000)
+    throw err
+  }
+
+  return response.status
+}
+
 export async function deliver_line_text_reply(input: {
   reply_token: string | null | undefined
   text: string
@@ -234,10 +272,7 @@ export async function deliver_line_chat_bundles(
   input: deliver_line_chat_bundles_input,
 ) {
   const reply_token = input.line_reply_token
-
-  if (!reply_token?.trim()) {
-    return
-  }
+  const line_user_id = input.line_user_id?.trim() ?? ''
 
   if (input.messages.length === 0) {
     return
@@ -273,19 +308,34 @@ export async function deliver_line_chat_bundles(
   const line_message_count = line_messages.length
 
   try {
-    await post_line_reply_messages({
-      reply_token,
-      messages: line_messages,
-    })
-  } catch (reply_error) {
-    const err = reply_error as line_reply_error
+    if (reply_token?.trim()) {
+      await post_line_reply_messages({
+        reply_token,
+        messages: line_messages,
+      })
+      return
+    }
 
-    console.error('[line_reply_failed]', line_trace_base, {
-      error: serialize_error(reply_error),
+    if (line_user_id) {
+      await post_line_push_messages({
+        line_user_id,
+        messages: line_messages,
+      })
+      return
+    }
+
+    throw new Error('line_delivery_target_missing')
+  } catch (line_error) {
+    const err = line_error as line_reply_error
+
+    console.error('[line_delivery_failed]', line_trace_base, {
+      error: serialize_error(line_error),
       error_status: err.line_status,
       error_body: err.line_body,
       bundle_count,
       line_message_count,
     })
+
+    throw line_error
   }
 }

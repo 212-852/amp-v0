@@ -14,6 +14,7 @@ export type push_notify_input = {
   user_uuid: string
   message: string
   title?: string
+  url?: string
   room_uuid?: string | null
   participant_uuid?: string | null
   message_uuid?: string | null
@@ -331,9 +332,11 @@ function build_push_payload(
     typeof resolved_title === 'string' && resolved_title.trim()
       ? resolved_title.trim()
       : '\u65B0\u3057\u3044\u30E1\u30C3\u30BB\u30FC\u30B8'
-  const url = room_uuid
-    ? `/user?room_uuid=${encodeURIComponent(room_uuid)}`
-    : '/user'
+  const url = input.url
+    ? input.url
+    : room_uuid
+      ? `/user?room_uuid=${encodeURIComponent(room_uuid)}`
+      : '/user'
 
   return {
     title,

@@ -7,6 +7,8 @@ room_type,
 status,
 mode,
 action_id,
+last_incoming_channel,
+last_incoming_at,
 created_at,
 updated_at
 `

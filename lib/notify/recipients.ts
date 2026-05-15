@@ -19,6 +19,12 @@ export type concierge_recipients = {
   owner_core: notify_recipient[]
 }
 
+export type admin_notify_recipients = {
+  admins: notify_recipient[]
+  active_admin_count: number
+  has_active_admin_page: boolean
+}
+
 type user_row = {
   user_uuid: string | null
   display_name: string | null
@@ -195,6 +201,87 @@ export async function load_concierge_recipients(): Promise<concierge_recipients>
     open_admin_count: open_admin_users.length,
     has_open_admin: open_admin_users.length > 0,
     owner_core: owner_core_users.map(to_recipient),
+  }
+}
+
+export async function load_admin_notify_recipients(input: {
+  room_uuid: string | null
+  exclude_user_uuid?: string | null
+}): Promise<admin_notify_recipients> {
+  const exclude_user_uuid = clean_uuid(input.exclude_user_uuid ?? null)
+  const users_result = await supabase
+    .from('users')
+    .select('user_uuid, display_name, role')
+    .in('role', ['admin', 'owner', 'core'])
+
+  if (users_result.error) {
+    throw users_result.error
+  }
+
+  const admins = ((users_result.data ?? []) as user_row[])
+    .filter(
+      (row): row is user_row & { user_uuid: string } =>
+        typeof row.user_uuid === 'string' &&
+        row.user_uuid.length > 0 &&
+        row.user_uuid !== exclude_user_uuid,
+    )
+    .map((row) => ({
+      user_uuid: row.user_uuid,
+      display_name: row.display_name,
+      line_user_id: null,
+    }))
+
+  const room_uuid = clean_uuid(input.room_uuid)
+
+  if (!room_uuid) {
+    return {
+      admins,
+      active_admin_count: 0,
+      has_active_admin_page: false,
+    }
+  }
+
+  const presence_result = await supabase
+    .from('participants')
+    .select('participant_uuid, user_uuid, is_active, last_seen_at')
+    .eq('room_uuid', room_uuid)
+    .in('role', ['admin', 'concierge'])
+    .eq('is_active', true)
+
+  if (presence_result.error) {
+    return {
+      admins,
+      active_admin_count: 0,
+      has_active_admin_page: false,
+    }
+  }
+
+  const now = Date.now()
+  const active_admin_count = (presence_result.data ?? []).filter((row) => {
+    const user_uuid =
+      typeof row.user_uuid === 'string' && row.user_uuid.length > 0
+        ? row.user_uuid
+        : null
+
+    if (exclude_user_uuid && user_uuid === exclude_user_uuid) {
+      return false
+    }
+
+    const raw = row.last_seen_at
+
+    if (typeof raw !== 'string' || raw.length === 0) {
+      return true
+    }
+
+    const last_seen = new Date(raw).getTime()
+
+    return !Number.isNaN(last_seen) && now - last_seen < 5 * 60 * 1000
+  }).length
+
+  return {
+    admins,
+    active_admin_count,
+    has_active_admin_page: active_admin_count > 0,
   }
 }
 

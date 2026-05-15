@@ -12,14 +12,17 @@ export type push_subscription_row = {
   is_pwa?: boolean | null
 }
 
-/**
- * rules: member / vip user only; guest / admin / driver cannot save for now.
- */
 export function can_save_push_subscription(session: push_session_slice): boolean {
-  return (
+  const user_allowed =
     session.role === 'user' &&
     (session.tier === 'member' || session.tier === 'vip')
-  )
+  const admin_allowed =
+    session.role === 'admin' &&
+    (session.tier === 'admin' ||
+      session.tier === 'owner' ||
+      session.tier === 'core')
+
+  return user_allowed || admin_allowed
 }
 
 /**

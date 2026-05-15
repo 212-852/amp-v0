@@ -33,6 +33,7 @@ function empty_user_home_chat(): initial_chat_result {
     visitor_uuid: '',
     channel: 'web' as const,
     mode: 'bot' as const,
+    last_incoming_channel: null,
   }
 
   return {

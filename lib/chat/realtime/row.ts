@@ -66,14 +66,36 @@ export function archived_message_from_message_row(
     return null
   }
 
-  const bundle = parsed.bundle
+  const flat = parsed as Record<string, unknown>
+  let bundle = parsed.bundle
 
   if (!bundle) {
-    return null
+    const text_raw = typeof flat.text === 'string' ? flat.text.trim() : ''
+
+    if (!text_raw) {
+      return null
+    }
+
+    const sr =
+      typeof flat.sender_role === 'string' ? flat.sender_role : null
+    const at =
+      typeof flat.actor_type === 'string' ? flat.actor_type : null
+    const sender: 'user' | 'bot' =
+      sr === 'bot' || at === 'bot' ? 'bot' : 'user'
+
+    bundle = {
+      bundle_uuid: row.message_uuid,
+      bundle_type: 'text',
+      sender,
+      version: 1,
+      locale: 'ja',
+      payload: {
+        text: text_raw,
+      },
+    } as message_bundle
   }
 
   const sequence = typeof parsed.sequence === 'number' ? parsed.sequence : 0
-  const flat = parsed as Record<string, unknown>
   const body_source_channel =
     typeof flat.source_channel === 'string' ? flat.source_channel : null
   const body_direction =

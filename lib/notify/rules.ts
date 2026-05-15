@@ -85,6 +85,20 @@ export type notify_event =
       source_channel: string
       started_at: string
     }
+  | {
+      event: 'admin_notification'
+      admin_event:
+        | 'support_started'
+        | 'new_user_message'
+        | 'review_needed'
+        | 'system_alert'
+      room_uuid?: string | null
+      message_uuid?: string | null
+      message: string
+      title?: string | null
+      actor_user_uuid?: string | null
+      source_channel: string
+    }
 
 export type notify_channel = 'discord' | 'discord_action' | 'line' | 'push'
 
@@ -96,6 +110,7 @@ export type notify_rule = {
     | 'concierge_closed'
     | 'admin_internal_name_updated'
     | 'support_started'
+    | 'admin_notification'
   priority?: 'high' | 'normal'
   targets?: notify_target[]
   channels: notify_channel[]
@@ -167,6 +182,10 @@ export function should_send_notify(event: notify_event) {
     return control.notify.support_started
   }
 
+  if (event.event === 'admin_notification') {
+    return true
+  }
+
   if (event.event === 'debug_trace') {
     return control.notify.debug_trace
   }
@@ -236,7 +255,20 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
     return {
       category: 'support_started',
       priority: 'normal',
-      channels: ['discord_action'],
+      channels: ['push', 'discord_action'],
+    }
+  }
+
+  if (event.event === 'admin_notification') {
+    return {
+      category: 'admin_notification',
+      priority:
+        event.admin_event === 'system_alert' ||
+        event.admin_event === 'review_needed'
+          ? 'high'
+          : 'normal',
+      targets: ['admin', 'owner', 'core'],
+      channels: ['push', 'discord_action'],
     }
   }
 
