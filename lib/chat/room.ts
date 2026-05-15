@@ -6,7 +6,11 @@ import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 
 import { participant_idle_status } from '@/lib/chat/participant/rules'
-import { room_select_fields } from '@/lib/chat/room/schema'
+import {
+  is_missing_room_last_incoming_columns_error,
+  room_select_fields,
+  room_select_fields_core,
+} from '@/lib/chat/room/schema'
 
 export type chat_channel =
   | 'web'
@@ -453,11 +457,31 @@ async function find_canonical_user_participant_after_insert_conflict(
 }
 
 export async function load_room_row(room_uuid: string) {
-  const result = await supabase
+  let result = await supabase
     .from('rooms')
     .select(room_select_fields)
     .eq('room_uuid', room_uuid)
     .maybeSingle()
+
+  if (
+    result.error &&
+    is_missing_room_last_incoming_columns_error(result.error)
+  ) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_support_mode_preserved',
+      payload: {
+        room_uuid,
+        phase: 'load_room_row',
+        reason: 'last_incoming_columns_absent_used_core_select',
+      },
+    })
+    result = await supabase
+      .from('rooms')
+      .select(room_select_fields_core)
+      .eq('room_uuid', room_uuid)
+      .maybeSingle()
+  }
 
   if (result.error) {
     throw result.error
@@ -519,18 +543,47 @@ async function insert_direct_room_row(
     },
   })
 
-  const room_result = await supabase
+  const insert_payload_full = {
+    room_type: 'direct',
+    status: 'active',
+    updated_at: now,
+    last_incoming_channel: input.channel,
+    last_incoming_at: now,
+    mode: 'bot',
+  }
+
+  const insert_payload_core = {
+    room_type: 'direct',
+    status: 'active',
+    updated_at: now,
+    mode: 'bot' as const,
+  }
+
+  let room_result = await supabase
     .from('rooms')
-    .insert({
-      room_type: 'direct',
-      status: 'active',
-      updated_at: now,
-      last_incoming_channel: input.channel,
-      last_incoming_at: now,
-      mode: 'bot',
-    })
+    .insert(insert_payload_full)
     .select(room_select_fields)
     .single()
+
+  if (
+    room_result.error &&
+    is_missing_room_last_incoming_columns_error(room_result.error)
+  ) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_support_mode_preserved',
+      payload: {
+        room_uuid: null,
+        phase: 'insert_direct_room_row',
+        reason: 'last_incoming_columns_absent_used_core_insert',
+      },
+    })
+    room_result = await supabase
+      .from('rooms')
+      .insert(insert_payload_core)
+      .select(room_select_fields_core)
+      .single()
+  }
 
   if (room_result.error && !is_unique_violation(room_result.error)) {
     await debug_event({
@@ -662,6 +715,22 @@ export async function update_room_last_incoming_channel(input: {
     })
     .eq('room_uuid', input.room_uuid)
 
+  const skipped_due_to_missing_columns =
+    Boolean(result.error) &&
+    is_missing_room_last_incoming_columns_error(result.error)
+
+  if (skipped_due_to_missing_columns) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_support_mode_preserved',
+      payload: {
+        room_uuid: input.room_uuid,
+        phase: 'update_room_last_incoming_channel',
+        reason: 'last_incoming_columns_absent_update_skipped',
+      },
+    })
+  }
+
   const payload = {
     room_uuid: input.room_uuid,
     message_uuid: input.message_uuid ?? null,
@@ -672,6 +741,7 @@ export async function update_room_last_incoming_channel(input: {
     receiver_participant_uuid: null,
     error_code: result.error ? result.error.code : null,
     error_message: result.error ? result.error.message : null,
+    skipped_due_to_missing_columns,
   }
 
   await debug_event({
@@ -681,6 +751,10 @@ export async function update_room_last_incoming_channel(input: {
   })
 
   if (result.error) {
+    if (skipped_due_to_missing_columns) {
+      return
+    }
+
     throw result.error
   }
 }
@@ -1030,8 +1104,32 @@ async function touch_direct_participant_and_room(
     })
     .eq('room_uuid', room.room_uuid)
 
-  if (room_result.error) {
-    throw room_result.error
+  let final_room_result = room_result
+
+  if (
+    room_result.error &&
+    is_missing_room_last_incoming_columns_error(room_result.error)
+  ) {
+    await debug_event({
+      category: 'chat_room',
+      event: 'room_support_mode_preserved',
+      payload: {
+        room_uuid: room.room_uuid,
+        phase: 'touch_direct_participant_and_room',
+        reason: 'last_incoming_columns_absent_touch_room_core_only',
+      },
+    })
+    final_room_result = await supabase
+      .from('rooms')
+      .update({
+        status: 'active',
+        updated_at: now,
+      })
+      .eq('room_uuid', room.room_uuid)
+  }
+
+  if (final_room_result.error) {
+    throw final_room_result.error
   }
 
   const refreshed_room = await load_room_row(room.room_uuid)
@@ -1690,7 +1788,7 @@ export async function resolve_admin_reception_send_context(input: {
 
   const room_result = await supabase
     .from('rooms')
-    .select('room_uuid, mode, last_incoming_channel')
+    .select('room_uuid, mode')
     .eq('room_uuid', room_uuid)
     .maybeSingle()
 
@@ -1702,8 +1800,32 @@ export async function resolve_admin_reception_send_context(input: {
     return { ok: false, error: 'room_not_found' }
   }
 
+  const last_incoming_select = await supabase
+    .from('rooms')
+    .select('last_incoming_channel')
+    .eq('room_uuid', room_uuid)
+    .maybeSingle()
+
+  let row_last_incoming: chat_channel | null = null
+
+  if (
+    last_incoming_select.error &&
+    is_missing_room_last_incoming_columns_error(last_incoming_select.error)
+  ) {
+    row_last_incoming = null
+  } else if (last_incoming_select.error) {
+    throw last_incoming_select.error
+  } else {
+    row_last_incoming = normalize_chat_channel(
+      (last_incoming_select.data as { last_incoming_channel?: unknown } | null)
+        ?.last_incoming_channel,
+    )
+  }
+
   const staff_sender_role: 'admin' | 'concierge' =
-    parse_room_mode(room_result.data.mode) === 'concierge'
+    parse_room_mode(
+      (room_result.data as { mode?: string | null }).mode,
+    ) === 'concierge'
       ? 'concierge'
       : 'admin'
 
@@ -1790,10 +1912,7 @@ export async function resolve_admin_reception_send_context(input: {
       bot_participant_uuid,
       staff_participant_uuid: ensured_staff_participant_uuid,
       staff_sender_role,
-      last_incoming_channel: normalize_chat_channel(
-        (room_result.data as { last_incoming_channel?: unknown })
-          .last_incoming_channel,
-      ) ?? user_last_channel,
+      last_incoming_channel: row_last_incoming ?? user_last_channel,
     },
   }
 }

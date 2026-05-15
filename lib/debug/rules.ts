@@ -199,6 +199,7 @@ export function resolve_debug_rule(input: {
   const admin_chat_list_lifecycle_events = new Set([
     'admin_chat_list_load_started',
     'admin_chat_list_query_succeeded',
+    'admin_room_filter_checked',
   ])
 
   if (

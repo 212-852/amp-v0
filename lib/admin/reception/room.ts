@@ -19,6 +19,11 @@ import {
   summarize_admin_chat_identity_payload_shape,
   type resolved_admin_chat_customer_source,
 } from '@/lib/chat/identity/admin_list_customer_name'
+import {
+  is_missing_room_last_incoming_columns_error,
+  room_select_fields,
+  room_select_fields_core,
+} from '@/lib/chat/room/schema'
 import { supabase } from '@/lib/db/supabase'
 
 import {
@@ -62,8 +67,8 @@ type room_row = {
   status: string | null
   mode: string | null
   action_id: string | null
-  last_incoming_channel: string | null
-  last_incoming_at: string | null
+  last_incoming_channel?: string | null
+  last_incoming_at?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -98,6 +103,7 @@ type admin_chat_list_debug_event =
   | 'admin_chat_list_query_succeeded'
   | 'admin_chat_list_filtered_empty'
   | 'admin_chat_list_normalize_failed'
+  | 'admin_room_filter_checked'
 
 export type reception_room_subject = {
   display_name: string
@@ -113,9 +119,6 @@ export type reception_room_memo = {
   handoff_memo_updated_at: string | null
   handoff_memo_updated_by: string | null
 }
-
-const room_select =
-  'room_uuid, room_type, status, mode, action_id, last_incoming_channel, last_incoming_at, created_at, updated_at'
 
 function error_field(error: unknown, key: string): string | null {
   if (!error || typeof error !== 'object') {
@@ -146,6 +149,8 @@ async function emit_admin_chat_list_debug(input: {
   filter_reason_counts?: Record<string, number>
   error?: unknown
   phase: string
+  support_mode_filter?: reception_room_mode | null
+  rooms_select_shape?: 'full' | 'core' | null
 }) {
   await debug_event({
     category: 'admin_chat',
@@ -159,6 +164,8 @@ async function emit_admin_chat_list_debug(input: {
       error_details: error_field(input.error, 'details'),
       error_hint: error_field(input.error, 'hint'),
       phase: input.phase,
+      support_mode_filter: input.support_mode_filter ?? null,
+      rooms_select_shape: input.rooms_select_shape ?? null,
     },
   })
 }
@@ -235,19 +242,27 @@ export async function load_reception_channel_stats(): Promise<reception_channel_
     throw messages.error
   }
 
-  if (rooms.error) {
-    throw rooms.error
-  }
-
   const messages_by_channel: Record<string, number> = {}
   const rooms_by_last_incoming_channel: Record<string, number> = {}
+
+  const rooms_rows =
+    rooms.error &&
+    is_missing_room_last_incoming_columns_error(rooms.error)
+      ? []
+      : (() => {
+          if (rooms.error) {
+            throw rooms.error
+          }
+
+          return (rooms.data ?? []) as Array<{ last_incoming_channel?: unknown }>
+        })()
 
   for (const row of (messages.data ?? []) as Array<{ channel?: unknown }>) {
     const key = normalize_reception_channel(row.channel) ?? 'unknown'
     messages_by_channel[key] = (messages_by_channel[key] ?? 0) + 1
   }
 
-  for (const row of (rooms.data ?? []) as Array<{ last_incoming_channel?: unknown }>) {
+  for (const row of rooms_rows) {
     const key = normalize_reception_channel(row.last_incoming_channel) ?? 'unknown'
     rooms_by_last_incoming_channel[key] =
       (rooms_by_last_incoming_channel[key] ?? 0) + 1
@@ -912,19 +927,38 @@ export async function list_reception_rooms({
     raw_room_count: null,
     filtered_room_count: null,
     phase: `rooms_query_${mode}`,
+    support_mode_filter: mode,
+    rooms_select_shape: null,
   })
 
-  const query = supabase
+  let rooms_select_shape: 'full' | 'core' = 'full'
+
+  const query_full = supabase
     .from('rooms')
-    .select(room_select)
+    .select(room_select_fields)
     .eq('mode', mode)
     .order('updated_at', { ascending: false })
     .limit(fetch_limit)
 
-  let result: Awaited<typeof query>
+  const query_core = supabase
+    .from('rooms')
+    .select(room_select_fields_core)
+    .eq('mode', mode)
+    .order('updated_at', { ascending: false })
+    .limit(fetch_limit)
+
+  let result: Awaited<typeof query_full>
 
   try {
-    result = await query
+    result = await query_full
+
+    if (
+      result.error &&
+      is_missing_room_last_incoming_columns_error(result.error)
+    ) {
+      rooms_select_shape = 'core'
+      result = await query_core
+    }
   } catch (error) {
     await emit_admin_chat_list_debug({
       event: 'admin_chat_list_query_failed',
@@ -932,6 +966,8 @@ export async function list_reception_rooms({
       filtered_room_count: null,
       error,
       phase: `rooms_query_${mode}`,
+      support_mode_filter: mode,
+      rooms_select_shape,
     })
 
     return []
@@ -944,12 +980,23 @@ export async function list_reception_rooms({
       filtered_room_count: null,
       error: result.error,
       phase: `rooms_query_${mode}`,
+      support_mode_filter: mode,
+      rooms_select_shape,
     })
 
     return []
   }
 
-  const rows = (result.data ?? []) as room_row[]
+  const rows = (result.data ?? []) as unknown as room_row[]
+
+  await emit_admin_chat_list_debug({
+    event: 'admin_room_filter_checked',
+    raw_room_count: rows.length,
+    filtered_room_count: null,
+    phase: `rooms_query_${mode}`,
+    support_mode_filter: mode,
+    rooms_select_shape,
+  })
 
   if (rows.length === 0) {
     await emit_admin_chat_list_debug({
@@ -1037,11 +1084,25 @@ export async function list_reception_rooms({
 export async function get_reception_room(
   room_uuid: string,
 ): Promise<reception_room | null> {
-  const result = await supabase
+  let rooms_select_shape: 'full' | 'core' = 'full'
+
+  let result = await supabase
     .from('rooms')
-    .select(room_select)
+    .select(room_select_fields)
     .eq('room_uuid', room_uuid)
     .maybeSingle()
+
+  if (
+    result.error &&
+    is_missing_room_last_incoming_columns_error(result.error)
+  ) {
+    rooms_select_shape = 'core'
+    result = await supabase
+      .from('rooms')
+      .select(room_select_fields_core)
+      .eq('room_uuid', room_uuid)
+      .maybeSingle()
+  }
 
   if (result.error) {
     throw result.error
@@ -1051,7 +1112,16 @@ export async function get_reception_room(
     return null
   }
 
-  const row = result.data as room_row
+  await emit_admin_chat_list_debug({
+    event: 'admin_room_filter_checked',
+    raw_room_count: 1,
+    filtered_room_count: null,
+    phase: 'get_reception_room',
+    support_mode_filter: null,
+    rooms_select_shape,
+  })
+
+  const row = result.data as unknown as room_row
   const list_mode: reception_room_mode =
     row.mode === 'bot' ? 'bot' : 'concierge'
   const enrichments = await enrich_room_cards([row], list_mode)

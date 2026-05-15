@@ -30,6 +30,7 @@ function allow_discord_debug_category(category: string, event?: string) {
     'chat_room_resolve_failed',
     'participant_linked_to_user',
     'room_uuid_restored',
+    'room_support_mode_preserved',
   ])
 
   if (
