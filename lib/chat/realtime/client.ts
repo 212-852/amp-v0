@@ -138,7 +138,7 @@ function admin_realtime_message_field_payload(input: {
   }
 }
 
-type chat_realtime_debug_payload = {
+export type chat_realtime_debug_payload = {
   event: string
   room_uuid: string | null
   active_room_uuid?: string | null
@@ -195,6 +195,12 @@ type chat_realtime_debug_payload = {
   payload_source_channel?: string | null
   /** Body `direction` (e.g. incoming). */
   payload_direction?: string | null
+  message_count_before?: number | null
+  message_count_after?: number | null
+  oldest_created_at?: string | null
+  newest_created_at?: string | null
+  realtime_message_uuid?: string | null
+  realtime_created_at?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {

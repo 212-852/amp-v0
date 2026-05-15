@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import PawIcon from '@/components/icons/paw'
 import {
   archived_message_to_timeline_message,
-  compare_chat_room_timeline_messages,
+  chat_timeline_time_bounds,
+  normalize_chat_timeline_messages,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
@@ -46,28 +47,26 @@ function merge_timeline_rows(
   prev_message_count: number
   next_message_count: number
   dedupe_hit: boolean
+  combined_len_before_normalize: number
+  oldest_created_at: string | null
+  newest_created_at: string | null
 } {
-  const seen = new Set(previous.map((row) => row.message_uuid))
-  const merged = [...previous]
-  let dedupe_hit = false
-
-  for (const row of addition) {
-    if (seen.has(row.message_uuid)) {
-      dedupe_hit = true
-      continue
-    }
-
-    seen.add(row.message_uuid)
-    merged.push(row)
-  }
-
-  const rows = merged.sort(compare_chat_room_timeline_messages)
+  const combined_len_before_normalize = previous.length + addition.length
+  const rows = normalize_chat_timeline_messages([
+    ...previous,
+    ...addition,
+  ])
+  const dedupe_hit = combined_len_before_normalize > rows.length
+  const bounds = chat_timeline_time_bounds(rows)
 
   return {
     rows,
     prev_message_count: previous.length,
     next_message_count: rows.length,
     dedupe_hit,
+    combined_len_before_normalize,
+    oldest_created_at: bounds.oldest_created_at,
+    newest_created_at: bounds.newest_created_at,
   }
 }
 
@@ -145,7 +144,7 @@ export default function AdminChatTimeline({
   const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
-    [...initial_messages].sort(compare_chat_room_timeline_messages),
+    normalize_chat_timeline_messages(initial_messages),
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
@@ -389,7 +388,87 @@ export default function AdminChatTimeline({
 
         set_rows((previous) => {
           try {
+            const dbg = admin_rt_ctx_ref.current
+            const ch = chat_room_realtime_channel_name(locked_room)
+
+            send_chat_realtime_debug({
+              event: 'realtime_message_merge_started',
+              room_uuid: locked_room,
+              active_room_uuid: locked_room,
+              participant_uuid: dbg.staff_participant_uuid,
+              user_uuid: dbg.staff_user_uuid,
+              role: 'admin',
+              tier: dbg.staff_tier,
+              source_channel: 'admin',
+              channel_name: ch,
+              phase: 'admin_chat_timeline_merge',
+              message_count_before: previous.length,
+              message_count_after: null,
+              oldest_created_at: null,
+              newest_created_at: null,
+              realtime_message_uuid: mapped.message_uuid,
+              realtime_created_at: mapped.created_at,
+            })
+
+            send_chat_realtime_debug({
+              event: 'chat_messages_normalize_started',
+              room_uuid: locked_room,
+              active_room_uuid: locked_room,
+              participant_uuid: dbg.staff_participant_uuid,
+              user_uuid: dbg.staff_user_uuid,
+              role: 'admin',
+              tier: dbg.staff_tier,
+              source_channel: 'admin',
+              channel_name: ch,
+              phase: 'admin_chat_timeline_merge',
+              message_count_before: previous.length + 1,
+              message_count_after: null,
+              oldest_created_at: null,
+              newest_created_at: null,
+              realtime_message_uuid: mapped.message_uuid,
+              realtime_created_at: mapped.created_at,
+            })
+
             const result = merge_timeline_rows(previous, [mapped])
+
+            send_chat_realtime_debug({
+              event: 'chat_messages_sorted',
+              room_uuid: locked_room,
+              active_room_uuid: locked_room,
+              participant_uuid: dbg.staff_participant_uuid,
+              user_uuid: dbg.staff_user_uuid,
+              role: 'admin',
+              tier: dbg.staff_tier,
+              source_channel: 'admin',
+              channel_name: ch,
+              phase: 'admin_chat_timeline_merge',
+              message_count_before: result.combined_len_before_normalize,
+              message_count_after: result.next_message_count,
+              oldest_created_at: result.oldest_created_at,
+              newest_created_at: result.newest_created_at,
+              realtime_message_uuid: mapped.message_uuid,
+              realtime_created_at: mapped.created_at,
+            })
+
+            send_chat_realtime_debug({
+              event: 'realtime_message_merge_succeeded',
+              room_uuid: locked_room,
+              active_room_uuid: locked_room,
+              participant_uuid: dbg.staff_participant_uuid,
+              user_uuid: dbg.staff_user_uuid,
+              role: 'admin',
+              tier: dbg.staff_tier,
+              source_channel: 'admin',
+              channel_name: ch,
+              phase: 'admin_chat_timeline_merge',
+              message_count_before: result.combined_len_before_normalize,
+              message_count_after: result.next_message_count,
+              oldest_created_at: result.oldest_created_at,
+              newest_created_at: result.newest_created_at,
+              realtime_message_uuid: mapped.message_uuid,
+              realtime_created_at: mapped.created_at,
+            })
+
             update_result = {
               prev_message_count: result.prev_message_count,
               next_message_count: result.next_message_count,

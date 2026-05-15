@@ -8,6 +8,7 @@ export type message_insert_row = {
   channel?: string | null
   body: string | Record<string, unknown> | null
   created_at: string
+  inserted_at?: string | null
 }
 
 export type realtime_archived_message = archived_message & {
@@ -107,6 +108,7 @@ export function archived_message_from_message_row(
     sequence,
     bundle,
     created_at: row.created_at,
+    inserted_at: row.inserted_at ?? null,
     sender_user_uuid:
       typeof parsed.user_uuid === 'string' ? parsed.user_uuid : null,
     sender_participant_uuid:

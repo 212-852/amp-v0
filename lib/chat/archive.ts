@@ -72,6 +72,8 @@ export type archived_message = {
   sequence: number
   bundle: message_bundle
   created_at: string
+  /** DB insert time when selected; used only for stable ordering. */
+  inserted_at?: string | null
 }
 
 type archive_row = {

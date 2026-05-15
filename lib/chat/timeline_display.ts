@@ -15,6 +15,7 @@ export type chat_room_timeline_message = {
   created_at: string | null
   sequence: number | null
   bundle_type: string | null
+  inserted_at?: string | null
 }
 
 function timeline_text_from_bundle(bundle: message_bundle): string {
@@ -84,6 +85,7 @@ export function archived_message_to_timeline_message(
       created_at: row.created_at,
       sequence: row.sequence,
       bundle_type: bundle.bundle_type,
+      inserted_at: row.inserted_at ?? null,
     }
   }
 
@@ -106,18 +108,13 @@ export function archived_message_to_timeline_message(
     created_at: row.created_at,
     sequence: row.sequence,
     bundle_type: bundle.bundle_type,
+    inserted_at: row.inserted_at ?? null,
   }
-}
-
-export function archived_messages_to_reception_timeline(
-  rows: archived_message[],
-): chat_room_timeline_message[] {
-  return rows.map(archived_message_to_timeline_message)
 }
 
 /**
  * Realtime rows often omit `sequence` in JSON (defaults to 0 in the client parser).
- * Treat 0 like unknown so we fall back to `created_at` ordering like server-indexed rows.
+ * Treat 0 like unknown so tie-break falls through to message_uuid.
  */
 export function timeline_sequence_sort_value(
   sequence: number | null | undefined,
@@ -129,27 +126,134 @@ export function timeline_sequence_sort_value(
   return sequence
 }
 
+export function archived_messages_to_reception_timeline(
+  rows: archived_message[],
+): chat_room_timeline_message[] {
+  return normalize_chat_timeline_messages(
+    rows.map(archived_message_to_timeline_message),
+  )
+}
+
+function timeline_created_at_sort_ms(iso: string | null | undefined): number {
+  if (!iso) {
+    return 0
+  }
+
+  const t = new Date(iso).getTime()
+
+  return Number.isNaN(t) ? 0 : t
+}
+
+function timeline_inserted_at_sort_ms(iso: string | null | undefined): number {
+  if (!iso) {
+    return 0
+  }
+
+  const t = new Date(iso).getTime()
+
+  return Number.isNaN(t) ? 0 : t
+}
+
+/**
+ * Global chronological order for merged fetch + realtime rows.
+ * Primary: created_at. Then inserted_at, sequence, message_uuid.
+ */
+export function compare_timeline_messages_chronological(
+  a: chat_room_timeline_message,
+  b: chat_room_timeline_message,
+): number {
+  const ca = timeline_created_at_sort_ms(a.created_at)
+  const cb = timeline_created_at_sort_ms(b.created_at)
+
+  if (ca !== cb) {
+    return ca - cb
+  }
+
+  const ia = timeline_inserted_at_sort_ms(a.inserted_at)
+  const ib = timeline_inserted_at_sort_ms(b.inserted_at)
+
+  if (ia !== ib) {
+    return ia - ib
+  }
+
+  const sa = timeline_sequence_sort_value(a.sequence)
+  const sb = timeline_sequence_sort_value(b.sequence)
+
+  if (sa !== null && sb !== null && sa !== sb) {
+    return sa - sb
+  }
+
+  if (sa !== null && sb === null) {
+    return -1
+  }
+
+  if (sb !== null && sa === null) {
+    return 1
+  }
+
+  return a.message_uuid.localeCompare(b.message_uuid)
+}
+
+export function dedupe_chat_timeline_messages_by_uuid(
+  rows: chat_room_timeline_message[],
+): chat_room_timeline_message[] {
+  const by_uuid = new Map<string, chat_room_timeline_message>()
+
+  for (const row of rows) {
+    const prev = by_uuid.get(row.message_uuid)
+
+    if (!prev) {
+      by_uuid.set(row.message_uuid, row)
+      continue
+    }
+
+    by_uuid.set(
+      row.message_uuid,
+      compare_timeline_messages_chronological(prev, row) <= 0 ? row : prev,
+    )
+  }
+
+  return Array.from(by_uuid.values())
+}
+
+export function normalize_chat_timeline_messages(
+  rows: chat_room_timeline_message[],
+): chat_room_timeline_message[] {
+  return dedupe_chat_timeline_messages_by_uuid(rows).sort(
+    compare_timeline_messages_chronological,
+  )
+}
+
+export function chat_timeline_time_bounds(rows: chat_room_timeline_message[]): {
+  oldest_created_at: string | null
+  newest_created_at: string | null
+} {
+  let oldest: string | null = null
+  let newest: string | null = null
+
+  for (const m of rows) {
+    const c = m.created_at
+
+    if (!c) {
+      continue
+    }
+
+    if (!oldest || c < oldest) {
+      oldest = c
+    }
+
+    if (!newest || c > newest) {
+      newest = c
+    }
+  }
+
+  return { oldest_created_at: oldest, newest_created_at: newest }
+}
+
+/** @deprecated Prefer compare_timeline_messages_chronological */
 export function compare_chat_room_timeline_messages(
   a: chat_room_timeline_message,
   b: chat_room_timeline_message,
 ): number {
-  const sa = timeline_sequence_sort_value(a.sequence)
-  const sb = timeline_sequence_sort_value(b.sequence)
-
-  if (sa !== null && sb !== null) {
-    return sa - sb
-  }
-
-  if (sa !== null) {
-    return -1
-  }
-
-  if (sb !== null) {
-    return 1
-  }
-
-  return (
-    new Date(a.created_at ?? 0).getTime() -
-    new Date(b.created_at ?? 0).getTime()
-  )
+  return compare_timeline_messages_chronological(a, b)
 }

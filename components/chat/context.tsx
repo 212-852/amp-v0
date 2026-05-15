@@ -14,6 +14,14 @@ import {
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import type { archived_message } from '@/lib/chat/archive'
+import {
+  archived_messages_time_bounds,
+  normalize_archived_messages,
+} from '@/lib/chat/messages_normalize'
+import {
+  chat_room_realtime_channel_name,
+  send_chat_realtime_debug,
+} from '@/lib/chat/realtime/client'
 import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
@@ -24,6 +32,8 @@ type chat_room_client_state = {
   locale: chat_locale
   mode: room_mode
 }
+
+const user_chat_merge_debug_source_channel = 'user_chat_context'
 
 type chat_context_value = chat_room_client_state & {
   messages: archived_message[]
@@ -59,55 +69,6 @@ type chat_context_value = chat_room_client_state & {
 }
 
 const UserChatContext = createContext<chat_context_value | null>(null)
-
-function message_key(message: archived_message) {
-  return message.bundle.bundle_uuid || message.archive_uuid
-}
-
-function append_unique(
-  current_messages: archived_message[],
-  next_messages: archived_message[],
-) {
-  const merged = [...current_messages]
-  const seen_archive = new Set(
-    current_messages.map((message) => message.archive_uuid),
-  )
-
-  next_messages.forEach((message) => {
-    if (seen_archive.has(message.archive_uuid)) {
-      return
-    }
-
-    seen_archive.add(message.archive_uuid)
-    merged.push(message)
-  })
-
-  return merged.sort((a, b) => a.sequence - b.sequence)
-}
-
-function unique_messages(messages: archived_message[]) {
-  const bundle_keys = new Set<string>()
-  const archive_keys = new Set<string>()
-  const unique: archived_message[] = []
-
-  messages.forEach((message) => {
-    const bundle_key = message_key(message)
-
-    if (archive_keys.has(message.archive_uuid)) {
-      return
-    }
-
-    if (bundle_keys.has(bundle_key)) {
-      return
-    }
-
-    bundle_keys.add(bundle_key)
-    archive_keys.add(message.archive_uuid)
-    unique.push(message)
-  })
-
-  return unique.sort((a, b) => a.sequence - b.sequence)
-}
 
 export function UserChatProvider({
   children,
@@ -164,14 +125,16 @@ export function UserChatProvider({
         locale: input.locale,
         mode: input.mode,
       })
-      set_messages(input.messages)
+      set_messages(normalize_archived_messages(input.messages))
       window.setTimeout(() => scroll_to_bottom('auto'), 0)
     },
     [scroll_to_bottom],
   )
 
   const append_message = useCallback((message: archived_message) => {
-    set_messages((current) => append_unique(current, [message]))
+    set_messages((current) =>
+      normalize_archived_messages([...current, message]),
+    )
     window.setTimeout(() => scroll_to_bottom('smooth'), 0)
   }, [scroll_to_bottom])
 
@@ -187,14 +150,110 @@ export function UserChatProvider({
         const dedupe_hit = current.some(
           (item) => item.archive_uuid === message.archive_uuid,
         )
-        const next = dedupe_hit
-          ? current
-          : [...current, message].sort((a, b) => a.sequence - b.sequence)
+
+        if (dedupe_hit) {
+          result = {
+            prev_message_count: current.length,
+            next_message_count: current.length,
+            dedupe_hit: true,
+          }
+
+          return current
+        }
+
+        const room_uuid = room_state.room_uuid
+        const participant_uuid = room_state.participant_uuid
+        const before_len = current.length + 1
+        const ch =
+          room_uuid !== null ? chat_room_realtime_channel_name(room_uuid) : null
+
+        if (room_uuid && ch) {
+          send_chat_realtime_debug({
+            event: 'realtime_message_merge_started',
+            room_uuid,
+            active_room_uuid: room_uuid,
+            participant_uuid,
+            user_uuid: null,
+            role: 'user',
+            tier: null,
+            source_channel: user_chat_merge_debug_source_channel,
+            channel_name: ch,
+            phase: 'user_chat_timeline_merge',
+            message_count_before: current.length,
+            message_count_after: null,
+            oldest_created_at: null,
+            newest_created_at: null,
+            realtime_message_uuid: message.archive_uuid,
+            realtime_created_at: message.created_at,
+          })
+
+          send_chat_realtime_debug({
+            event: 'chat_messages_normalize_started',
+            room_uuid,
+            active_room_uuid: room_uuid,
+            participant_uuid,
+            user_uuid: null,
+            role: 'user',
+            tier: null,
+            source_channel: user_chat_merge_debug_source_channel,
+            channel_name: ch,
+            phase: 'user_chat_timeline_merge',
+            message_count_before: before_len,
+            message_count_after: null,
+            oldest_created_at: null,
+            newest_created_at: null,
+            realtime_message_uuid: message.archive_uuid,
+            realtime_created_at: message.created_at,
+          })
+        }
+
+        const next = normalize_archived_messages([...current, message])
+        const bounds = archived_messages_time_bounds(next)
+
+        if (room_uuid && ch) {
+          send_chat_realtime_debug({
+            event: 'chat_messages_sorted',
+            room_uuid,
+            active_room_uuid: room_uuid,
+            participant_uuid,
+            user_uuid: null,
+            role: 'user',
+            tier: null,
+            source_channel: user_chat_merge_debug_source_channel,
+            channel_name: ch,
+            phase: 'user_chat_timeline_merge',
+            message_count_before: before_len,
+            message_count_after: next.length,
+            oldest_created_at: bounds.oldest_created_at,
+            newest_created_at: bounds.newest_created_at,
+            realtime_message_uuid: message.archive_uuid,
+            realtime_created_at: message.created_at,
+          })
+
+          send_chat_realtime_debug({
+            event: 'realtime_message_merge_succeeded',
+            room_uuid,
+            active_room_uuid: room_uuid,
+            participant_uuid,
+            user_uuid: null,
+            role: 'user',
+            tier: null,
+            source_channel: user_chat_merge_debug_source_channel,
+            channel_name: ch,
+            phase: 'user_chat_timeline_merge',
+            message_count_before: before_len,
+            message_count_after: next.length,
+            oldest_created_at: bounds.oldest_created_at,
+            newest_created_at: bounds.newest_created_at,
+            realtime_message_uuid: message.archive_uuid,
+            realtime_created_at: message.created_at,
+          })
+        }
 
         result = {
           prev_message_count: current.length,
           next_message_count: next.length,
-          dedupe_hit,
+          dedupe_hit: false,
         }
 
         return next
@@ -204,12 +263,14 @@ export function UserChatProvider({
 
       return result
     },
-    [scroll_to_bottom],
+    [room_state.participant_uuid, room_state.room_uuid, scroll_to_bottom],
   )
 
   const append_messages = useCallback(
     (next_messages: archived_message[]) => {
-      set_messages((current) => append_unique(current, next_messages))
+      set_messages((current) =>
+        normalize_archived_messages([...current, ...next_messages]),
+      )
       window.setTimeout(() => scroll_to_bottom('smooth'), 0)
     },
     [scroll_to_bottom],
@@ -218,7 +279,7 @@ export function UserChatProvider({
   const replace_message = useCallback(
     (archive_uuid: string, message: archived_message) => {
       set_messages((current) =>
-        unique_messages(
+        normalize_archived_messages(
           current.map((item) =>
             item.archive_uuid === archive_uuid ? message : item,
           ),

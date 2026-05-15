@@ -16,14 +16,6 @@ export function resolve_debug_rule(input: {
   event: string
   payload?: Record<string, unknown>
 }): debug_rule {
-  if (input.category === 'chat_realtime') {
-    return {
-      category: 'chat_realtime',
-      level: 'info',
-      channels: [],
-    }
-  }
-
   const message_send_diagnostic_events = new Set([
     'chat_message_send_clicked',
     'user_message_send_clicked',
@@ -598,6 +590,10 @@ export function resolve_debug_rule(input: {
     'admin_realtime_payload_ignored',
     'admin_message_state_append_started',
     'admin_message_state_append_succeeded',
+    'chat_messages_normalize_started',
+    'chat_messages_sorted',
+    'realtime_message_merge_started',
+    'realtime_message_merge_succeeded',
   ])
 
   const chat_realtime_server_failed = new Set([
@@ -722,6 +718,14 @@ export function resolve_debug_rule(input: {
       category: input.category,
       level: is_failed ? 'error' : 'info',
       channels: is_failed ? ['discord'] : [],
+    }
+  }
+
+  if (input.category === 'chat_realtime') {
+    return {
+      category: 'chat_realtime',
+      level: 'info',
+      channels: [],
     }
   }
 

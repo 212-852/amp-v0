@@ -56,6 +56,12 @@ type chat_debug_body = {
   payload_channel?: unknown
   payload_source_channel?: unknown
   payload_direction?: unknown
+  message_count_before?: unknown
+  message_count_after?: unknown
+  oldest_created_at?: unknown
+  newest_created_at?: unknown
+  realtime_message_uuid?: unknown
+  realtime_created_at?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -145,6 +151,12 @@ export async function POST(request: Request) {
       payload_channel: string_or_null(body?.payload_channel),
       payload_source_channel: string_or_null(body?.payload_source_channel),
       payload_direction: string_or_null(body?.payload_direction),
+      message_count_before: number_or_null(body?.message_count_before),
+      message_count_after: number_or_null(body?.message_count_after),
+      oldest_created_at: string_or_null(body?.oldest_created_at),
+      newest_created_at: string_or_null(body?.newest_created_at),
+      realtime_message_uuid: string_or_null(body?.realtime_message_uuid),
+      realtime_created_at: string_or_null(body?.realtime_created_at),
     },
   })
 

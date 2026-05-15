@@ -6,7 +6,6 @@ import { load_archived_messages } from '@/lib/chat/archive'
 import { resolve_chat_room_list_preview_text } from '@/lib/chat/presence/rules'
 import {
   archived_messages_to_reception_timeline,
-  compare_chat_room_timeline_messages,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
 import {
@@ -1262,9 +1261,7 @@ export async function list_reception_room_messages({
 }): Promise<reception_room_message[]> {
   const archived = await load_archived_messages(room_uuid)
 
-  return archived_messages_to_reception_timeline(archived).sort(
-    compare_chat_room_timeline_messages,
-  )
+  return archived_messages_to_reception_timeline(archived)
 }
 
 function normalize_memo(row: memo_row): reception_room_memo {
