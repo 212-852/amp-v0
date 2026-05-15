@@ -28,6 +28,7 @@ export type chat_typing_payload = {
 export type chat_presence_payload = {
   room_uuid: string
   participant_uuid: string
+  user_uuid: string | null
   role: string | null
   is_active: boolean
   is_typing: boolean
@@ -41,7 +42,7 @@ export function chat_room_realtime_channel_name(room_uuid: string) {
   return `room:${room_uuid}`
 }
 
-export const chat_typing_expire_ms = 3_000
+export const chat_typing_expire_ms = 5_000
 
 export function chat_typing_is_fresh(input: {
   is_typing: boolean
@@ -283,9 +284,16 @@ function presence_payload_from_participant_row(
     return null
   }
 
+  const user_uuid_raw = row.user_uuid
+  const user_uuid =
+    typeof user_uuid_raw === 'string' && user_uuid_raw.trim()
+      ? user_uuid_raw.trim()
+      : null
+
   return {
     room_uuid: row.room_uuid,
     participant_uuid: row.participant_uuid,
+    user_uuid,
     role: typeof row.role === 'string' ? row.role : null,
     is_active: row.is_active === true,
     is_typing: row.is_typing === true,
@@ -621,43 +629,104 @@ export function subscribe_chat_room_realtime(input: {
         filter: postgres_filter,
       },
       (payload) => {
+        const is_admin_listener = input.source_channel === 'admin'
         const presence = presence_payload_from_participant_row(payload.new)
 
         if (!presence) {
-          send_chat_realtime_debug({
-            event: 'admin_presence_realtime_received',
-            ...base_debug,
-            event_name: 'UPDATE',
-            postgres_event: 'UPDATE',
-            table: 'participants',
-            ignored_reason: 'unparseable_participant_row',
-            phase: 'participants_presence_update',
-          })
+          if (is_admin_listener) {
+            send_chat_realtime_debug({
+              event: 'admin_presence_realtime_received',
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? null,
+              event_name: 'UPDATE',
+              postgres_event: 'UPDATE',
+              table: 'participants',
+              participant_uuid: null,
+              user_uuid: null,
+              is_typing: null,
+              ignored_reason: 'unparseable_participant_row',
+              phase: 'participants_presence_update',
+            })
+          }
           return
         }
 
-        send_chat_realtime_debug({
-          event: 'admin_presence_realtime_received',
-          ...base_debug,
-          event_name: 'UPDATE',
-          postgres_event: 'UPDATE',
-          table: 'participants',
-          payload_room_uuid: presence.room_uuid,
-          participant_uuid: presence.participant_uuid,
-          role: presence.role,
-          source_channel:
-            presence.source_channel ?? input.source_channel ?? 'web',
-          is_active: presence.is_active,
-          is_typing: presence.is_typing,
-          last_seen_at: presence.last_seen_at,
-          typing_at: presence.typing_at,
-          ignored_reason:
-            presence.room_uuid === input.room_uuid ? null : 'room_uuid_mismatch',
-          phase: 'participants_presence_update',
-        })
+        if (is_admin_listener) {
+          send_chat_realtime_debug({
+            event: 'admin_presence_realtime_received',
+            ...base_debug,
+            active_room_uuid: input.active_room_uuid ?? null,
+            event_name: 'UPDATE',
+            postgres_event: 'UPDATE',
+            table: 'participants',
+            payload_room_uuid: presence.room_uuid,
+            participant_uuid: presence.participant_uuid,
+            user_uuid: presence.user_uuid,
+            role: presence.role,
+            source_channel:
+              presence.source_channel ?? input.source_channel ?? 'web',
+            is_active: presence.is_active,
+            is_typing: presence.is_typing,
+            last_seen_at: presence.last_seen_at,
+            typing_at: presence.typing_at,
+            ignored_reason:
+              presence.room_uuid === input.room_uuid
+                ? null
+                : 'room_uuid_mismatch',
+            phase: 'participants_presence_update',
+          })
+        }
 
         if (presence.room_uuid !== input.room_uuid) {
+          if (is_admin_listener && input.on_presence) {
+            send_chat_realtime_debug({
+              event: 'admin_presence_payload_ignored',
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? null,
+              participant_uuid: presence.participant_uuid,
+              user_uuid: presence.user_uuid,
+              source_channel:
+                presence.source_channel ?? input.source_channel ?? 'web',
+              is_typing: presence.is_typing,
+              ignored_reason: 'room_uuid_mismatch',
+              phase: 'participants_presence_update',
+            })
+          }
           return
+        }
+
+        if (is_admin_listener && input.on_presence) {
+          const role = presence.role?.trim().toLowerCase() ?? ''
+          const end_user = role === 'user' || role === 'driver'
+
+          if (!end_user) {
+            send_chat_realtime_debug({
+              event: 'admin_presence_payload_ignored',
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? null,
+              participant_uuid: presence.participant_uuid,
+              user_uuid: presence.user_uuid,
+              source_channel:
+                presence.source_channel ?? input.source_channel ?? 'web',
+              is_typing: presence.is_typing,
+              ignored_reason: 'presence_role_not_end_user',
+              phase: 'participants_presence_update',
+            })
+            return
+          }
+
+          send_chat_realtime_debug({
+            event: 'admin_presence_payload_accepted',
+            ...base_debug,
+            active_room_uuid: input.active_room_uuid ?? null,
+            participant_uuid: presence.participant_uuid,
+            user_uuid: presence.user_uuid,
+            source_channel:
+              presence.source_channel ?? input.source_channel ?? 'web',
+            is_typing: presence.is_typing,
+            ignored_reason: null,
+            phase: 'participants_presence_update',
+          })
         }
 
         input.on_presence?.(presence)
@@ -841,6 +910,23 @@ export function subscribe_chat_room_realtime(input: {
 
       input.on_typing(typing)
     })
+
+  if (input.source_channel === 'admin' && input.on_presence) {
+    send_chat_realtime_debug({
+      event: 'admin_presence_subscribe_started',
+      ...base_debug,
+      active_room_uuid: input.active_room_uuid ?? null,
+      postgres_event: 'UPDATE',
+      table: 'participants',
+      event_name: 'UPDATE',
+      filter: postgres_filter,
+      participant_uuid: input.participant_uuid,
+      user_uuid: input.user_uuid,
+      is_typing: null,
+      ignored_reason: null,
+      phase: 'subscribe_chat_room_realtime_presence',
+    })
+  }
 
   const typing_bind_meta = chat_room_realtime_channel_meta.get(channel)
 
@@ -1194,6 +1280,7 @@ export function sync_chat_typing_presence(input: {
   participant_uuid: string
   is_typing: boolean
   source_channel?: string | null
+  typing_phase?: 'start' | 'heartbeat'
 }) {
   void fetch('/api/chat/presence', {
     method: 'POST',
@@ -1205,6 +1292,9 @@ export function sync_chat_typing_presence(input: {
       participant_uuid: input.participant_uuid,
       action: input.is_typing ? 'typing_start' : 'typing_stop',
       last_channel: input.source_channel ?? undefined,
+      ...(input.is_typing && input.typing_phase
+        ? { typing_phase: input.typing_phase }
+        : {}),
     }),
   }).catch(() => {})
 }

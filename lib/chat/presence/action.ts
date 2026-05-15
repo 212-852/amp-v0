@@ -155,6 +155,26 @@ async function update_participant_presence(input: {
   }
 }
 
+async function participant_user_uuid_for_debug(input: {
+  room_uuid: string
+  participant_uuid: string
+}): Promise<string | null> {
+  const snap = await supabase
+    .from('participants')
+    .select('user_uuid')
+    .eq('room_uuid', input.room_uuid)
+    .eq('participant_uuid', input.participant_uuid)
+    .maybeSingle()
+
+  if (snap.error || !snap.data) {
+    return null
+  }
+
+  const u = (snap.data as { user_uuid?: string | null }).user_uuid
+
+  return typeof u === 'string' && u.trim() ? u.trim() : null
+}
+
 export async function mark_room_entered(input: {
   room_uuid: string
   participant_uuid: string
@@ -209,6 +229,7 @@ export async function mark_typing_started(input: {
   room_uuid: string
   participant_uuid: string
   last_channel?: participant_surface_channel | null
+  typing_phase?: 'start' | 'heartbeat'
 }) {
   const typing_at = new Date().toISOString()
   const patch: Record<string, unknown> = {
@@ -226,15 +247,28 @@ export async function mark_typing_started(input: {
     patch,
   })
 
+  const user_uuid = await participant_user_uuid_for_debug({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+  })
+
+  const phase_kind = input.typing_phase === 'heartbeat' ? 'heartbeat' : 'start'
+  const event =
+    phase_kind === 'heartbeat'
+      ? 'presence_typing_heartbeat'
+      : 'presence_typing_started'
+
   await debug_event({
     category: 'chat_realtime',
-    event: 'presence_typing_started',
+    event,
     payload: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
-      is_typing: true,
-      last_seen_at: null,
+      user_uuid,
       source_channel: input.last_channel ?? null,
+      is_typing: true,
+      active_room_uuid: null,
+      ignored_reason: null,
     },
   })
 }
@@ -259,15 +293,22 @@ export async function mark_typing_stopped(input: {
     patch,
   })
 
+  const user_uuid = await participant_user_uuid_for_debug({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+  })
+
   await debug_event({
     category: 'chat_realtime',
     event: 'presence_typing_stopped',
     payload: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
+      user_uuid,
       is_typing: false,
-      last_seen_at: null,
       source_channel: input.last_channel ?? null,
+      active_room_uuid: null,
+      ignored_reason: null,
     },
   })
 }

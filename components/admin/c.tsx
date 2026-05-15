@@ -682,37 +682,49 @@ export default function AdminChatTimeline({
         return
       }
 
-      if (action === 'typing_start' && typing_active_ref.current) {
+      if (action === 'typing_stop' && !typing_active_ref.current) {
         return
       }
 
       const channel = realtime_channel_ref.current
+      const is_heartbeat = action === 'typing_start' && typing_active_ref.current
 
-      if (!channel) {
-        return
+      if (action === 'typing_start') {
+        typing_active_ref.current = true
+      } else {
+        typing_active_ref.current = false
       }
-
-      typing_active_ref.current = action === 'typing_start'
 
       sync_chat_typing_presence({
         room_uuid,
         participant_uuid: staff_participant_uuid,
         is_typing: action === 'typing_start',
         source_channel: 'admin',
+        typing_phase:
+          action === 'typing_start'
+            ? is_heartbeat
+              ? 'heartbeat'
+              : 'start'
+            : undefined,
       })
 
-      publish_chat_typing({
-        channel,
-        room_uuid,
-        active_room_uuid: room_uuid,
-        participant_uuid: staff_participant_uuid,
-        user_uuid: staff_user_uuid,
-        role: 'admin',
-        tier: staff_tier,
-        display_name: staff_display_name,
-        is_typing: action === 'typing_start',
-        source_channel: 'admin',
-      })
+      if (
+        channel &&
+        (action === 'typing_stop' || (action === 'typing_start' && !is_heartbeat))
+      ) {
+        publish_chat_typing({
+          channel,
+          room_uuid,
+          active_room_uuid: room_uuid,
+          participant_uuid: staff_participant_uuid,
+          user_uuid: staff_user_uuid,
+          role: 'admin',
+          tier: staff_tier,
+          display_name: staff_display_name,
+          is_typing: action === 'typing_start',
+          source_channel: 'admin',
+        })
+      }
     },
     [room_uuid, staff_display_name, staff_participant_uuid, staff_tier, staff_user_uuid],
   )
@@ -739,7 +751,7 @@ export default function AdminChatTimeline({
     publish_typing_timer_ref.current = window.setTimeout(() => {
       publish_typing_timer_ref.current = null
       post_typing_presence('typing_stop')
-    }, 3_000)
+    }, 5_000)
   }
 
   async function submit_reply(raw_text: string) {

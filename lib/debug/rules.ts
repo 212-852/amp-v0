@@ -615,6 +615,11 @@ export function resolve_debug_rule(input: {
     'realtime_message_merge_succeeded',
     'room_unread_realtime_received',
     'admin_room_badge_updated',
+    'admin_presence_subscribe_started',
+    'admin_presence_realtime_received',
+    'admin_presence_payload_accepted',
+    'admin_presence_payload_ignored',
+    'admin_room_typing_state_updated',
   ])
 
   const chat_realtime_server_failed = new Set([
@@ -739,6 +744,25 @@ export function resolve_debug_rule(input: {
       category: input.category,
       level: is_failed ? 'error' : 'info',
       channels: is_failed ? ['discord'] : [],
+    }
+  }
+
+  const chat_realtime_presence_user_events = new Set([
+    'presence_typing_started',
+    'presence_typing_heartbeat',
+    'presence_typing_stopped',
+  ])
+
+  if (
+    input.category === 'chat_realtime' &&
+    chat_realtime_presence_user_events.has(input.event)
+  ) {
+    return {
+      category: 'chat_realtime',
+      level: 'info',
+      channels: debug_control.chat_realtime_debug_enabled
+        ? ['discord']
+        : [],
     }
   }
 

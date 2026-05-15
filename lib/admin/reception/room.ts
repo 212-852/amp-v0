@@ -117,6 +117,7 @@ type room_card_enrichment = {
   user_is_online: boolean
   user_last_seen_at: string | null
   presence_source_channel: string | null
+  user_typing_at: string | null
 }
 
 type admin_chat_list_debug_event =
@@ -284,6 +285,7 @@ function normalize_room(
     presence_source_channel: normalize_reception_channel(
       enrichment?.presence_source_channel,
     ),
+    user_typing_at: enrichment?.user_typing_at ?? null,
   }
 }
 
@@ -534,6 +536,43 @@ function choose_customer_user_participant(
   )
 }
 
+function end_user_typing_snapshot(
+  room_ps: participant_row[],
+  now: Date,
+): { is_typing: boolean; typing_at: string | null } {
+  let best_at: string | null = null
+  let best_ms = 0
+  let any = false
+
+  for (const p of room_ps) {
+    const role = p.role?.trim().toLowerCase() ?? ''
+
+    if (role !== 'user' && role !== 'driver') {
+      continue
+    }
+
+    if (
+      !typing_timestamp_is_fresh(
+        p.typing_at ?? null,
+        p.is_typing ?? null,
+        now,
+      )
+    ) {
+      continue
+    }
+
+    any = true
+    const t = new Date(p.typing_at ?? 0).getTime()
+
+    if (!Number.isNaN(t) && t >= best_ms) {
+      best_ms = t
+      best_at = typeof p.typing_at === 'string' ? p.typing_at : null
+    }
+  }
+
+  return { is_typing: any, typing_at: best_at }
+}
+
 let admin_chat_schema_columns_debug_emitted = false
 
 async function enrich_room_cards(
@@ -730,18 +769,13 @@ async function enrich_room_cards(
 
     const latest_summary = latest_summary_by_room.get(row.room_uuid) ?? null
     const base_preview = latest_summary?.preview ?? null
+    const typing_snapshot = end_user_typing_snapshot(room_ps, new Date())
     const preview_resolved = resolve_chat_room_list_preview_text({
       audience: 'admin_inbox',
       latest_message_text: base_preview,
-      typing_user_active:
-        customer?.role === 'user' &&
-        typing_timestamp_is_fresh(
-          customer.typing_at ?? null,
-          customer.is_typing ?? null,
-          new Date(),
-        ),
+      typing_user_active: typing_snapshot.is_typing,
       typing_staff_lines: [],
-      typing_placeholder_ja: '入力中...',
+      typing_placeholder_ja: 'ユーザー入力中...',
       fallback_when_empty: '対応が必要です',
     })
 
@@ -854,16 +888,11 @@ async function enrich_room_cards(
       avatar_url: pick_string(customer_user?.['image_url']),
       preview: preview_resolved,
       user_participant_uuid: string_value(customer?.participant_uuid ?? null),
-      user_is_typing:
-        customer?.role === 'user' &&
-        typing_timestamp_is_fresh(
-          customer.typing_at ?? null,
-          customer.is_typing ?? null,
-          new Date(),
-        ),
+      user_is_typing: typing_snapshot.is_typing,
       user_is_online: customer?.is_active === true,
       user_last_seen_at: string_value(customer?.last_seen_at ?? null),
       presence_source_channel: normalize_reception_channel(customer?.last_channel),
+      user_typing_at: typing_snapshot.typing_at,
     })
   }
 

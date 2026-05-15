@@ -15,6 +15,8 @@ export type reception_room = {
   user_is_online?: boolean
   user_last_seen_at?: string | null
   presence_source_channel?: string | null
+  /** Latest `typing_at` from customer participant; used to expire typing UI locally. */
+  user_typing_at?: string | null
 }
 
 export function format_admin_room_unread_label(count: number): string {

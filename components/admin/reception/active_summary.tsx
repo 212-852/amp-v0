@@ -5,6 +5,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import {
   format_admin_room_unread_label,
+  normalize_reception_channel,
   reception_channel_label,
   reception_presence_label,
   type reception_room,
@@ -51,6 +52,7 @@ export default function AdminReceptionActiveSummary({
     user_is_online: room?.user_is_online ?? false,
     user_last_seen_at: room?.user_last_seen_at ?? null,
     presence_source_channel: room?.presence_source_channel ?? null,
+    user_typing_at: room?.user_typing_at ?? null,
   })
 
   useEffect(() => {
@@ -65,8 +67,43 @@ export default function AdminReceptionActiveSummary({
       user_is_online: room?.user_is_online ?? false,
       user_last_seen_at: room?.user_last_seen_at ?? null,
       presence_source_channel: room?.presence_source_channel ?? null,
+      user_typing_at: room?.user_typing_at ?? null,
     })
   }, [room])
+
+  useEffect(() => {
+    if (!room_uuid) {
+      return
+    }
+
+    const tick = window.setInterval(() => {
+      set_summary((previous) => {
+        if (!previous.user_is_typing && !previous.user_typing_at) {
+          return previous
+        }
+
+        const now = new Date()
+        const fresh = typing_timestamp_is_fresh(
+          previous.user_typing_at ?? null,
+          previous.user_is_typing,
+          now,
+        )
+
+        if (fresh === (previous.user_is_typing ?? false)) {
+          return previous
+        }
+
+        return {
+          ...previous,
+          user_is_typing: fresh,
+        }
+      })
+    }, 1_000)
+
+    return () => {
+      window.clearInterval(tick)
+    }
+  }, [room_uuid])
 
   useEffect(() => {
     if (!room_uuid) {
@@ -101,14 +138,6 @@ export default function AdminReceptionActiveSummary({
           bundle: message.bundle,
         })
         const latest_text = row.text?.trim() || null
-        const next_preview = resolve_chat_room_list_preview_text({
-          audience: 'admin_inbox',
-          latest_message_text: latest_text,
-          typing_user_active: false,
-          typing_staff_lines: [],
-          typing_placeholder_ja: '入力中...',
-          fallback_when_empty: 'メッセージ',
-        })
         const channel_value = message.insert_row_channel ?? source_channel
         const direction = message.body_direction ?? null
         const last_message_at = message.created_at ?? new Date().toISOString()
@@ -129,6 +158,15 @@ export default function AdminReceptionActiveSummary({
         })
 
         set_summary((previous) => {
+          const next_preview = resolve_chat_room_list_preview_text({
+            audience: 'admin_inbox',
+            latest_message_text: latest_text,
+            typing_user_active: previous.user_is_typing,
+            typing_staff_lines: [],
+            typing_placeholder_ja: 'ユーザー入力中...',
+            fallback_when_empty: 'メッセージ',
+          })
+
           const next = {
             ...previous,
             preview: next_preview,
@@ -159,23 +197,31 @@ export default function AdminReceptionActiveSummary({
       },
       on_typing: () => {},
       on_presence: (presence) => {
-        if (presence.role !== 'user') {
+        const role = presence.role?.trim().toLowerCase() ?? ''
+
+        if (role !== 'user' && role !== 'driver') {
           return
         }
+
+        const is_typing = typing_timestamp_is_fresh(
+          presence.typing_at,
+          presence.is_typing,
+          new Date(),
+        )
 
         set_summary((previous) => ({
           ...previous,
           user_participant_uuid: presence.participant_uuid,
-          user_is_typing: typing_timestamp_is_fresh(
-            presence.typing_at,
-            presence.is_typing,
-            new Date(),
-          ),
+          user_is_typing: is_typing,
           user_is_online: presence.is_active,
           user_last_seen_at: presence.last_seen_at,
-          presence_source_channel: presence.source_channel,
+          presence_source_channel: normalize_reception_channel(
+            presence.source_channel,
+          ),
+          user_typing_at: presence.typing_at,
           last_incoming_channel:
-            presence.source_channel ?? previous.last_incoming_channel,
+            normalize_reception_channel(presence.source_channel) ??
+            previous.last_incoming_channel,
         }))
 
         send_chat_realtime_debug({
@@ -185,9 +231,21 @@ export default function AdminReceptionActiveSummary({
           role: presence.role,
           source_channel: presence.source_channel ?? 'web',
           is_active: presence.is_active,
-          is_typing: presence.is_typing,
+          is_typing,
           last_seen_at: presence.last_seen_at,
           typing_at: presence.typing_at,
+          ignored_reason: null,
+          phase: 'admin_active_room_summary_presence',
+        })
+
+        send_chat_realtime_debug({
+          event: 'admin_room_typing_state_updated',
+          room_uuid: presence.room_uuid,
+          active_room_uuid: room_uuid,
+          participant_uuid: presence.participant_uuid,
+          user_uuid: presence.user_uuid,
+          source_channel: presence.source_channel ?? 'web',
+          is_typing,
           ignored_reason: null,
           phase: 'admin_active_room_summary_presence',
         })
@@ -284,7 +342,7 @@ export default function AdminReceptionActiveSummary({
         </span>
         <span>
           {reception_presence_label({
-            is_typing: summary.user_is_typing,
+            is_typing: false,
             is_online: summary.user_is_online,
             last_seen_at: summary.user_last_seen_at,
           })}
@@ -297,7 +355,14 @@ export default function AdminReceptionActiveSummary({
       </div>
       {summary.preview ? (
         <p className="mt-1 truncate text-[12px] leading-tight text-neutral-500">
-          {summary.preview}
+          {resolve_chat_room_list_preview_text({
+            audience: 'admin_inbox',
+            latest_message_text: summary.preview,
+            typing_user_active: summary.user_is_typing,
+            typing_staff_lines: [],
+            typing_placeholder_ja: 'ユーザー入力中...',
+            fallback_when_empty: summary.preview,
+          })}
         </p>
       ) : null}
     </div>

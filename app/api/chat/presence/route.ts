@@ -13,6 +13,7 @@ type presence_request_body = {
   participant_uuid?: unknown
   action?: unknown
   last_channel?: unknown
+  typing_phase?: unknown
 }
 
 export async function POST(request: Request) {
@@ -42,7 +43,15 @@ export async function POST(request: Request) {
     } else if (body?.action === 'leave') {
       await mark_room_left(context)
     } else if (body?.action === 'typing_start') {
-      await mark_typing_started(context)
+      const typing_phase =
+        body?.typing_phase === 'heartbeat' ? 'heartbeat' : 'start'
+
+      await mark_typing_started({
+        room_uuid: context.room_uuid,
+        participant_uuid: context.participant_uuid,
+        last_channel: context.last_channel ?? undefined,
+        typing_phase,
+      })
     } else if (body?.action === 'typing_stop') {
       await mark_typing_stopped(context)
     } else {

@@ -244,39 +244,58 @@ export default function UserFooter() {
         return
       }
 
-      if (action === 'typing_start' && typing_active_ref.current) {
+      if (action === 'typing_stop' && !typing_active_ref.current) {
         return
       }
 
       const channel = chat.room_realtime_channel_ref.current
+      const is_heartbeat = action === 'typing_start' && typing_active_ref.current
 
-      if (!channel) {
-        return
+      if (action === 'typing_start') {
+        typing_active_ref.current = true
+      } else {
+        typing_active_ref.current = false
       }
-
-      typing_active_ref.current = action === 'typing_start'
 
       sync_chat_typing_presence({
         room_uuid: chat.room_uuid,
         participant_uuid: chat.participant_uuid,
         is_typing: action === 'typing_start',
         source_channel: session?.source_channel ?? 'web',
+        typing_phase:
+          action === 'typing_start'
+            ? is_heartbeat
+              ? 'heartbeat'
+              : 'start'
+            : undefined,
       })
 
-      publish_chat_typing({
-        channel,
-        room_uuid: chat.room_uuid,
-        active_room_uuid: chat.room_uuid,
-        participant_uuid: chat.participant_uuid,
-        user_uuid: session?.user_uuid ?? null,
-        role: 'user',
-        tier: session?.tier ?? null,
-        display_name: 'user',
-        is_typing: action === 'typing_start',
-        source_channel: session?.source_channel ?? 'web',
-      })
+      if (
+        channel &&
+        (action === 'typing_stop' || (action === 'typing_start' && !is_heartbeat))
+      ) {
+        publish_chat_typing({
+          channel,
+          room_uuid: chat.room_uuid,
+          active_room_uuid: chat.room_uuid,
+          participant_uuid: chat.participant_uuid,
+          user_uuid: session?.user_uuid ?? null,
+          role: 'user',
+          tier: session?.tier ?? null,
+          display_name: 'user',
+          is_typing: action === 'typing_start',
+          source_channel: session?.source_channel ?? 'web',
+        })
+      }
     },
-    [chat.participant_uuid, chat.room_uuid, chat.room_realtime_channel_ref, session?.user_uuid, session?.tier, session?.source_channel],
+    [
+      chat.participant_uuid,
+      chat.room_uuid,
+      chat.room_realtime_channel_ref,
+      session?.user_uuid,
+      session?.tier,
+      session?.source_channel,
+    ],
   )
 
   useEffect(() => {
@@ -336,7 +355,7 @@ export default function UserFooter() {
     typing_timer_ref.current = window.setTimeout(() => {
       typing_timer_ref.current = null
       post_typing_presence('typing_stop')
-    }, 3_000)
+    }, 5_000)
   }
 
   function handle_message_input_change() {
