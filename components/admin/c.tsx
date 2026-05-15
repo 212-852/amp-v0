@@ -151,6 +151,7 @@ export default function AdminChatTimeline({
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
+  const [is_leaving_support, set_is_leaving_support] = useState(false)
   const [typing_lines, set_typing_lines] = useState<string[]>([])
   const typing_timer_ref = useRef<number | null>(null)
   const publish_typing_timer_ref = useRef<number | null>(null)
@@ -341,6 +342,25 @@ export default function AdminChatTimeline({
           return
         }
 
+        send_chat_realtime_debug({
+          event: 'admin_active_chat_realtime_payload_received',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: admin_rt_ctx_ref.current.staff_participant_uuid,
+          user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+          role: 'admin',
+          tier: admin_rt_ctx_ref.current.staff_tier,
+          source_channel: 'admin',
+          channel_name: chat_room_realtime_channel_name(locked_room),
+          message_uuid: archived.archive_uuid,
+          payload_message_uuid: archived.archive_uuid,
+          payload_room_uuid: archived.room_uuid,
+          message_channel: archived.insert_row_channel ?? null,
+          message_source_channel: archived.body_source_channel ?? null,
+          message_direction: archived.body_direction ?? null,
+          phase: 'admin_chat_message_append',
+        })
+
         const mapped = archived_message_to_timeline_message({
           archive_uuid: archived.archive_uuid,
           room_uuid: archived.room_uuid,
@@ -370,6 +390,25 @@ export default function AdminChatTimeline({
 
           return
         }
+
+        send_chat_realtime_debug({
+          event: 'admin_active_chat_realtime_payload_accepted',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: admin_rt_ctx_ref.current.staff_participant_uuid,
+          user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+          role: 'admin',
+          tier: admin_rt_ctx_ref.current.staff_tier,
+          source_channel: 'admin',
+          channel_name: chat_room_realtime_channel_name(locked_room),
+          message_uuid: mapped.message_uuid,
+          payload_message_uuid: archived.archive_uuid,
+          payload_room_uuid: mapped.room_uuid,
+          message_channel: archived.insert_row_channel ?? null,
+          message_source_channel: archived.body_source_channel ?? null,
+          message_direction: archived.body_direction ?? mapped.direction ?? null,
+          phase: 'admin_chat_message_append',
+        })
 
         const row_rt_debug = {
           message_channel: archived.insert_row_channel ?? null,
@@ -660,9 +699,30 @@ export default function AdminChatTimeline({
         })
       },
       on_support_action: (action: chat_support_action_payload) => {
+        send_chat_realtime_debug({
+          event: 'admin_support_action_received',
+          room_uuid: action.room_uuid,
+          active_room_uuid: locked_room,
+          action_uuid: action.action_uuid,
+          event_type: action.action_type,
+          source_channel: action.source_channel ?? 'admin',
+          ignored_reason: null,
+          phase: 'admin_chat_support_action',
+        })
+
         const text = action.body?.trim() ?? ''
 
         if (!text) {
+          send_chat_realtime_debug({
+            event: 'admin_support_action_ignored',
+            room_uuid: action.room_uuid,
+            active_room_uuid: locked_room,
+            action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            source_channel: action.source_channel ?? 'admin',
+            ignored_reason: 'empty_action_body',
+            phase: 'admin_chat_support_action',
+          })
           return
         }
 
@@ -680,6 +740,16 @@ export default function AdminChatTimeline({
 
         set_rows((previous) => {
           if (previous.some((row) => row.message_uuid === action.action_uuid)) {
+            send_chat_realtime_debug({
+              event: 'admin_support_action_ignored',
+              room_uuid: action.room_uuid,
+              active_room_uuid: locked_room,
+              action_uuid: action.action_uuid,
+              event_type: action.action_type,
+              source_channel: action.source_channel ?? 'admin',
+              ignored_reason: 'action_uuid_dedupe',
+              phase: 'admin_chat_support_action',
+            })
             return previous
           }
 
@@ -950,6 +1020,34 @@ export default function AdminChatTimeline({
     void submit_reply(reply_text)
   }
 
+  async function leave_support_explicitly() {
+    if (!room_uuid || !staff_participant_uuid || is_leaving_support) {
+      return
+    }
+
+    set_is_leaving_support(true)
+
+    try {
+      await fetch('/api/chat/presence', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          room_uuid,
+          participant_uuid: staff_participant_uuid,
+          action: 'admin_support_leave',
+          last_channel: 'admin',
+        }),
+      })
+    } catch (error) {
+      console.error('[admin_reception] support_leave_failed', error)
+    } finally {
+      set_is_leaving_support(false)
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
@@ -1021,6 +1119,18 @@ export default function AdminChatTimeline({
       </div>
 
       <footer className="shrink-0 border-t border-neutral-200 bg-white pb-[max(8px,env(safe-area-inset-bottom,0px))] pt-2">
+        <div className="flex justify-end px-4 pb-1">
+          <button
+            type="button"
+            onClick={() => {
+              void leave_support_explicitly()
+            }}
+            disabled={is_leaving_support || !staff_participant_uuid.trim()}
+            className="rounded-full border border-neutral-300 px-3 py-1 text-[11px] font-medium text-neutral-600 disabled:opacity-60"
+          >
+            {is_leaving_support ? '退出中...' : '対応を終了'}
+          </button>
+        </div>
         <form
           className="flex items-center gap-3 px-4 pb-2"
           onSubmit={handle_submit}

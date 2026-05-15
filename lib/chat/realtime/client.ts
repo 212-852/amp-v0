@@ -890,7 +890,35 @@ export function subscribe_chat_room_realtime(input: {
           phase: 'postgres_changes_chat_actions',
         })
 
-        if (!action || action.room_uuid !== input.room_uuid) {
+        if (!action) {
+          send_chat_realtime_debug({
+            event: 'admin_support_action_ignored',
+            ...base_debug,
+            postgres_event: 'INSERT',
+            event_name: 'INSERT',
+            table: 'chat_actions',
+            payload_room_uuid: null,
+            payload_action_uuid: null,
+            event_type: null,
+            ignored_reason: 'unparseable_chat_action_row',
+            phase: 'postgres_changes_chat_actions',
+          })
+          return
+        }
+
+        if (action.room_uuid !== input.room_uuid) {
+          send_chat_realtime_debug({
+            event: 'admin_support_action_ignored',
+            ...base_debug,
+            postgres_event: 'INSERT',
+            event_name: 'INSERT',
+            table: 'chat_actions',
+            payload_room_uuid: action.room_uuid,
+            payload_action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            ignored_reason: 'payload_room_uuid_mismatch',
+            phase: 'postgres_changes_chat_actions',
+          })
           return
         }
 
@@ -898,6 +926,18 @@ export function subscribe_chat_room_realtime(input: {
           action.action_type !== 'support_started' &&
           action.action_type !== 'support_left'
         ) {
+          send_chat_realtime_debug({
+            event: 'admin_support_action_ignored',
+            ...base_debug,
+            postgres_event: 'INSERT',
+            event_name: 'INSERT',
+            table: 'chat_actions',
+            payload_room_uuid: action.room_uuid,
+            payload_action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            ignored_reason: 'unsupported_action_type',
+            phase: 'postgres_changes_chat_actions',
+          })
           return
         }
 

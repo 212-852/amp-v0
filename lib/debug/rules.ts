@@ -55,9 +55,9 @@ export function resolve_debug_rule(input: {
     'user_message_send_finished',
     'output_reply_channel_resolved',
     'room_last_incoming_channel_updated',
-    'admin_reply_delivery_started',
-    'admin_reply_delivery_succeeded',
-    'admin_reply_delivery_failed',
+    'output_reply_delivery_started',
+    'output_reply_delivery_succeeded',
+    'output_reply_delivery_failed',
   ])
 
   if (
@@ -162,9 +162,9 @@ export function resolve_debug_rule(input: {
     'chat_message_send_succeeded',
     'output_reply_channel_resolved',
     'room_last_incoming_channel_updated',
-    'admin_reply_delivery_started',
-    'admin_reply_delivery_succeeded',
-    'admin_reply_delivery_failed',
+    'output_reply_delivery_started',
+    'output_reply_delivery_succeeded',
+    'output_reply_delivery_failed',
   ])
 
   const concierge_list_debug_events = new Set([
@@ -603,7 +603,7 @@ export function resolve_debug_rule(input: {
     const is_failed =
       input.event === 'chat_message_send_blocked' ||
       input.event === 'chat_message_send_failed' ||
-      input.event === 'admin_reply_delivery_failed'
+      input.event === 'output_reply_delivery_failed'
 
     return {
       category: 'chat_message',
@@ -623,6 +623,14 @@ export function resolve_debug_rule(input: {
     'chat_typing_listener_not_registered',
     'chat_typing_send_before_subscribed',
     'admin_message_state_append_failed',
+    'admin_active_chat_realtime_subscribe_started',
+    'admin_active_chat_realtime_payload_received',
+    'admin_active_chat_realtime_payload_accepted',
+    'admin_active_chat_realtime_payload_ignored',
+    'admin_active_chat_message_appended',
+    'admin_support_action_received',
+    'admin_support_action_rendered',
+    'admin_support_action_ignored',
   ])
 
   const chat_realtime_success_gated = new Set([

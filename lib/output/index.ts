@@ -3,13 +3,13 @@ import 'server-only'
 import type { archived_message } from '@/lib/chat/archive'
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
+import { resolve_chat_external_notification_decision } from '@/lib/notification/rules'
 import type {
   chat_channel,
   chat_room,
 } from '@/lib/chat/room'
 
 import { deliver_line_chat_bundles } from './line'
-import { resolve_output_delivery_target } from './rules'
 import { deliver_web_chat_bundles } from './web'
 
 type output_chat_input = {
@@ -51,13 +51,16 @@ function first_message_uuid(messages: archived_message[]) {
 async function emit_reply_delivery_debug(input: {
   event:
     | 'output_reply_channel_resolved'
-    | 'admin_reply_delivery_started'
-    | 'admin_reply_delivery_succeeded'
-    | 'admin_reply_delivery_failed'
+    | 'output_reply_delivery_started'
+    | 'output_reply_delivery_succeeded'
+    | 'output_reply_delivery_failed'
   room: chat_room
   message_uuid: string | null
   last_incoming_channel: chat_channel
   selected_output_channel: 'line' | 'web'
+  user_active_channel: chat_channel | null
+  primary_channel: 'push' | 'line' | 'none' | null
+  reason: string
   sender_role: string | null
   error_code?: string | null
   error_message?: string | null
@@ -70,6 +73,9 @@ async function emit_reply_delivery_debug(input: {
       message_uuid: input.message_uuid,
       last_incoming_channel: input.last_incoming_channel,
       selected_output_channel: input.selected_output_channel,
+      user_active_channel: input.user_active_channel,
+      primary_channel: input.primary_channel,
+      reason: input.reason,
       sender_role: input.sender_role,
       receiver_user_uuid: input.room.user_uuid,
       receiver_participant_uuid: input.room.participant_uuid,
@@ -82,10 +88,53 @@ async function emit_reply_delivery_debug(input: {
 export async function output_chat_bundles(
   input: output_chat_input,
 ) {
-  const target = resolve_output_delivery_target(input.channel)
   const message_uuid = first_message_uuid(input.messages)
   const is_admin_reply =
     input.sender_role === 'admin' || input.sender_role === 'concierge'
+  const notification_decision = is_admin_reply
+    ? await resolve_chat_external_notification_decision({
+        user_uuid: input.room.user_uuid,
+        participant_uuid: input.room.participant_uuid,
+        source_channel: input.channel,
+      })
+    : null
+  const participant_presence = is_admin_reply
+    ? await supabase
+        .from('participants')
+        .select('is_active, last_channel, last_seen_at')
+        .eq('participant_uuid', input.room.participant_uuid)
+        .maybeSingle()
+    : null
+  const active_row =
+    (participant_presence?.data as
+      | {
+          is_active?: boolean | null
+          last_channel?: string | null
+          last_seen_at?: string | null
+        }
+      | null) ?? null
+  const user_active_channel =
+    active_row?.is_active === true &&
+    (active_row.last_channel === 'web' ||
+      active_row.last_channel === 'pwa' ||
+      active_row.last_channel === 'liff')
+      ? (active_row.last_channel as chat_channel)
+      : null
+  const target =
+    user_active_channel !== null
+      ? 'web'
+      : input.channel === 'line'
+        ? 'line'
+        : 'web'
+  const reason =
+    user_active_channel !== null
+      ? 'active_in_app_chat'
+      : input.channel === 'line'
+        ? 'last_incoming_line'
+        : 'last_incoming_web_like'
+  const primary_channel = notification_decision
+    ? notification_decision.primary_channel
+    : null
 
   if (is_admin_reply) {
     await emit_reply_delivery_debug({
@@ -94,15 +143,21 @@ export async function output_chat_bundles(
       message_uuid,
       last_incoming_channel: input.channel,
       selected_output_channel: target,
+      user_active_channel,
+      primary_channel,
+      reason,
       sender_role: input.sender_role ?? null,
     })
 
     await emit_reply_delivery_debug({
-      event: 'admin_reply_delivery_started',
+      event: 'output_reply_delivery_started',
       room: input.room,
       message_uuid,
       last_incoming_channel: input.channel,
       selected_output_channel: target,
+      user_active_channel,
+      primary_channel,
+      reason,
       sender_role: input.sender_role ?? null,
     })
   }
@@ -126,22 +181,28 @@ export async function output_chat_bundles(
 
     if (is_admin_reply) {
       await emit_reply_delivery_debug({
-        event: 'admin_reply_delivery_succeeded',
+        event: 'output_reply_delivery_succeeded',
         room: input.room,
         message_uuid,
         last_incoming_channel: input.channel,
         selected_output_channel: target,
+        user_active_channel,
+        primary_channel,
+        reason,
         sender_role: input.sender_role ?? null,
       })
     }
   } catch (error) {
     if (is_admin_reply) {
       await emit_reply_delivery_debug({
-        event: 'admin_reply_delivery_failed',
+        event: 'output_reply_delivery_failed',
         room: input.room,
         message_uuid,
         last_incoming_channel: input.channel,
         selected_output_channel: target,
+        user_active_channel,
+        primary_channel,
+        reason,
         sender_role: input.sender_role ?? null,
         error_code: error instanceof Error ? error.name : 'output_error',
         error_message: error instanceof Error ? error.message : String(error),
