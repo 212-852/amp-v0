@@ -6,6 +6,7 @@ import PawIcon from '@/components/icons/paw'
 import type { reception_room_message } from '@/lib/admin/reception/room'
 import {
   archived_message_to_timeline_message,
+  compare_chat_room_timeline_messages,
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
 import {
@@ -37,28 +38,6 @@ type AdminChatTimelineProps = {
   room_display_title: string
 }
 
-function compare_timeline_asc(
-  a: reception_room_message,
-  b: reception_room_message,
-): number {
-  if (a.sequence !== null && b.sequence !== null) {
-    return a.sequence - b.sequence
-  }
-
-  if (a.sequence !== null) {
-    return -1
-  }
-
-  if (b.sequence !== null) {
-    return 1
-  }
-
-  return (
-    new Date(a.created_at ?? 0).getTime() -
-    new Date(b.created_at ?? 0).getTime()
-  )
-}
-
 function merge_timeline_rows(
   previous: reception_room_message[],
   addition: reception_room_message[],
@@ -82,7 +61,7 @@ function merge_timeline_rows(
     merged.push(row)
   }
 
-  const rows = merged.sort(compare_timeline_asc)
+  const rows = merged.sort(compare_chat_room_timeline_messages)
 
   return {
     rows,
@@ -166,7 +145,7 @@ export default function AdminChatTimeline({
   const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
-    [...initial_messages].sort(compare_timeline_asc),
+    [...initial_messages].sort(compare_chat_room_timeline_messages),
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
@@ -191,8 +170,6 @@ export default function AdminChatTimeline({
     role: null as string | null,
   })
 
-  const set_rows_ref = useRef(set_rows)
-
   const subscribed_room_uuid_ref = useRef<string | null>(null)
 
   useEffect(() => {
@@ -208,7 +185,6 @@ export default function AdminChatTimeline({
       participant_uuid: staff_participant_uuid,
       role: 'admin',
     }
-    set_rows_ref.current = set_rows
   }, [room_uuid, staff_participant_uuid, staff_tier, staff_user_uuid])
 
   useEffect(() => {
@@ -349,6 +325,14 @@ export default function AdminChatTimeline({
           bundle: archived.bundle,
         })
 
+        const row_rt_debug = {
+          message_channel: archived.insert_row_channel ?? null,
+          message_source_channel: archived.body_source_channel ?? null,
+          message_direction:
+            archived.body_direction ?? mapped.direction ?? null,
+          sender_participant_uuid: archived.sender_participant_uuid ?? null,
+        }
+
         const near_bottom_before = compute_message_list_near_bottom(
           message_list_scroll_ref.current,
         )
@@ -365,9 +349,7 @@ export default function AdminChatTimeline({
           channel_name: chat_room_realtime_channel_name(locked_room),
           message_uuid: mapped.message_uuid,
           payload_room_uuid: mapped.room_uuid,
-          message_direction: mapped.direction,
-          message_channel: null,
-          message_source_channel: null,
+          ...row_rt_debug,
           phase: 'admin_chat_message_append',
         })
 
@@ -379,7 +361,7 @@ export default function AdminChatTimeline({
 
         let append_error: string | null = null
 
-        set_rows_ref.current((previous) => {
+        set_rows((previous) => {
           try {
             const result = merge_timeline_rows(previous, [mapped])
             update_result = {
@@ -417,7 +399,7 @@ export default function AdminChatTimeline({
             channel_name: chat_room_realtime_channel_name(locked_room),
             message_uuid: mapped.message_uuid,
             payload_room_uuid: mapped.room_uuid,
-            message_direction: mapped.direction,
+            ...row_rt_debug,
             error_message: append_error,
             prev_message_count: update_result.prev_message_count,
             next_message_count: update_result.next_message_count,
@@ -442,7 +424,7 @@ export default function AdminChatTimeline({
             channel_name: chat_room_realtime_channel_name(locked_room),
             message_uuid: mapped.message_uuid,
             payload_room_uuid: mapped.room_uuid,
-            message_direction: mapped.direction,
+            ...row_rt_debug,
             ignored_reason: 'message_uuid_dedupe',
             prev_message_count: update_result.prev_message_count,
             next_message_count: update_result.next_message_count,
@@ -465,7 +447,7 @@ export default function AdminChatTimeline({
           channel_name: chat_room_realtime_channel_name(locked_room),
           message_uuid: mapped.message_uuid,
           payload_room_uuid: mapped.room_uuid,
-          message_direction: mapped.direction,
+          ...row_rt_debug,
           prev_message_count: update_result.prev_message_count,
           next_message_count: update_result.next_message_count,
           phase: 'admin_chat_message_append',

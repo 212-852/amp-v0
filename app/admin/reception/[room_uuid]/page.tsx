@@ -184,6 +184,7 @@ export default async function AdminReceptionRoomPage({
         </div>
 
         <AdminChatTimeline
+          key={room_uuid}
           messages={message_result.messages}
           load_failed={!message_result.ok}
           room_uuid={room_uuid}

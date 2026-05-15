@@ -115,19 +115,36 @@ export function archived_messages_to_reception_timeline(
   return rows.map(archived_message_to_timeline_message)
 }
 
+/**
+ * Realtime rows often omit `sequence` in JSON (defaults to 0 in the client parser).
+ * Treat 0 like unknown so we fall back to `created_at` ordering like server-indexed rows.
+ */
+export function timeline_sequence_sort_value(
+  sequence: number | null | undefined,
+): number | null {
+  if (sequence === null || sequence === undefined || sequence === 0) {
+    return null
+  }
+
+  return sequence
+}
+
 export function compare_chat_room_timeline_messages(
   a: chat_room_timeline_message,
   b: chat_room_timeline_message,
 ): number {
-  if (a.sequence !== null && b.sequence !== null) {
-    return a.sequence - b.sequence
+  const sa = timeline_sequence_sort_value(a.sequence)
+  const sb = timeline_sequence_sort_value(b.sequence)
+
+  if (sa !== null && sb !== null) {
+    return sa - sb
   }
 
-  if (a.sequence !== null) {
+  if (sa !== null) {
     return -1
   }
 
-  if (b.sequence !== null) {
+  if (sb !== null) {
     return 1
   }
 

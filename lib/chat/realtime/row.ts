@@ -14,6 +14,12 @@ export type realtime_archived_message = archived_message & {
   sender_user_uuid?: string | null
   sender_participant_uuid?: string | null
   sender_role?: string | null
+  /** `messages.channel` from INSERT row when present. */
+  insert_row_channel?: string | null
+  /** `body.source_channel` from archived JSON (e.g. line). */
+  body_source_channel?: string | null
+  /** `body.direction` from archived JSON (e.g. incoming). */
+  body_direction?: string | null
 }
 
 type parsed_message_body = {
@@ -67,6 +73,11 @@ export function archived_message_from_message_row(
   }
 
   const sequence = typeof parsed.sequence === 'number' ? parsed.sequence : 0
+  const flat = parsed as Record<string, unknown>
+  const body_source_channel =
+    typeof flat.source_channel === 'string' ? flat.source_channel : null
+  const body_direction =
+    typeof flat.direction === 'string' ? flat.direction : null
 
   return {
     archive_uuid: row.message_uuid,
@@ -88,5 +99,9 @@ export function archived_message_from_message_row(
         : typeof bundle.sender === 'string'
           ? bundle.sender
           : null,
+    insert_row_channel:
+      typeof row.channel === 'string' ? row.channel : null,
+    body_source_channel,
+    body_direction,
   }
 }
