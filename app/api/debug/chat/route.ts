@@ -7,6 +7,7 @@ type chat_debug_body = {
   room_uuid?: unknown
   active_room_uuid?: unknown
   participant_uuid?: unknown
+  admin_participant_uuid?: unknown
   admin_user_uuid?: unknown
   user_uuid?: unknown
   role?: unknown
@@ -93,6 +94,7 @@ type chat_debug_body = {
   previous_room_uuid?: unknown
   next_room_uuid?: unknown
   leave_reason?: unknown
+  reason?: unknown
   pathname?: unknown
   action_type?: unknown
 }
@@ -123,6 +125,7 @@ export async function POST(request: Request) {
       room_uuid: string_or_null(body?.room_uuid),
       active_room_uuid: string_or_null(body?.active_room_uuid),
       participant_uuid: string_or_null(body?.participant_uuid),
+      admin_participant_uuid: string_or_null(body?.admin_participant_uuid),
       admin_user_uuid: string_or_null(body?.admin_user_uuid),
       user_uuid: string_or_null(body?.user_uuid),
       role: string_or_null(body?.role),
@@ -224,6 +227,7 @@ export async function POST(request: Request) {
       previous_room_uuid: string_or_null(body?.previous_room_uuid),
       next_room_uuid: string_or_null(body?.next_room_uuid),
       leave_reason: string_or_null(body?.leave_reason),
+      reason: string_or_null(body?.reason),
       pathname: string_or_null(body?.pathname),
       action_type: string_or_null(body?.action_type),
     },

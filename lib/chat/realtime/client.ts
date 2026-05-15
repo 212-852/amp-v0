@@ -180,6 +180,7 @@ export type chat_realtime_debug_payload = {
   room_uuid: string | null
   active_room_uuid?: string | null
   participant_uuid?: string | null
+  admin_participant_uuid?: string | null
   admin_user_uuid?: string | null
   user_uuid?: string | null
   role?: string | null
@@ -269,6 +270,7 @@ export type chat_realtime_debug_payload = {
   previous_room_uuid?: string | null
   next_room_uuid?: string | null
   leave_reason?: string | null
+  reason?: string | null
   pathname?: string | null
   action_type?: string | null
 }

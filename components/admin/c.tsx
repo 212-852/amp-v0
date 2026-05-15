@@ -186,6 +186,72 @@ export default function AdminChatTimeline({
   const show_jump_button_ref = useRef(false)
 
   useEffect(() => {
+    const pathname =
+      typeof window !== 'undefined' ? window.location.pathname : null
+
+    send_chat_realtime_debug({
+      event: 'admin_chat_detail_mounted',
+      room_uuid,
+      active_room_uuid: room_uuid,
+      previous_room_uuid: null,
+      next_room_uuid: room_uuid,
+      participant_uuid: staff_participant_uuid,
+      admin_user_uuid: staff_user_uuid,
+      user_uuid: staff_user_uuid,
+      role: 'admin',
+      tier: staff_tier,
+      source_channel: 'admin',
+      pathname,
+      reason: 'component_mount',
+      phase: 'admin_chat_detail_lifecycle',
+    })
+
+    return () => {
+      send_chat_realtime_debug({
+        event: 'admin_chat_detail_unmounted',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        previous_room_uuid: room_uuid,
+        next_room_uuid: null,
+        participant_uuid: staff_participant_uuid,
+        admin_user_uuid: staff_user_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'admin',
+        tier: staff_tier,
+        source_channel: 'admin',
+        pathname:
+          typeof window !== 'undefined' ? window.location.pathname : null,
+        reason: 'component_unmount',
+        phase: 'admin_chat_detail_lifecycle',
+      })
+    }
+  }, [room_uuid, staff_participant_uuid, staff_tier, staff_user_uuid])
+
+  useEffect(() => {
+    if (!room_uuid || !staff_participant_uuid) {
+      return
+    }
+
+    send_chat_realtime_debug({
+      event: 'admin_active_room_ready',
+      room_uuid,
+      active_room_uuid: room_uuid,
+      previous_room_uuid: null,
+      next_room_uuid: room_uuid,
+      participant_uuid: staff_participant_uuid,
+      admin_user_uuid: staff_user_uuid,
+      user_uuid: staff_user_uuid,
+      role: 'admin',
+      tier: staff_tier,
+      source_channel: 'admin',
+      pathname:
+        typeof window !== 'undefined' ? window.location.pathname : null,
+      reason: staff_user_uuid ? 'admin_session_resolved' : 'room_resolved',
+      phase: 'admin_chat_detail_lifecycle',
+    })
+  }, [room_uuid, staff_participant_uuid, staff_tier, staff_user_uuid])
+
+  useEffect(() => {
     staff_participant_uuid_ref.current = staff_participant_uuid
     latest_room_uuid_ref.current = room_uuid
     admin_rt_ctx_ref.current = {

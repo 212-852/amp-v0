@@ -317,6 +317,9 @@ export function resolve_debug_rule(input: {
 
   const support_started_ok_debug = new Set([
     'admin_support_enter_detected',
+    'enter_support_room_started',
+    'enter_support_room_skipped',
+    'enter_support_room_succeeded',
     'support_started_action_create_started',
     'support_started_action_create_succeeded',
     'support_started_notify_route_decided',
@@ -343,7 +346,8 @@ export function resolve_debug_rule(input: {
 
   if (
     input.category === 'admin_chat' &&
-    input.event === 'support_started_action_create_failed'
+    (input.event === 'support_started_action_create_failed' ||
+      input.event === 'enter_support_room_failed')
   ) {
     return {
       category: 'admin_chat',
@@ -401,6 +405,10 @@ export function resolve_debug_rule(input: {
 
   const support_left_lifecycle = new Set([
     'admin_support_leave_detected',
+    'leave_support_room_started',
+    'leave_support_room_skipped',
+    'leave_support_room_succeeded',
+    'leave_support_room_failed',
     'support_left_action_create_started',
     'support_left_action_create_succeeded',
     'support_left_action_create_failed',
@@ -659,7 +667,17 @@ export function resolve_debug_rule(input: {
     'support_left_realtime_ignored',
     'support_action_realtime_received',
     'support_action_realtime_rendered',
+    'support_action_realtime_ignored',
     'support_started_realtime_rendered',
+    'admin_chat_detail_mounted',
+    'admin_chat_detail_unmounted',
+    'admin_active_room_ready',
+    'admin_support_enter_call_started',
+    'admin_support_enter_call_succeeded',
+    'admin_support_enter_call_failed',
+    'admin_support_leave_call_started',
+    'admin_support_leave_call_succeeded',
+    'admin_support_leave_call_failed',
     'admin_leave_route_change_detected',
     'admin_leave_room_change_detected',
     'admin_leave_visibility_hidden_detected',
