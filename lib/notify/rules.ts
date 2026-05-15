@@ -85,6 +85,21 @@ export type notify_event =
       source_channel: string
       started_at: string
     }
+    | {
+      event: 'support_left'
+      room_uuid: string
+      action_uuid: string
+      created_at: string
+      admin_display_label: string
+      customer_display_name: string
+      admin_user_uuid: string
+      admin_participant_uuid: string | null
+      customer_user_uuid: string | null
+      customer_participant_uuid: string | null
+      discord_thread_action_id: string | null
+      source_channel: string
+      left_at: string
+    }
   | {
       event: 'admin_notification'
       admin_event:
@@ -182,6 +197,10 @@ export function should_send_notify(event: notify_event) {
     return control.notify.support_started
   }
 
+  if (event.event === 'support_left') {
+    return control.notify.support_started
+  }
+
   if (event.event === 'admin_notification') {
     return true
   }
@@ -256,6 +275,14 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
       category: 'support_started',
       priority: 'normal',
       channels: ['push', 'discord_action'],
+    }
+  }
+
+  if (event.event === 'support_left') {
+    return {
+      category: 'support_started',
+      priority: 'normal',
+      channels: ['discord_action'],
     }
   }
 
@@ -417,13 +444,19 @@ export function resolve_line_new_chat_open_url(input: {
   return user_with_room
 }
 
+export function format_support_left_notify_content(
+  event: Extract<notify_event, { event: 'support_left' }>,
+): string {
+  return `${event.admin_display_label} が退出しました`
+}
+
 export function format_support_started_notify_content(
   event: Extract<notify_event, { event: 'support_started' }>,
 ): string {
   return [
     '[SUPPORT STARTED]',
     '',
-    `${event.admin_display_label} が対応を始めました`,
+    `${event.admin_display_label} が対応を開始しました`,
     `customer_display_name: ${event.customer_display_name}`,
     `room_uuid: ${event.room_uuid}`,
     `admin_internal_name: ${event.admin_internal_name ?? 'none'}`,

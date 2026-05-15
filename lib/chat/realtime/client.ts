@@ -37,10 +37,41 @@ export type chat_presence_payload = {
   source_channel: string | null
 }
 
-/** User and admin must use the same topic string for broadcast + postgres_changes. */
+/** User and admin must use the same topic string for broadcast typing. */
 export function chat_room_realtime_channel_name(room_uuid: string) {
   return `room:${room_uuid}`
 }
+
+export type chat_realtime_listener_scope = 'default' | 'admin_list' | 'admin_active'
+
+/** Postgres listener channel per surface (avoids Supabase channel name collisions). */
+export function chat_realtime_postgres_channel_name(
+  room_uuid: string,
+  scope: chat_realtime_listener_scope = 'default',
+) {
+  if (scope === 'admin_list') {
+    return `admin_room_list:${room_uuid}`
+  }
+
+  if (scope === 'admin_active') {
+    return `admin_active_chat:${room_uuid}`
+  }
+
+  return chat_room_realtime_channel_name(room_uuid)
+}
+
+export type chat_support_action_payload = {
+  room_uuid: string
+  action_uuid: string
+  action_type: string
+  body: string | null
+  created_at: string | null
+  actor_user_uuid: string | null
+  actor_display_name: string | null
+  source_channel: string | null
+}
+
+const typing_companion_channels = new WeakMap<RealtimeChannel, RealtimeChannel>()
 
 export const chat_typing_expire_ms = 5_000
 
@@ -230,6 +261,10 @@ export type chat_realtime_debug_payload = {
   active_admin_count?: number | null
   typing_exists?: boolean | null
   unread_count?: number | null
+  action_uuid?: string | null
+  event_type?: string | null
+  prev_count?: number | null
+  next_count?: number | null
   latest_activity_at?: string | null
 }
 
@@ -312,6 +347,110 @@ function presence_payload_from_participant_row(
   }
 }
 
+function support_action_from_chat_actions_row(
+  value: unknown,
+): chat_support_action_payload | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const row = value as Record<string, unknown>
+  const room_uuid =
+    typeof row.room_uuid === 'string' ? row.room_uuid.trim() : ''
+  const action_type =
+    typeof row.action_type === 'string' ? row.action_type.trim() : ''
+
+  if (!room_uuid || !action_type) {
+    return null
+  }
+
+  const action_uuid_raw =
+    row.action_uuid ?? row.uuid ?? row.id ?? row.action_id
+  const action_uuid =
+    typeof action_uuid_raw === 'string' && action_uuid_raw.trim()
+      ? action_uuid_raw.trim()
+      : ''
+
+  if (!action_uuid) {
+    return null
+  }
+
+  const actor_user_uuid =
+    typeof row.actor_user_uuid === 'string'
+      ? row.actor_user_uuid
+      : typeof row.admin_user_uuid === 'string'
+        ? row.admin_user_uuid
+        : null
+  const actor_display_name =
+    typeof row.actor_display_name === 'string'
+      ? row.actor_display_name
+      : null
+  const source_channel =
+    typeof row.source_channel === 'string' ? row.source_channel : null
+  const body = typeof row.body === 'string' ? row.body : null
+  const created_at =
+    typeof row.created_at === 'string' ? row.created_at : null
+
+  return {
+    room_uuid,
+    action_uuid,
+    action_type,
+    body,
+    created_at,
+    actor_user_uuid,
+    actor_display_name,
+    source_channel,
+  }
+}
+
+function admin_subscribe_started_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'admin_list') {
+    return 'admin_room_list_realtime_subscribe_started'
+  }
+
+  if (scope === 'admin_active') {
+    return 'admin_active_chat_realtime_subscribe_started'
+  }
+
+  return 'chat_realtime_subscribe_started'
+}
+
+function admin_message_received_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'admin_list') {
+    return 'admin_room_list_message_received'
+  }
+
+  if (scope === 'admin_active') {
+    return 'admin_active_chat_realtime_payload_received'
+  }
+
+  return 'admin_realtime_payload_received'
+}
+
+function admin_message_accepted_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'admin_list') {
+    return 'admin_room_list_message_accepted'
+  }
+
+  if (scope === 'admin_active') {
+    return 'admin_active_chat_realtime_payload_accepted'
+  }
+
+  return 'admin_realtime_payload_accepted'
+}
+
+function admin_message_ignored_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'admin_list') {
+    return 'admin_room_list_message_ignored'
+  }
+
+  if (scope === 'admin_active') {
+    return 'admin_active_chat_realtime_payload_ignored'
+  }
+
+  return 'admin_realtime_payload_ignored'
+}
+
 export function subscribe_chat_room_realtime(input: {
   supabase: SupabaseClient
   room_uuid: string
@@ -321,6 +460,7 @@ export function subscribe_chat_room_realtime(input: {
   role?: string | null
   tier?: string | null
   source_channel?: string | null
+  listener_scope?: chat_realtime_listener_scope
   /** When set, broadcast self filter reads latest identity each callback (avoids stale subscribe closure). */
   active_typing_identity_ref?: MutableRefObject<{
     user_uuid: string | null
@@ -330,9 +470,15 @@ export function subscribe_chat_room_realtime(input: {
   on_message: (message: realtime_archived_message) => void
   on_typing: (payload: chat_typing_payload) => void
   on_presence?: (payload: chat_presence_payload) => void
+  on_support_action?: (payload: chat_support_action_payload) => void
 }): RealtimeChannel {
-  const channel_name = chat_room_realtime_channel_name(input.room_uuid)
+  const listener_scope = input.listener_scope ?? 'default'
+  const channel_name = chat_realtime_postgres_channel_name(
+    input.room_uuid,
+    listener_scope,
+  )
   const postgres_filter = `room_uuid=eq.${input.room_uuid}`
+  const is_admin_listener = input.source_channel === 'admin'
   const base_debug = {
     room_uuid: input.room_uuid,
     active_room_uuid: input.active_room_uuid ?? input.room_uuid,
@@ -347,6 +493,14 @@ export function subscribe_chat_room_realtime(input: {
     table: 'messages',
     filter: postgres_filter,
   }
+
+  send_chat_realtime_debug({
+    event: admin_subscribe_started_event(listener_scope),
+    ...base_debug,
+    subscribe_status: 'SUBSCRIBE_REQUESTED',
+    postgres_event: 'INSERT',
+    phase: 'subscribe_chat_room_realtime',
+  })
 
   send_chat_realtime_debug({
     event: 'chat_realtime_subscribe_started',
@@ -421,7 +575,10 @@ export function subscribe_chat_room_realtime(input: {
 
         if (admin_insert) {
           send_chat_realtime_debug({
-            event: 'admin_realtime_payload_received',
+            event:
+              listener_scope === 'default'
+                ? 'admin_realtime_payload_received'
+                : admin_message_received_event(listener_scope),
             ...base_debug,
             active_room_uuid: input.active_room_uuid ?? input.room_uuid,
             payload_room_uuid: admin_insert.payload_room_uuid,
@@ -469,7 +626,10 @@ export function subscribe_chat_room_realtime(input: {
         if (payload_room_uuid && payload_room_uuid !== input.room_uuid) {
           if (admin_insert) {
             send_chat_realtime_debug({
-              event: 'admin_realtime_payload_ignored',
+              event:
+                listener_scope === 'default'
+                  ? 'admin_realtime_payload_ignored'
+                  : admin_message_ignored_event(listener_scope),
               ...base_debug,
               active_room_uuid: input.active_room_uuid ?? input.room_uuid,
               payload_room_uuid,
@@ -508,7 +668,10 @@ export function subscribe_chat_room_realtime(input: {
         if (!message) {
           if (admin_insert) {
             send_chat_realtime_debug({
-              event: 'admin_realtime_payload_ignored',
+              event:
+                listener_scope === 'default'
+                  ? 'admin_realtime_payload_ignored'
+                  : admin_message_ignored_event(listener_scope),
               ...base_debug,
               active_room_uuid: input.active_room_uuid ?? input.room_uuid,
               payload_room_uuid,
@@ -557,7 +720,10 @@ export function subscribe_chat_room_realtime(input: {
 
         if (admin_insert) {
           send_chat_realtime_debug({
-            event: 'admin_realtime_payload_accepted',
+            event:
+              listener_scope === 'default'
+                ? 'admin_realtime_payload_accepted'
+                : admin_message_accepted_event(listener_scope),
             ...base_debug,
             active_room_uuid: input.active_room_uuid ?? input.room_uuid,
             payload_room_uuid,
@@ -625,6 +791,117 @@ export function subscribe_chat_room_realtime(input: {
         }
 
         input.on_message(message)
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: postgres_filter,
+      },
+      (payload) => {
+        const raw_new = payload.new as Record<string, unknown> | undefined
+        const admin_row =
+          is_admin_listener && raw_new
+            ? extract_admin_realtime_insert_fields(raw_new)
+            : null
+
+        if (admin_row) {
+          send_chat_realtime_debug({
+            event:
+              listener_scope === 'default'
+                ? 'admin_realtime_payload_received'
+                : admin_message_received_event(listener_scope),
+            ...base_debug,
+            postgres_event: 'UPDATE',
+            event_name: 'UPDATE',
+            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+            payload_room_uuid: admin_row.payload_room_uuid,
+            message_uuid: admin_row.message_uuid,
+            payload_message_uuid: admin_row.message_uuid,
+            ...admin_realtime_message_field_payload(admin_row),
+            phase: 'postgres_changes_update_admin',
+          })
+        }
+
+        const row = payload.new as message_insert_row & { room_uuid?: string }
+        const payload_room_uuid =
+          typeof row?.room_uuid === 'string' ? row.room_uuid : null
+
+        if (!payload_room_uuid || payload_room_uuid !== input.room_uuid) {
+          return
+        }
+
+        const message = archived_message_from_message_row(row as message_insert_row)
+
+        if (!message) {
+          return
+        }
+
+        if (admin_row) {
+          send_chat_realtime_debug({
+            event:
+              listener_scope === 'default'
+                ? 'admin_realtime_payload_accepted'
+                : admin_message_accepted_event(listener_scope),
+            ...base_debug,
+            postgres_event: 'UPDATE',
+            event_name: 'UPDATE',
+            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+            payload_room_uuid,
+            message_uuid: message.archive_uuid,
+            payload_message_uuid: message.archive_uuid,
+            ...admin_realtime_message_field_payload(admin_row),
+            ignored_reason: null,
+            phase: 'postgres_changes_update_admin',
+          })
+        }
+
+        input.on_message(message)
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'chat_actions',
+        filter: postgres_filter,
+      },
+      (payload) => {
+        if (!input.on_support_action) {
+          return
+        }
+
+        const action = support_action_from_chat_actions_row(payload.new)
+
+        send_chat_realtime_debug({
+          event: 'admin_support_action_received',
+          ...base_debug,
+          postgres_event: 'INSERT',
+          event_name: 'INSERT',
+          table: 'chat_actions',
+          payload_room_uuid: action?.room_uuid ?? null,
+          payload_action_uuid: action?.action_uuid ?? null,
+          event_type: action?.action_type ?? null,
+          ignored_reason: action ? null : 'unparseable_chat_action_row',
+          phase: 'postgres_changes_chat_actions',
+        })
+
+        if (!action || action.room_uuid !== input.room_uuid) {
+          return
+        }
+
+        if (
+          action.action_type !== 'support_started' &&
+          action.action_type !== 'support_left'
+        ) {
+          return
+        }
+
+        input.on_support_action(action)
       },
     )
     .on(
@@ -764,7 +1041,9 @@ export function subscribe_chat_room_realtime(input: {
         input.on_presence?.(presence)
       },
     )
-    .on('broadcast', { event: 'typing' }, (payload) => {
+
+  if (listener_scope !== 'admin_list') {
+    channel.on('broadcast', { event: 'typing' }, (payload) => {
       const active_identity =
         input.active_typing_identity_ref?.current ?? {
           user_uuid: input.user_uuid ?? null,
@@ -942,6 +1221,7 @@ export function subscribe_chat_room_realtime(input: {
 
       input.on_typing(typing)
     })
+  }
 
   if (input.source_channel === 'admin' && input.on_presence) {
     send_chat_realtime_debug({

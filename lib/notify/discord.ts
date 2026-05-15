@@ -489,6 +489,7 @@ export function discord_action_webhook_configured(): boolean {
  */
 export async function post_discord_action_webhook_message(input: {
   content: string
+  thread_id?: string | null
 }): Promise<
   | { ok: true }
   | { ok: false; http_status?: number; error_text?: string | null }
@@ -505,7 +506,15 @@ export async function post_discord_action_webhook_message(input: {
   const trimmed =
     input.content.length > 2000 ? input.content.slice(0, 2000) : input.content
 
-  const response = await fetch(url, {
+  const thread_id =
+    typeof input.thread_id === 'string' && input.thread_id.trim()
+      ? input.thread_id.trim()
+      : null
+  const target_url = thread_id
+    ? `${url}?thread_id=${encodeURIComponent(thread_id)}`
+    : url
+
+  const response = await fetch(target_url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

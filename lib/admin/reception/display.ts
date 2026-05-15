@@ -85,27 +85,10 @@ export function reception_presence_label(input: {
   last_seen_at?: string | null
 }) {
   if (input.is_typing === true) {
-    return '入力中...'
+    return 'ユーザー入力中'
   }
 
-  if (input.is_online === true) {
-    return 'オンライン'
-  }
-
-  if (!input.last_seen_at) {
-    return '最終 --:--'
-  }
-
-  const date = new Date(input.last_seen_at)
-
-  if (Number.isNaN(date.getTime())) {
-    return '最終 --:--'
-  }
-
-  return `最終 ${date.toLocaleTimeString('ja-JP', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })}`
+  return ''
 }
 
 export function build_room_card_summary(input: {
@@ -164,7 +147,7 @@ export function build_room_card_summary(input: {
   if (idle) {
     return {
       summary_type: 'admin_idle',
-      summary_text: `${idle.row.display_name} 離席中`,
+      summary_text: `${idle.row.display_name} 退出`,
       active_admin_count: 0,
       typing_exists: false,
     }

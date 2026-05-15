@@ -276,6 +276,18 @@ export default function AdminReceptionRoomListLive({
       const list_title =
         titles_ref.current.get(room_uuid) ?? room_uuid.slice(0, 8)
 
+      send_chat_realtime_debug({
+        event: 'admin_room_list_realtime_subscribe_started',
+        room_uuid,
+        active_room_uuid: null,
+        user_uuid: session.user_uuid ?? null,
+        role: 'admin',
+        tier: session.tier ?? null,
+        source_channel: 'admin',
+        channel_name: `admin_room_list:${room_uuid}`,
+        phase: 'admin_room_list_realtime',
+      })
+
       const channel = subscribe_chat_room_realtime({
         supabase,
         room_uuid,
@@ -285,6 +297,7 @@ export default function AdminReceptionRoomListLive({
         role: 'admin',
         tier: session.tier ?? null,
         source_channel: 'admin',
+        listener_scope: 'admin_list',
         on_message: (message) => {
           const source_channel =
             message.body_source_channel ?? message.insert_row_channel ?? null
@@ -293,8 +306,9 @@ export default function AdminReceptionRoomListLive({
           const last_message_at = message.created_at ?? new Date().toISOString()
 
           send_chat_realtime_debug({
-            event: 'room_card_realtime_message_received',
+            event: 'admin_room_list_message_received',
             room_uuid: message.room_uuid,
+            active_room_uuid: null,
             message_uuid: message.archive_uuid,
             payload_message_uuid: message.archive_uuid,
             source_channel: source_channel ?? 'web',
@@ -322,8 +336,9 @@ export default function AdminReceptionRoomListLive({
               : null
 
           send_chat_realtime_debug({
-            event: 'admin_room_list_realtime_payload_accepted',
+            event: 'admin_room_list_message_accepted',
             room_uuid: message.room_uuid,
+            active_room_uuid: null,
             message_uuid: message.archive_uuid,
             payload_message_uuid: message.archive_uuid,
             source_channel: source_channel ?? 'web',
@@ -400,7 +415,7 @@ export default function AdminReceptionRoomListLive({
             const sorted = sort_room_cards(mapped)
 
             send_chat_realtime_debug({
-              event: 'room_card_resorted',
+              event: 'admin_room_card_resorted',
               room_uuid: message.room_uuid,
               message_uuid: message.archive_uuid,
               payload_message_uuid: message.archive_uuid,
@@ -410,6 +425,25 @@ export default function AdminReceptionRoomListLive({
               last_message_at,
               prev_room_count: previous.length,
               next_room_count: sorted.length,
+              prev_count: previous.length,
+              next_count: sorted.length,
+              ignored_reason: null,
+              phase: 'admin_room_list_state_update',
+            })
+
+            send_chat_realtime_debug({
+              event: 'admin_room_card_state_updated',
+              room_uuid: message.room_uuid,
+              message_uuid: message.archive_uuid,
+              payload_message_uuid: message.archive_uuid,
+              source_channel: source_channel ?? 'web',
+              channel,
+              direction,
+              last_message_at,
+              prev_room_count: previous.length,
+              next_room_count: sorted.length,
+              prev_count: previous.length,
+              next_count: sorted.length,
               ignored_reason: null,
               phase: 'admin_room_list_state_update',
             })
@@ -453,6 +487,79 @@ export default function AdminReceptionRoomListLive({
               list_title,
             ),
             scroll_to_bottom: null,
+          })
+        },
+        on_support_action: (action) => {
+          const activity_at = action.created_at ?? new Date().toISOString()
+          const body_text = action.body?.trim() ?? ''
+
+          set_rooms((previous) => {
+            let matched = false
+            const next = previous.map((row) => {
+              if (row.room_uuid !== action.room_uuid) {
+                return row
+              }
+
+              matched = true
+              const next_row = {
+                ...row,
+                preview: body_text || row.preview,
+                updated_at: activity_at,
+                latest_activity_at: activity_at,
+              }
+
+              send_chat_realtime_debug({
+                event: 'admin_room_card_state_updated',
+                room_uuid: action.room_uuid,
+                active_room_uuid: null,
+                action_uuid: action.action_uuid,
+                event_type: action.action_type,
+                source_channel: action.source_channel ?? 'admin',
+                prev_count: previous.length,
+                next_count: previous.length,
+                ignored_reason: null,
+                phase: 'admin_room_list_support_action',
+              })
+
+              send_room_card_summary_debug({
+                event: 'room_card_summary_build_started',
+                room: next_row,
+              })
+              send_room_card_summary_debug({
+                event: 'room_card_summary_updated',
+                room: next_row,
+              })
+
+              return next_row
+            })
+
+            if (!matched) {
+              return previous
+            }
+
+            const sorted = sort_room_cards(next)
+
+            send_chat_realtime_debug({
+              event: 'admin_room_card_resorted',
+              room_uuid: action.room_uuid,
+              action_uuid: action.action_uuid,
+              event_type: action.action_type,
+              prev_count: previous.length,
+              next_count: sorted.length,
+              phase: 'admin_room_list_support_action',
+            })
+
+            return sorted
+          })
+
+          send_chat_realtime_debug({
+            event: 'admin_support_action_rendered',
+            room_uuid: action.room_uuid,
+            active_room_uuid: null,
+            action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            source_channel: action.source_channel ?? 'admin',
+            phase: 'admin_room_list_support_action',
           })
         },
         on_typing: () => {},
@@ -942,9 +1049,11 @@ export default function AdminReceptionRoomListLive({
                 <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-white">
                   {reception_channel_label(room.last_incoming_channel)}
                 </span>
-                <span className="text-neutral-500">
-                  {presence_meta_line_for_room(room)}
-                </span>
+                {presence_meta_line_for_room(room) ? (
+                  <span className="text-neutral-500">
+                    {presence_meta_line_for_room(room)}
+                  </span>
+                ) : null}
               </div>
             </div>
           </Link>

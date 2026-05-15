@@ -174,6 +174,7 @@ export default function AdminReceptionActiveSummary({
       role: 'admin',
       tier: staff_tier,
       source_channel: 'admin',
+      listener_scope: 'admin_active',
       on_message: (message) => {
         const source_channel =
           message.body_source_channel ?? message.insert_row_channel ?? null

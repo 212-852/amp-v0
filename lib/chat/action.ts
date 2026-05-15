@@ -41,6 +41,7 @@ import {
 import { deliver_line_text_reply } from '@/lib/output/line'
 import type { chat_locale } from './message'
 import { insert_support_started_action, merge_support_started_notify_meta_into_chat_action } from '@/lib/actions/support_started'
+import { insert_support_left_action } from '@/lib/actions/support_left'
 import { public_actions_table_name } from '@/lib/actions/table'
 import { notify } from '@/lib/notify'
 import {
@@ -2527,7 +2528,7 @@ export async function handle_admin_reception_room_opened(
   const display_name = await resolve_handoff_memo_saved_by_name(
     session.user_uuid,
   )
-  const text = `${display_name} が対応を始めました`
+  const text = `${display_name} が対応を開始しました`
   const bundle = build_room_action_log_bundle({
     text,
     locale: 'ja',
@@ -2795,6 +2796,134 @@ export async function handle_admin_reception_room_opened(
     status: 200,
     body: { ok: true },
   }
+}
+
+export async function record_admin_support_left_session(input: {
+  room_uuid: string
+  staff_participant_uuid: string
+}) {
+  const room_uuid = clean_uuid(input.room_uuid)
+  const staff_participant_uuid = clean_uuid(input.staff_participant_uuid)
+
+  if (!room_uuid || !staff_participant_uuid) {
+    return
+  }
+
+  const [staff_pick, user_pick, bot_pick] = await Promise.all([
+    supabase
+      .from('participants')
+      .select('participant_uuid, user_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('participant_uuid', staff_participant_uuid)
+      .maybeSingle(),
+    supabase
+      .from('participants')
+      .select('participant_uuid, user_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('role', 'user')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('participants')
+      .select('participant_uuid')
+      .eq('room_uuid', room_uuid)
+      .eq('role', 'bot')
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  const admin_uuid = clean_uuid(
+    (staff_pick.data as { user_uuid?: string } | null)?.user_uuid ?? null,
+  )
+  const user_participant_uuid = clean_uuid(
+    (user_pick.data as { participant_uuid?: string } | null)?.participant_uuid ??
+      null,
+  )
+  const bot_participant_uuid = clean_uuid(
+    (bot_pick.data as { participant_uuid?: string } | null)?.participant_uuid ??
+      null,
+  )
+
+  if (!admin_uuid || !user_participant_uuid || !bot_participant_uuid) {
+    return
+  }
+
+  const display_name = await resolve_handoff_memo_saved_by_name(admin_uuid)
+  const text = `${display_name} が退出しました`
+  const bundle = build_room_action_log_bundle({
+    text,
+    locale: 'ja',
+    actor_display_name: display_name,
+    admin_user_uuid: admin_uuid,
+  })
+
+  try {
+    await archive_message_bundles({
+      room_uuid,
+      participant_uuid: user_participant_uuid,
+      bot_participant_uuid,
+      channel: 'web',
+      bundles: [bundle],
+    })
+  } catch (error) {
+    console.error('[admin_support_left] archive_failed', {
+      room_uuid,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  const room_pick = await supabase
+    .from('rooms')
+    .select('action_id')
+    .eq('room_uuid', room_uuid)
+    .maybeSingle()
+
+  const discord_thread_action_id = normalize_discord_thread_action_id(
+    room_pick.data?.action_id ?? null,
+  )
+  const subject = await resolve_room_subject(room_uuid)
+
+  const inserted = await insert_support_left_action(supabase, {
+    room_uuid,
+    admin_user_uuid: admin_uuid,
+    admin_participant_uuid: staff_participant_uuid,
+    customer_user_uuid: clean_uuid(
+      (user_pick.data as { user_uuid?: string } | null)?.user_uuid ?? null,
+    ),
+    customer_participant_uuid: user_participant_uuid,
+    discord_id: discord_thread_action_id,
+    body: text,
+    customer_display_name: subject.display_name,
+    admin_internal_name: null,
+    admin_display_label: display_name,
+  })
+
+  if (!inserted.ok) {
+    console.error('[admin_support_left] action_insert_failed', {
+      room_uuid,
+      error: inserted.error,
+    })
+    return
+  }
+
+  await notify({
+    event: 'support_left',
+    room_uuid,
+    action_uuid: inserted.action_row_id,
+    created_at: inserted.created_at,
+    admin_display_label: display_name,
+    customer_display_name: subject.display_name,
+    admin_user_uuid: admin_uuid,
+    admin_participant_uuid: staff_participant_uuid,
+    customer_user_uuid: clean_uuid(
+      (user_pick.data as { user_uuid?: string } | null)?.user_uuid ?? null,
+    ),
+    customer_participant_uuid: user_participant_uuid,
+    discord_thread_action_id,
+    source_channel: 'admin',
+    left_at: inserted.created_at,
+  })
 }
 
 export async function handle_chat_message_request(

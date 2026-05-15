@@ -24,6 +24,7 @@ import {
   type notify_recipient,
 } from './recipients'
 import {
+  format_support_left_notify_content,
   format_support_started_notify_content,
   normalize_line_notify_last_channel,
   resolve_concierge_targets,
@@ -278,6 +279,10 @@ export async function notify(
 
   if (event.event === 'support_started') {
     return deliver_support_started(event)
+  }
+
+  if (event.event === 'support_left') {
+    return deliver_support_left(event)
   }
 
   if (event.event === 'admin_notification') {
@@ -541,6 +546,35 @@ async function deliver_admin_notification(input: {
   }
 }
 
+async function post_support_lifecycle_discord(input: {
+  room_uuid: string
+  discord_thread_action_id: string | null
+  content_line: string
+}) {
+  const normalized = normalize_discord_thread_action_id(
+    input.discord_thread_action_id,
+  )
+  const result = await sync_discord_action_context({
+    title: `Support - ${short_room_uuid(input.room_uuid)}`,
+    content: input.content_line,
+    action_id: normalized,
+  })
+
+  if (result?.action_id && !normalized) {
+    const { supabase } = await import('@/lib/db/supabase')
+
+    await supabase
+      .from('rooms')
+      .update({
+        action_id: result.action_id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('room_uuid', input.room_uuid)
+  }
+
+  return result
+}
+
 async function deliver_support_started(
   event: Extract<notify_event, { event: 'support_started' }>,
 ): Promise<notify_run_result> {
@@ -628,6 +662,14 @@ async function deliver_support_started(
     })
   }
 
+  const discord_line = `${event.admin_display_label} が対応を開始しました`
+
+  const discord_result = await post_support_lifecycle_discord({
+    room_uuid: event.room_uuid,
+    discord_thread_action_id: normalized_thread_action_id,
+    content_line: discord_line,
+  })
+
   const content = format_support_started_notify_content(event)
   const admin_route = await deliver_admin_notification({
     admin_event: 'support_started',
@@ -639,22 +681,45 @@ async function deliver_support_started(
     source_channel: event.source_channel,
   })
 
-  if (admin_route.outcome === 'delivered') {
+  if (admin_route.outcome === 'delivered' || discord_result?.action_id) {
     await emit_support_started_admin_chat_debug(
       'support_started_notify_succeeded',
       {
         ...base_debug_payload,
-        notification_channel: admin_route.transport,
+        notification_channel: discord_result?.action_id
+          ? 'discord_action_thread'
+          : admin_route.transport,
       },
     )
 
-    return support_started_notify_run(admin_route.deliveries, {
+    const deliveries = [...admin_route.deliveries]
+
+    if (discord_result?.action_id) {
+      deliveries.push({
+        channel: 'discord',
+        action_id: discord_result.action_id,
+      })
+    }
+
+    return support_started_notify_run(deliveries, {
       outcome: 'delivered',
-      transport: admin_route.transport,
+      transport: discord_result?.action_id
+        ? 'discord_action_webhook'
+        : admin_route.transport,
     })
   }
 
   if (admin_route.transport === 'toast' || admin_route.transport === 'none') {
+    if (discord_result?.action_id) {
+      return support_started_notify_run(
+        [{ channel: 'discord', action_id: discord_result.action_id }],
+        {
+          outcome: 'delivered',
+          transport: 'discord_action_webhook',
+        },
+      )
+    }
+
     await emit_support_started_admin_chat_debug(
       'support_started_notify_skipped',
       {
@@ -699,6 +764,47 @@ async function deliver_support_started(
     transport: 'none',
     error_code: 'admin_notification_route_unresolved',
     error_message: 'admin notification route ended without delivery',
+  })
+}
+
+async function deliver_support_left(
+  event: Extract<notify_event, { event: 'support_left' }>,
+): Promise<notify_run_result> {
+  const normalized_thread_action_id = normalize_discord_thread_action_id(
+    event.discord_thread_action_id,
+  )
+
+  if (!should_send_notify(event)) {
+    return support_started_notify_run([], {
+      outcome: 'skipped',
+      transport: 'none',
+      error_code: 'notify_rule_disabled',
+      error_message: 'support_left notify disabled',
+    })
+  }
+
+  const content_line = format_support_left_notify_content(event)
+  const discord_result = await post_support_lifecycle_discord({
+    room_uuid: event.room_uuid,
+    discord_thread_action_id: normalized_thread_action_id,
+    content_line,
+  })
+
+  if (discord_result?.action_id) {
+    return support_started_notify_run(
+      [{ channel: 'discord', action_id: discord_result.action_id }],
+      {
+        outcome: 'delivered',
+        transport: 'discord_action_webhook',
+      },
+    )
+  }
+
+  return support_started_notify_run([], {
+    outcome: 'failed',
+    transport: 'discord_action_webhook',
+    error_code: 'discord_action_thread_failed',
+    error_message: 'support_left discord thread post failed',
   })
 }
 

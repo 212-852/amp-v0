@@ -79,6 +79,10 @@ type chat_debug_body = {
   active_admin_count?: unknown
   typing_exists?: unknown
   unread_count?: unknown
+  action_uuid?: unknown
+  event_type?: unknown
+  prev_count?: unknown
+  next_count?: unknown
   latest_activity_at?: unknown
 }
 
@@ -195,6 +199,10 @@ export async function POST(request: Request) {
         typeof body?.typing_exists === 'boolean' ? body.typing_exists : null,
       unread_count: number_or_null(body?.unread_count),
       latest_activity_at: string_or_null(body?.latest_activity_at),
+      action_uuid: string_or_null(body?.action_uuid),
+      event_type: string_or_null(body?.event_type),
+      prev_count: number_or_null(body?.prev_count),
+      next_count: number_or_null(body?.next_count),
     },
   })
 

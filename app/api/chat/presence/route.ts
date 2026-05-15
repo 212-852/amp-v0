@@ -12,6 +12,7 @@ import {
   mark_typing_started,
   mark_typing_stopped,
 } from '@/lib/chat/presence/action'
+import { record_admin_support_left_session } from '@/lib/chat/action'
 import { resolve_presence_mutation_context } from '@/lib/chat/presence/context'
 
 type presence_request_body = {
@@ -101,11 +102,19 @@ export async function POST(request: Request) {
       await mark_admin_support_heartbeat({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_leave') {
       await mark_admin_support_leave({ room_uuid, participant_uuid })
+      await record_admin_support_left_session({
+        room_uuid,
+        staff_participant_uuid: participant_uuid,
+      })
     } else if (body?.action === 'admin_support_page_unload') {
       await mark_admin_support_leave({
         room_uuid,
         participant_uuid,
         debug_event_name: 'admin_presence_page_unload',
+      })
+      await record_admin_support_left_session({
+        room_uuid,
+        staff_participant_uuid: participant_uuid,
       })
     } else if (body?.action === 'admin_support_idle') {
       await mark_admin_support_idle_notice({ room_uuid, participant_uuid })

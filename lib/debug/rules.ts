@@ -649,6 +649,17 @@ export function resolve_debug_rule(input: {
     'admin_support_status_updated',
     'admin_support_recovered',
     'admin_support_presence_idle',
+    'admin_room_list_realtime_subscribe_started',
+    'admin_room_list_message_received',
+    'admin_room_list_message_accepted',
+    'admin_room_card_state_updated',
+    'admin_room_card_resorted',
+    'admin_active_chat_realtime_subscribe_started',
+    'admin_active_chat_realtime_payload_received',
+    'admin_active_chat_realtime_payload_accepted',
+    'admin_active_chat_message_appended',
+    'admin_support_action_received',
+    'admin_support_action_rendered',
   ])
 
   const chat_realtime_server_failed = new Set([

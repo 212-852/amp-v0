@@ -19,6 +19,7 @@ import {
   send_chat_realtime_debug,
   subscribe_chat_room_realtime,
   sync_chat_typing_presence,
+  type chat_support_action_payload,
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
 import { create_browser_supabase } from '@/lib/db/browser'
@@ -143,6 +144,7 @@ export default function AdminChatTimeline({
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
   const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
+  const typing_broadcast_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
     normalize_chat_timeline_messages(initial_messages),
@@ -310,6 +312,19 @@ export default function AdminChatTimeline({
       phase: 'admin_chat_create_browser_supabase',
     })
 
+    send_chat_realtime_debug({
+      event: 'admin_active_chat_realtime_subscribe_started',
+      room_uuid: locked_room,
+      active_room_uuid: locked_room,
+      participant_uuid: ctx.staff_participant_uuid,
+      user_uuid: ctx.staff_user_uuid,
+      role: 'admin',
+      tier: ctx.staff_tier,
+      source_channel: 'admin',
+      channel_name: `admin_active_chat:${locked_room}`,
+      phase: 'admin_chat_realtime_guard',
+    })
+
     const channel = subscribe_chat_room_realtime({
       supabase,
       room_uuid: locked_room,
@@ -319,6 +334,7 @@ export default function AdminChatTimeline({
       role: 'admin',
       tier: ctx.staff_tier,
       source_channel: 'admin',
+      listener_scope: 'admin_active',
       active_typing_identity_ref,
       on_message: (archived) => {
         if (!archived) {
@@ -598,6 +614,27 @@ export default function AdminChatTimeline({
         })
 
         send_chat_realtime_debug({
+          event: 'admin_active_chat_message_appended',
+          room_uuid: locked_room,
+          active_room_uuid: locked_room,
+          participant_uuid: dbg.staff_participant_uuid,
+          user_uuid: dbg.staff_user_uuid,
+          role: 'admin',
+          tier: dbg.staff_tier,
+          source_channel: 'admin',
+          channel_name: chat_room_realtime_channel_name(locked_room),
+          message_uuid: mapped.message_uuid,
+          payload_message_uuid: archived.archive_uuid,
+          prev_message_count: update_result.prev_message_count,
+          next_message_count: update_result.next_message_count,
+          prev_count: update_result.prev_message_count,
+          next_count: update_result.next_message_count,
+          dedupe_hit: update_result.dedupe_hit,
+          ignored_reason: append_error,
+          phase: 'admin_chat_realtime_state_update',
+        })
+
+        send_chat_realtime_debug({
           event: 'chat_realtime_message_state_updated',
           room_uuid: locked_room,
           active_room_uuid: locked_room,
@@ -620,6 +657,57 @@ export default function AdminChatTimeline({
             ? 'message_uuid_dedupe'
             : null,
           phase: 'admin_chat_realtime_state_update',
+        })
+      },
+      on_support_action: (action: chat_support_action_payload) => {
+        const text = action.body?.trim() ?? ''
+
+        if (!text) {
+          return
+        }
+
+        const system_row: chat_room_timeline_message = {
+          message_uuid: action.action_uuid,
+          room_uuid: action.room_uuid,
+          sequence: null,
+          text,
+          created_at: action.created_at ?? new Date().toISOString(),
+          direction: 'system',
+          sender: 'system',
+          role: 'system',
+          bundle_type: 'room_action_log',
+        }
+
+        set_rows((previous) => {
+          if (previous.some((row) => row.message_uuid === action.action_uuid)) {
+            return previous
+          }
+
+          const result = merge_timeline_rows(previous, [system_row])
+
+          send_chat_realtime_debug({
+            event: 'admin_active_chat_message_appended',
+            room_uuid: locked_room,
+            active_room_uuid: locked_room,
+            action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            source_channel: action.source_channel ?? 'admin',
+            prev_count: result.prev_message_count,
+            next_count: result.next_message_count,
+            phase: 'admin_chat_support_action',
+          })
+
+          return result.rows
+        })
+
+        send_chat_realtime_debug({
+          event: 'admin_support_action_rendered',
+          room_uuid: action.room_uuid,
+          active_room_uuid: locked_room,
+          action_uuid: action.action_uuid,
+          event_type: action.action_type,
+          source_channel: action.source_channel ?? 'admin',
+          phase: 'admin_chat_support_action',
         })
       },
       on_typing: (typing) => {
@@ -652,6 +740,32 @@ export default function AdminChatTimeline({
       },
     })
 
+    const typing_channel = supabase.channel(
+      chat_room_realtime_channel_name(locked_room),
+      { config: { broadcast: { self: true } } },
+    )
+
+    typing_channel
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const raw = payload.payload
+
+        if (!raw || typeof raw !== 'object') {
+          return
+        }
+
+        const row = raw as chat_typing_payload
+
+        if (row.room_uuid !== locked_room) {
+          return
+        }
+
+        typing_rows_ref.current.set(row.participant_uuid, row)
+        refresh_typing_lines()
+        schedule_typing_refresh()
+      })
+      .subscribe()
+
+    typing_broadcast_channel_ref.current = typing_channel
     subscribed_room_uuid_ref.current = locked_room
     realtime_channel_ref.current = channel
 
@@ -661,6 +775,12 @@ export default function AdminChatTimeline({
           ? 'room_uuid_changed'
           : 'unmount'
       const dbg = admin_rt_ctx_ref.current
+
+      void supabase.removeChannel(typing_channel)
+
+      if (typing_broadcast_channel_ref.current === typing_channel) {
+        typing_broadcast_channel_ref.current = null
+      }
 
       cleanup_chat_room_realtime({
         supabase,
@@ -695,7 +815,8 @@ export default function AdminChatTimeline({
         return
       }
 
-      const channel = realtime_channel_ref.current
+      const channel =
+        typing_broadcast_channel_ref.current ?? realtime_channel_ref.current
       const is_heartbeat = action === 'typing_start' && typing_active_ref.current
 
       if (action === 'typing_start') {
