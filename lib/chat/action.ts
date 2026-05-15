@@ -2427,16 +2427,27 @@ export async function handle_admin_reception_room_opened(
       const parsed = JSON.parse(row.body ?? '{}') as {
         bundle?: {
           content_key?: string
-          metadata?: { admin_user_uuid?: string }
+          metadata?: { action?: string; admin_user_uuid?: string }
+          payload?: { text?: string }
         }
       }
       const key = parsed?.bundle?.content_key
+      const action = parsed?.bundle?.metadata?.action
+      const text =
+        typeof parsed?.bundle?.payload?.text === 'string'
+          ? parsed.bundle.payload.text
+          : ''
       const row_admin = clean_uuid(
         parsed?.bundle?.metadata?.admin_user_uuid ?? null,
       )
+      const is_support_started_action =
+        action === 'support_started' ||
+        action === 'admin_reception_open' ||
+        (!action && text.includes('対応を開始'))
 
       if (
         key === 'room.reception.admin_opened' &&
+        is_support_started_action &&
         row_admin &&
         row_admin === admin_uuid
       ) {
@@ -2520,6 +2531,26 @@ export async function handle_admin_reception_room_opened(
     }
   }
 
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_enter_detected',
+    payload: {
+      room_uuid,
+      active_room_uuid: room_uuid,
+      previous_room_uuid: null,
+      next_room_uuid: room_uuid,
+      admin_user_uuid: admin_uuid,
+      admin_participant_uuid,
+      admin_internal_name: null,
+      action_uuid: null,
+      event_type: 'support_started',
+      leave_reason: null,
+      discord_thread_id: null,
+      error_code: null,
+      error_message: null,
+    },
+  })
+
   if (admin_participant_uuid) {
     if (admin_already_active) {
       const room_mode_row = await supabase
@@ -2572,6 +2603,7 @@ export async function handle_admin_reception_room_opened(
     locale: 'ja',
     actor_display_name: display_name,
     admin_user_uuid: admin_uuid,
+    action: 'support_started',
   })
 
   await emit_chat_realtime_support_debug({
@@ -2935,6 +2967,27 @@ export async function record_admin_support_left_session(input: {
     support_session_key,
   }
 
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_support_leave_detected',
+    payload: {
+      room_uuid,
+      active_room_uuid: null,
+      previous_room_uuid: input.previous_active_room_uuid ?? room_uuid,
+      next_room_uuid: input.next_active_room_uuid ?? null,
+      admin_user_uuid: admin_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      admin_internal_name: null,
+      action_uuid: null,
+      event_type: 'support_left',
+      leave_reason: input.leave_reason ?? 'unknown',
+      support_mode,
+      discord_thread_id: null,
+      error_code: null,
+      error_message: null,
+    },
+  })
+
   const decision_skip = async (skipped_reason: string, already_left: boolean) => {
     await debug_event({
       category: 'admin_chat',
@@ -3067,6 +3120,7 @@ export async function record_admin_support_left_session(input: {
     locale: 'ja',
     actor_display_name: display_name,
     admin_user_uuid: admin_uuid,
+    action: 'support_left',
   })
 
   if (bot_participant_uuid) {

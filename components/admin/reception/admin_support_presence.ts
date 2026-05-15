@@ -62,6 +62,39 @@ function post_admin_support_presence(input: {
   }).catch(() => {})
 }
 
+function post_admin_support_enter(input: {
+  room_uuid: string
+  participant_uuid: string
+  admin_user_uuid: string | null
+  support_session_key: string
+}) {
+  leave_trigger_debug({
+    event: 'admin_support_enter_detected',
+    room_uuid: input.room_uuid,
+    previous_room_uuid: null,
+    next_room_uuid: input.room_uuid,
+    admin_user_uuid: input.admin_user_uuid,
+    admin_participant_uuid: input.participant_uuid,
+    leave_reason: '',
+  })
+
+  void fetch('/api/chat/reception/open', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ room_uuid: input.room_uuid }),
+  })
+    .catch(() => null)
+    .finally(() => {
+      post_admin_support_presence({
+        room_uuid: input.room_uuid,
+        participant_uuid: input.participant_uuid,
+        action: 'admin_support_join',
+        support_session_key: input.support_session_key,
+      })
+    })
+}
+
 export function use_admin_reception_support_presence(input: {
   room_uuid: string
   staff_participant_uuid: string
@@ -114,6 +147,23 @@ export function use_admin_reception_support_presence(input: {
         admin_participant_uuid: participant_uuid,
         leave_reason: 'beforeunload',
       })
+      leave_trigger_debug({
+        event: 'admin_support_leave_detected',
+        room_uuid,
+        previous_room_uuid: room_uuid,
+        next_room_uuid: null,
+        admin_user_uuid: input.staff_user_uuid,
+        admin_participant_uuid: participant_uuid,
+        leave_reason: 'beforeunload',
+      })
+      post_admin_support_presence({
+        room_uuid,
+        participant_uuid,
+        action: 'admin_support_page_unload',
+        keepalive: true,
+        leave_reason: 'beforeunload',
+        support_session_key: support_session_key_ref.current,
+      })
     }
 
     const post = (
@@ -130,7 +180,12 @@ export function use_admin_reception_support_presence(input: {
       })
     }
 
-    post('admin_support_join')
+    post_admin_support_enter({
+      room_uuid,
+      participant_uuid,
+      admin_user_uuid: input.staff_user_uuid,
+      support_session_key: support_session_key_ref.current,
+    })
 
     const heartbeat = window.setInterval(() => {
       if (document.visibilityState !== 'visible') {
@@ -183,6 +238,15 @@ export function use_admin_reception_support_presence(input: {
             admin_participant_uuid: participant_uuid,
             leave_reason: 'visibility_hidden_timeout',
           })
+          leave_trigger_debug({
+            event: 'admin_support_leave_detected',
+            room_uuid,
+            previous_room_uuid: room_uuid,
+            next_room_uuid: null,
+            admin_user_uuid: input.staff_user_uuid,
+            admin_participant_uuid: participant_uuid,
+            leave_reason: 'visibility_hidden_timeout',
+          })
           post_admin_support_presence({
             room_uuid,
             participant_uuid,
@@ -209,13 +273,27 @@ export function use_admin_reception_support_presence(input: {
             }),
           }).catch(() => {})
         }
-        post('admin_support_join')
+        post_admin_support_enter({
+          room_uuid,
+          participant_uuid,
+          admin_user_uuid: input.staff_user_uuid,
+          support_session_key: support_session_key_ref.current,
+        })
       }
     }
 
     const on_pagehide = () => {
       leave_trigger_debug({
         event: 'admin_leave_pagehide_detected',
+        room_uuid,
+        previous_room_uuid: room_uuid,
+        next_room_uuid: null,
+        admin_user_uuid: input.staff_user_uuid,
+        admin_participant_uuid: participant_uuid,
+        leave_reason: 'pagehide',
+      })
+      leave_trigger_debug({
+        event: 'admin_support_leave_detected',
         room_uuid,
         previous_room_uuid: room_uuid,
         next_room_uuid: null,
@@ -253,6 +331,15 @@ export function use_admin_reception_support_presence(input: {
       clear_idle_leave_timer()
       leave_trigger_debug({
         event: 'admin_leave_route_change_detected',
+        room_uuid,
+        previous_room_uuid: room_uuid,
+        next_room_uuid: null,
+        admin_user_uuid: input.staff_user_uuid,
+        admin_participant_uuid: participant_uuid,
+        leave_reason: 'route_change',
+      })
+      leave_trigger_debug({
+        event: 'admin_support_leave_detected',
         room_uuid,
         previous_room_uuid: room_uuid,
         next_room_uuid: null,

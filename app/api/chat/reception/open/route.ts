@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 
-import { handle_admin_reception_room_opened } from '@/lib/chat/action'
+import { enter_support_room } from '@/lib/support_presence/action'
 
 export async function POST(request: Request) {
-  const result = await handle_admin_reception_room_opened(request)
+  const result = await enter_support_room(request)
 
   return NextResponse.json(result.body, { status: result.status })
 }

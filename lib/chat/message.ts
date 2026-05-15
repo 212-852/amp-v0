@@ -614,7 +614,10 @@ export function build_room_action_log_bundle(input: {
   locale?: chat_locale
   actor_display_name: string
   admin_user_uuid: string
+  action?: 'support_started' | 'support_left'
 }): room_action_log_bundle {
+  const action = input.action ?? 'support_started'
+
   return {
     bundle_uuid: create_bundle_uuid(),
     bundle_type: 'room_action_log',
@@ -623,7 +626,7 @@ export function build_room_action_log_bundle(input: {
     locale: input.locale,
     content_key: 'room.reception.admin_opened',
     metadata: {
-      action: 'admin_reception_open',
+      action,
       actor_display_name: input.actor_display_name,
       admin_user_uuid: input.admin_user_uuid,
       visibility: 'admin',

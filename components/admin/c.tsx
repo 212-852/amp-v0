@@ -218,19 +218,6 @@ export default function AdminChatTimeline({
     }
   }, [rows.length, typing_lines.length])
 
-  useEffect(() => {
-    if (!room_uuid) {
-      return
-    }
-
-    void fetch('/api/chat/reception/open', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ room_uuid }),
-    }).catch(() => {})
-  }, [room_uuid])
-
   const refresh_typing_lines = useCallback(() => {
     const now = new Date()
     const lines: string[] = []

@@ -4,7 +4,6 @@ import {
   mark_admin_support_heartbeat,
   mark_admin_support_idle_notice,
   mark_admin_support_join,
-  mark_admin_support_leave,
   mark_admin_support_recovered_notice,
   expire_admin_support_presence,
   mark_room_entered,
@@ -12,7 +11,7 @@ import {
   mark_typing_started,
   mark_typing_stopped,
 } from '@/lib/chat/presence/action'
-import { record_admin_support_left_session } from '@/lib/chat/action'
+import { leave_support_room } from '@/lib/support_presence/action'
 import { resolve_presence_mutation_context } from '@/lib/chat/presence/context'
 
 type presence_request_body = {
@@ -50,7 +49,7 @@ export async function POST(request: Request) {
 
       await Promise.all(
         expired.map((row) =>
-          record_admin_support_left_session({
+          leave_support_room({
             room_uuid: row.room_uuid,
             staff_participant_uuid: row.participant_uuid,
             leave_reason: 'heartbeat_timeout',
@@ -123,7 +122,7 @@ export async function POST(request: Request) {
     } else if (body?.action === 'admin_support_heartbeat') {
       await mark_admin_support_heartbeat({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_leave') {
-      await record_admin_support_left_session({
+      await leave_support_room({
         room_uuid,
         staff_participant_uuid: participant_uuid,
         leave_reason:
@@ -140,9 +139,8 @@ export async function POST(request: Request) {
             : null,
         support_session_key: support_session_key_or_null(body),
       })
-      await mark_admin_support_leave({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_page_unload') {
-      await record_admin_support_left_session({
+      await leave_support_room({
         room_uuid,
         staff_participant_uuid: participant_uuid,
         leave_reason:
@@ -158,10 +156,6 @@ export async function POST(request: Request) {
             ? body.next_active_room_uuid
             : null,
         support_session_key: support_session_key_or_null(body),
-      })
-      await mark_admin_support_leave({
-        room_uuid,
-        participant_uuid,
         debug_event_name: 'admin_presence_page_unload',
       })
     } else if (body?.action === 'admin_support_idle') {

@@ -316,6 +316,7 @@ export function resolve_debug_rule(input: {
   }
 
   const support_started_ok_debug = new Set([
+    'admin_support_enter_detected',
     'support_started_action_create_started',
     'support_started_action_create_succeeded',
     'support_started_notify_route_decided',
@@ -399,6 +400,7 @@ export function resolve_debug_rule(input: {
   }
 
   const support_left_lifecycle = new Set([
+    'admin_support_leave_detected',
     'support_left_action_create_started',
     'support_left_action_create_succeeded',
     'support_left_action_create_failed',
@@ -655,6 +657,9 @@ export function resolve_debug_rule(input: {
     'support_left_realtime_received',
     'support_left_realtime_rendered',
     'support_left_realtime_ignored',
+    'support_action_realtime_received',
+    'support_action_realtime_rendered',
+    'support_started_realtime_rendered',
     'admin_leave_route_change_detected',
     'admin_leave_room_change_detected',
     'admin_leave_visibility_hidden_detected',
