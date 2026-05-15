@@ -554,9 +554,9 @@ export default function AdminReceptionRoomListLive({
         event: 'admin_room_list_realtime_subscribe_started',
         room_uuid,
         active_room_uuid: null,
-        user_uuid: session.user_uuid ?? null,
+        user_uuid: session?.user_uuid ?? null,
         role: 'admin',
-        tier: session.tier ?? null,
+        tier: session?.tier ?? null,
         source_channel: 'admin',
         channel_name: `admin_room_list:${room_uuid}`,
         phase: 'admin_room_list_realtime',
@@ -567,9 +567,9 @@ export default function AdminReceptionRoomListLive({
         room_uuid,
         active_room_uuid: null,
         participant_uuid: null,
-        user_uuid: session.user_uuid ?? null,
+        user_uuid: session?.user_uuid ?? null,
         role: 'admin',
-        tier: session.tier ?? null,
+        tier: session?.tier ?? null,
         source_channel: 'admin',
         listener_scope: 'admin_list',
         on_message: (message) => {
@@ -592,6 +592,22 @@ export default function AdminReceptionRoomListLive({
             ignored_reason: null,
             phase: 'admin_room_list_realtime',
           })
+
+          send_chat_realtime_debug({
+            event: 'admin_room_list_message_ignored',
+            room_uuid: message.room_uuid,
+            active_room_uuid: null,
+            message_uuid: message.archive_uuid,
+            payload_message_uuid: message.archive_uuid,
+            source_channel: source_channel ?? 'web',
+            channel,
+            direction,
+            last_message_at,
+            ignored_reason: 'admin_top_global_messages_listener_handles_card',
+            phase: 'admin_room_list_realtime',
+          })
+
+          return
 
           const row_msg = archived_message_to_timeline_message({
             archive_uuid: message.archive_uuid,
@@ -747,11 +763,11 @@ export default function AdminReceptionRoomListLive({
             sender_user_uuid: message.sender_user_uuid ?? null,
             sender_participant_uuid: message.sender_participant_uuid ?? null,
             sender_role: message.sender_role ?? message.bundle.sender ?? null,
-            active_user_uuid: session.user_uuid ?? null,
+            active_user_uuid: session?.user_uuid ?? null,
             active_participant_uuid: null,
             active_role: 'admin',
             role: 'admin',
-            tier: session.tier ?? null,
+            tier: session?.tier ?? null,
             source_channel: 'admin',
             target_path: `/admin/reception/${message.room_uuid}`,
             phase: 'admin_chat_list_realtime_message',
@@ -1128,9 +1144,9 @@ export default function AdminReceptionRoomListLive({
             room_uuid: ru,
             active_room_uuid: null,
             participant_uuid: null,
-            user_uuid: session.user_uuid ?? null,
+            user_uuid: session?.user_uuid ?? null,
             role: 'admin',
-            tier: session.tier ?? null,
+            tier: session?.tier ?? null,
             source_channel: 'admin',
             subscribe_status: null,
             channel_name: null,
@@ -1146,7 +1162,7 @@ export default function AdminReceptionRoomListLive({
             sender_user_uuid: null,
             sender_participant_uuid: null,
             active_participant_uuid: null,
-            active_user_uuid: session.user_uuid ?? null,
+            active_user_uuid: session?.user_uuid ?? null,
             active_role: 'admin',
             sender_role: null,
             display_name: null,
@@ -1193,7 +1209,7 @@ export default function AdminReceptionRoomListLive({
             realtime_created_at: null,
             unread_admin_count,
             admin_last_read_at,
-            actor_admin_user_uuid: session.user_uuid ?? null,
+            actor_admin_user_uuid: session?.user_uuid ?? null,
           })
 
           set_rooms((previous) => {
@@ -1233,9 +1249,9 @@ export default function AdminReceptionRoomListLive({
               room_uuid: ru,
               active_room_uuid: null,
               participant_uuid: null,
-              user_uuid: session.user_uuid ?? null,
+              user_uuid: session?.user_uuid ?? null,
               role: 'admin',
-              tier: session.tier ?? null,
+              tier: session?.tier ?? null,
               source_channel: 'admin',
               subscribe_status: null,
               channel_name: null,
@@ -1251,7 +1267,7 @@ export default function AdminReceptionRoomListLive({
               sender_user_uuid: null,
               sender_participant_uuid: null,
               active_participant_uuid: null,
-              active_user_uuid: session.user_uuid ?? null,
+              active_user_uuid: session?.user_uuid ?? null,
               active_role: 'admin',
               sender_role: null,
               display_name: null,
@@ -1298,7 +1314,7 @@ export default function AdminReceptionRoomListLive({
               realtime_created_at: null,
               unread_admin_count,
               admin_last_read_at,
-              actor_admin_user_uuid: session.user_uuid ?? null,
+              actor_admin_user_uuid: session?.user_uuid ?? null,
             })
 
             if (!matched) {
@@ -1331,9 +1347,9 @@ export default function AdminReceptionRoomListLive({
           room_uuid: room_uuids[index] ?? '',
           active_room_uuid: null,
           participant_uuid: null,
-          user_uuid: session.user_uuid ?? null,
+          user_uuid: session?.user_uuid ?? null,
           role: 'admin',
-          tier: session.tier ?? null,
+          tier: session?.tier ?? null,
           source_channel: 'admin',
           cleanup_reason: 'admin_reception_room_list_unmount',
         })

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowDown } from 'lucide-react'
 
 import PawIcon from '@/components/icons/paw'
 import { use_admin_reception_support_presence } from '@/components/admin/reception/admin_support_presence'
@@ -158,7 +159,7 @@ export default function AdminChatTimeline({
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
-  const [is_leaving_support, set_is_leaving_support] = useState(false)
+  const [show_jump_button, set_show_jump_button] = useState(false)
   const [typing_lines, set_typing_lines] = useState<string[]>([])
   const typing_timer_ref = useRef<number | null>(null)
   const publish_typing_timer_ref = useRef<number | null>(null)
@@ -182,6 +183,7 @@ export default function AdminChatTimeline({
 
   const subscribed_room_uuid_ref = useRef<string | null>(null)
   const subscribed_chat_actions_room_ref = useRef<string | null>(null)
+  const show_jump_button_ref = useRef(false)
 
   useEffect(() => {
     staff_participant_uuid_ref.current = staff_participant_uuid
@@ -270,6 +272,37 @@ export default function AdminChatTimeline({
       refresh_typing_lines()
     }, 3_100)
   }, [refresh_typing_lines])
+
+  const update_jump_button_visibility = useCallback((visible: boolean) => {
+    if (show_jump_button_ref.current === visible) {
+      return
+    }
+
+    show_jump_button_ref.current = visible
+    set_show_jump_button(visible)
+
+    if (visible) {
+      send_chat_realtime_debug({
+        event: 'chat_scroll_jump_visible',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        participant_uuid: staff_participant_uuid_ref.current,
+        user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        role: 'admin',
+        tier: admin_rt_ctx_ref.current.staff_tier,
+        source_channel: 'admin',
+        phase: 'admin_chat_scroll',
+      })
+    }
+  }, [room_uuid])
+
+  const handle_message_scroll = useCallback(() => {
+    const near_bottom = compute_message_list_near_bottom(
+      message_list_scroll_ref.current,
+    )
+
+    update_jump_button_visibility(!near_bottom)
+  }, [update_jump_button_visibility])
 
   useEffect(() => {
     if (!room_uuid) {
@@ -801,6 +834,19 @@ export default function AdminChatTimeline({
             phase: 'admin_chat_support_action',
           })
 
+          if (action.action_type === 'support_left') {
+            send_chat_realtime_debug({
+              event: 'support_left_realtime_rendered',
+              room_uuid: locked_room,
+              active_room_uuid: locked_room,
+              action_uuid: action.action_uuid,
+              event_type: action.action_type,
+              actor_name: action.actor_display_name,
+              inserted_index,
+              phase: 'admin_chat_support_action',
+            })
+          }
+
           if (near_bottom_before) {
             bottom_ref.current?.scrollIntoView({
               block: 'end',
@@ -1042,40 +1088,14 @@ export default function AdminChatTimeline({
     void submit_reply(reply_text)
   }
 
-  async function leave_support_explicitly() {
-    if (!room_uuid || !staff_participant_uuid || is_leaving_support) {
-      return
-    }
-
-    set_is_leaving_support(true)
-
-    try {
-      await fetch('/api/chat/presence', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          room_uuid,
-          participant_uuid: staff_participant_uuid,
-          action: 'admin_support_leave',
-          last_channel: 'admin',
-        }),
-      })
-    } catch (error) {
-      console.error('[admin_reception] support_leave_failed', error)
-    } finally {
-      set_is_leaving_support(false)
-    }
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div
-        ref={message_list_scroll_ref}
-        className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-6 pb-24 pt-3"
-      >
+      <div className="relative min-h-0 w-full flex-1">
+        <div
+          ref={message_list_scroll_ref}
+          onScroll={handle_message_scroll}
+          className="h-full min-h-0 w-full overflow-y-auto overscroll-contain px-6 pb-24 pt-3"
+        >
         {load_failed ? (
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
             メッセージを読み込めませんでした
@@ -1137,22 +1157,38 @@ export default function AdminChatTimeline({
             {typing_lines.join(' / ')}
           </div>
         ) : null}
-        <div ref={bottom_ref} className="h-1" aria-hidden="true" />
+          <div ref={bottom_ref} className="h-1" aria-hidden="true" />
+        </div>
+        {show_jump_button ? (
+          <button
+            type="button"
+            aria-label="最新メッセージへ移動"
+            onClick={() => {
+              send_chat_realtime_debug({
+                event: 'chat_scroll_jump_clicked',
+                room_uuid,
+                active_room_uuid: room_uuid,
+                participant_uuid: staff_participant_uuid_ref.current,
+                user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+                role: 'admin',
+                tier: admin_rt_ctx_ref.current.staff_tier,
+                source_channel: 'admin',
+                phase: 'admin_chat_scroll',
+              })
+              bottom_ref.current?.scrollIntoView({
+                block: 'end',
+                behavior: 'smooth',
+              })
+              update_jump_button_visibility(false)
+            }}
+            className="absolute right-4 top-4 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-white text-[18px] font-semibold leading-none text-neutral-700 shadow-[0_8px_24px_rgba(15,23,42,0.14)] transition hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+          >
+            <ArrowDown className="h-5 w-5" strokeWidth={2} />
+          </button>
+        ) : null}
       </div>
 
       <footer className="shrink-0 border-t border-neutral-200 bg-white pb-[max(8px,env(safe-area-inset-bottom,0px))] pt-2">
-        <div className="flex justify-end px-4 pb-1">
-          <button
-            type="button"
-            onClick={() => {
-              void leave_support_explicitly()
-            }}
-            disabled={is_leaving_support || !staff_participant_uuid.trim()}
-            className="rounded-full border border-neutral-300 px-3 py-1 text-[11px] font-medium text-neutral-600 disabled:opacity-60"
-          >
-            {is_leaving_support ? '退出中...' : '対応を終了'}
-          </button>
-        </div>
         <form
           className="flex items-center gap-3 px-4 pb-2"
           onSubmit={handle_submit}

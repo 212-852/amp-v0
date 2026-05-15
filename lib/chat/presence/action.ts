@@ -564,7 +564,7 @@ export async function mark_admin_support_recovered_notice(input: {
 
 export async function expire_admin_support_presence(input: {
   room_uuid?: string | null
-}) {
+}): Promise<Array<{ room_uuid: string; participant_uuid: string }>> {
   const cutoff_ms = Date.now() - admin_support_active_within_ms
   let query = supabase
     .from('participants')
@@ -592,6 +592,7 @@ export async function expire_admin_support_presence(input: {
     last_seen_at: string | null
     last_channel: string | null
   }>
+  const expired: Array<{ room_uuid: string; participant_uuid: string }> = []
 
   for (const row of rows) {
     if (!row.room_uuid) {
@@ -637,7 +638,14 @@ export async function expire_admin_support_presence(input: {
         timeout_seconds: age_seconds,
       },
     })
+
+    expired.push({
+      room_uuid: row.room_uuid,
+      participant_uuid: row.participant_uuid,
+    })
   }
+
+  return expired
 }
 
 async function load_profiles(participants: participant_row[]) {

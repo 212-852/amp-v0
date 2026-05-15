@@ -273,6 +273,7 @@ export function resolve_debug_rule(input: {
   const customer_identity_resolve_lifecycle = new Set([
     'admin_chat_customer_identity_resolve_started',
     'admin_chat_customer_identity_resolve_succeeded',
+    'customer_display_name_resolved',
   ])
 
   if (

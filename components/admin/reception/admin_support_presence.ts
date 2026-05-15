@@ -82,6 +82,15 @@ export function use_admin_reception_support_presence(input: {
           keepalive: true,
         })
         clear_idle_leave_timer()
+        idle_leave_timer_ref.current = window.setTimeout(() => {
+          post_admin_support_presence({
+            room_uuid,
+            participant_uuid,
+            action: 'admin_support_leave',
+            keepalive: true,
+            leave_reason: 'visibility_hidden_timeout',
+          })
+        }, 30_000)
       } else {
         clear_idle_leave_timer()
         if (was_hidden_ref.current) {

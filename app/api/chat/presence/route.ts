@@ -37,9 +37,21 @@ export async function POST(request: Request) {
 
   if (raw_action === 'admin_support_timeout_check') {
     try {
-      await expire_admin_support_presence({
+      const expired = await expire_admin_support_presence({
         room_uuid: typeof body?.room_uuid === 'string' ? body.room_uuid : null,
       })
+
+      await Promise.all(
+        expired.map((row) =>
+          record_admin_support_left_session({
+            room_uuid: row.room_uuid,
+            staff_participant_uuid: row.participant_uuid,
+            leave_reason: 'heartbeat_timeout',
+            previous_active_room_uuid: row.room_uuid,
+            next_active_room_uuid: null,
+          }),
+        ),
+      )
 
       return NextResponse.json({ ok: true })
     } catch (error) {

@@ -57,6 +57,18 @@ export function normalize_reception_channel(value: unknown): string | null {
   return null
 }
 
+export function reception_mode_badge_label(
+  mode: string | null | undefined,
+): 'concierge' | 'bot' | null {
+  const normalized = typeof mode === 'string' ? mode.trim().toLowerCase() : ''
+
+  if (normalized === 'concierge' || normalized === 'bot') {
+    return normalized
+  }
+
+  return null
+}
+
 export function reception_channel_label(value: string | null | undefined) {
   const normalized = normalize_reception_channel(value)
 

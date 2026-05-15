@@ -80,7 +80,7 @@ async function load_subject(
     })
 
     return {
-      display_name: 'ゲスト',
+      display_name: 'お客様',
       role: 'user',
       tier: 'guest',
       user_uuid: null,
@@ -167,7 +167,7 @@ export default async function AdminReceptionRoomPage({
             <AdminReceptionActiveSummary
               room_uuid={room_uuid}
               room={room}
-              subject={subject}
+              customer_display_name={subject.display_name}
               staff_user_uuid={access.user_uuid}
               staff_tier={access.tier}
               staff_participant_uuid={staff_participant_uuid}

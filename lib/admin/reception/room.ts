@@ -21,10 +21,14 @@ import {
 } from '@/lib/auth/customer_display'
 import {
   admin_chat_unset_customer_label,
-  resolve_admin_chat_list_customer_display,
   summarize_admin_chat_identity_payload_shape,
-  type resolved_admin_chat_customer_source,
 } from '@/lib/chat/identity/admin_list_customer_name'
+import {
+  customer_display_name_fallback,
+  emit_customer_display_name_resolved,
+  resolve_customer_display_name,
+  type resolved_customer_display_source,
+} from '@/lib/chat/identity/customer_display_name'
 import {
   is_missing_room_last_incoming_columns_error,
   is_missing_room_optional_select_columns_error,
@@ -226,7 +230,7 @@ type normalize_room_options = {
 }
 
 const guest_subject: reception_room_subject = {
-  display_name: 'ゲスト',
+  display_name: customer_display_name_fallback,
   role: 'user',
   tier: 'guest',
   user_uuid: null,
@@ -267,7 +271,7 @@ function normalize_room(
   const concierge_name_fallback =
     mode === 'concierge' && options?.room_uuid_label_fallback
       ? short_room_label(row.room_uuid)
-      : admin_chat_unset_customer_label
+      : customer_display_name_fallback
   const display_name =
     enrichment?.display_name ??
     (mode === 'concierge' ? concierge_name_fallback : 'Bot room')
@@ -301,7 +305,7 @@ function normalize_room(
     admin_support_staff: enrichment?.admin_support_staff ?? [],
     admin_support_card_line: enrichment?.admin_support_card_line ?? '',
     admin_support_active_header_line:
-      enrichment?.admin_support_active_header_line ?? '対応者なし',
+      enrichment?.admin_support_active_header_line ?? '',
     admin_support_last_handled_label:
       enrichment?.admin_support_last_handled_label ?? '',
   }
@@ -373,7 +377,7 @@ async function emit_customer_identity_resolve(input: {
   has_user_uuid: boolean
   has_display_name: boolean
   has_identity: boolean
-  resolved_display_name_source: resolved_admin_chat_customer_source
+  resolved_display_name_source: resolved_customer_display_source
   fallback_used: boolean
   reason: string | null
 }) {
@@ -411,6 +415,43 @@ async function emit_customer_identity_resolve(input: {
     event: input.event,
     payload,
   })
+}
+
+async function fetch_customer_profiles_by_user(
+  user_uuids: string[],
+): Promise<Map<string, { display_name: string | null }>> {
+  const map = new Map<string, { display_name: string | null }>()
+
+  if (user_uuids.length === 0) {
+    return map
+  }
+
+  try {
+    const result = await supabase
+      .from('profiles')
+      .select('user_uuid, display_name')
+      .in('user_uuid', user_uuids)
+
+    if (result.error) {
+      return map
+    }
+
+    for (const raw of (result.data ?? []) as Record<string, unknown>[]) {
+      const uid = pick_string(raw['user_uuid'])
+
+      if (!uid) {
+        continue
+      }
+
+      map.set(uid, {
+        display_name: pick_string(raw['display_name']),
+      })
+    }
+  } catch {
+    return map
+  }
+
+  return map
 }
 
 async function fetch_user_profile_row_by_uuid(
@@ -760,6 +801,8 @@ async function enrich_room_cards(
     await backfill_missing_users(user_uuids, users_by_uuid, users_select_list)
   }
 
+  const profiles_by_uuid = await fetch_customer_profiles_by_user(user_uuids)
+
   let latest_summary_by_room = new Map<string, latest_message_summary>()
 
   try {
@@ -832,22 +875,38 @@ async function enrich_room_cards(
         has_user_uuid: true,
         has_display_name,
         has_identity,
-        resolved_display_name_source: 'unset',
+        resolved_display_name_source: 'fallback',
         fallback_used: false,
         reason: 'resolve_started',
       })
     }
 
-    const resolved = resolve_admin_chat_list_customer_display({
-      user: customer_user ?? null,
-      identity_rows: identity_rows_for_user,
-      participant: customer,
-      latest_user_message_sender_display_name:
-        latest_summary?.latest_user_sender_display_name ?? null,
-    })
+    const customer_resolved = customer_user_uuid
+      ? resolve_customer_display_name({
+          profile: profiles_by_uuid.get(customer_user_uuid) ?? null,
+          user: customer_user ?? null,
+          identity_rows: identity_rows_for_user,
+        })
+      : {
+          display_name: customer_display_name_fallback,
+          source: 'fallback' as const,
+          debug: {
+            has_profile_display_name: false,
+            has_user_display_name: false,
+            has_identity_name: false,
+          },
+        }
 
     if (has_user_uuid) {
-      if (resolved.source === 'unset') {
+      await emit_customer_display_name_resolved({
+        user_uuid: customer_user_uuid,
+        room_uuid: row.room_uuid,
+        result: customer_resolved,
+      })
+    }
+
+    if (has_user_uuid) {
+      if (customer_resolved.source === 'fallback') {
         await emit_customer_identity_resolve({
           event: 'admin_chat_customer_identity_resolve_failed',
           room_uuid: row.room_uuid,
@@ -860,7 +919,7 @@ async function enrich_room_cards(
           has_user_uuid: true,
           has_display_name,
           has_identity,
-          resolved_display_name_source: resolved.source,
+          resolved_display_name_source: customer_resolved.source,
           fallback_used: true,
           reason: !customer_user
             ? 'user_row_not_found_after_batch_and_backfill'
@@ -890,8 +949,8 @@ async function enrich_room_cards(
           has_user_uuid: true,
           has_display_name,
           has_identity,
-          resolved_display_name_source: resolved.source,
-          fallback_used: resolved.source !== 'participants.display_name',
+          resolved_display_name_source: customer_resolved.source,
+          fallback_used: false,
           reason: null,
         })
       }
@@ -899,7 +958,7 @@ async function enrich_room_cards(
 
     if (
       list_mode === 'concierge' &&
-      resolved.title === admin_chat_unset_customer_label &&
+      customer_resolved.source === 'fallback' &&
       !has_user_uuid
     ) {
       await emit_admin_chat_trace({
@@ -971,7 +1030,7 @@ async function enrich_room_cards(
     })
 
     enrichments.set(row.room_uuid, {
-      display_name: resolved.title,
+      display_name: customer_resolved.display_name,
       role:
         pick_string(customer_user?.['role']) ??
         string_value(customer?.role),
@@ -1045,7 +1104,7 @@ export async function resolve_room_subject(
 
   if (!user_uuid) {
     return {
-      display_name: 'ゲスト',
+      display_name: customer_display_name_fallback,
       role: string_value(subject_participant.role) ?? 'user',
       tier: 'guest',
       user_uuid: null,
@@ -1091,18 +1150,38 @@ export async function resolve_room_subject(
     identity_rows = []
   }
 
-  const resolved = resolve_admin_chat_list_customer_display({
+  let profile: { display_name: string | null } | null = null
+
+  try {
+    const profile_result = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('user_uuid', user_uuid)
+      .maybeSingle()
+
+    if (!profile_result.error && profile_result.data) {
+      profile = {
+        display_name: pick_string(profile_result.data.display_name),
+      }
+    }
+  } catch {
+    profile = null
+  }
+
+  const customer_resolved = resolve_customer_display_name({
+    profile,
     user,
     identity_rows,
-    participant: subject_participant,
-    latest_user_message_sender_display_name: null,
   })
 
-  const display_name =
-    resolved.source === 'unset' ? 'ゲスト' : resolved.title
+  await emit_customer_display_name_resolved({
+    user_uuid,
+    room_uuid,
+    result: customer_resolved,
+  })
 
   return {
-    display_name,
+    display_name: customer_resolved.display_name,
     role:
       pick_string(user?.['role']) ??
       string_value(subject_participant.role) ??

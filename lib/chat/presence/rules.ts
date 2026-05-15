@@ -290,13 +290,13 @@ export function build_admin_support_ui_strings(input: {
 
   const active_header_line =
     active_names.length > 0
-      ? `対応: ${active_names.join(', ')}`
-      : '対応者なし'
+      ? `${active_names.join(', ')} が対応中`
+      : ''
 
   const card_line =
     card_parts.length > 0
       ? `${card_parts.join(' / ')}${last_handled_label ? ` | ${last_handled_label}` : ''}`
-      : `対応者なし${last_handled_label ? ` | ${last_handled_label}` : ''}`
+      : ''
 
   return {
     card_line,
