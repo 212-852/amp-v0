@@ -6,10 +6,12 @@ function post_admin_support_presence(input: {
   room_uuid: string
   participant_uuid: string
   action: string
+  keepalive?: boolean
 }) {
   void fetch('/api/chat/presence', {
     method: 'POST',
     credentials: 'include',
+    keepalive: input.keepalive,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       room_uuid: input.room_uuid,
@@ -51,8 +53,13 @@ export function use_admin_reception_support_presence(input: {
     const heartbeat = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
         post('admin_support_heartbeat')
+        post_admin_support_presence({
+          room_uuid,
+          participant_uuid,
+          action: 'admin_support_timeout_check',
+        })
       }
-    }, 15_000)
+    }, 10_000)
 
     const clear_idle_leave_timer = () => {
       if (idle_leave_timer_ref.current !== null) {
@@ -64,11 +71,13 @@ export function use_admin_reception_support_presence(input: {
     const on_visibility = () => {
       if (document.visibilityState === 'hidden') {
         was_hidden_ref.current = true
-        post('admin_support_idle')
+        post_admin_support_presence({
+          room_uuid,
+          participant_uuid,
+          action: 'admin_support_idle',
+          keepalive: true,
+        })
         clear_idle_leave_timer()
-        idle_leave_timer_ref.current = window.setTimeout(() => {
-          post('admin_support_leave')
-        }, 120_000)
       } else {
         clear_idle_leave_timer()
         if (was_hidden_ref.current) {
@@ -98,21 +107,28 @@ export function use_admin_reception_support_presence(input: {
         body: JSON.stringify({
           room_uuid,
           participant_uuid,
-          action: 'admin_support_leave',
+          action: 'admin_support_page_unload',
           last_channel: 'admin',
         }),
       }).catch(() => {})
     }
 
     document.addEventListener('visibilitychange', on_visibility)
+    window.addEventListener('beforeunload', on_pagehide)
     window.addEventListener('pagehide', on_pagehide)
 
     return () => {
       window.clearInterval(heartbeat)
       document.removeEventListener('visibilitychange', on_visibility)
+      window.removeEventListener('beforeunload', on_pagehide)
       window.removeEventListener('pagehide', on_pagehide)
       clear_idle_leave_timer()
-      post('admin_support_leave')
+      post_admin_support_presence({
+        room_uuid,
+        participant_uuid,
+        action: 'admin_support_leave',
+        keepalive: true,
+      })
     }
   }, [
     input.enabled,

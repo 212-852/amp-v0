@@ -7,16 +7,17 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { use_session_profile } from '@/components/session/profile'
 import {
+  build_room_card_summary,
   format_admin_room_unread_label,
   normalize_reception_channel,
   reception_channel_label,
   reception_presence_label,
+  type room_card_summary_type,
   type reception_room,
 } from '@/lib/admin/reception/display'
 import {
   merge_admin_support_staff_from_presence,
   reception_room_refresh_admin_support_strings,
-  resolve_chat_room_list_preview_text,
   typing_timestamp_is_fresh,
 } from '@/lib/chat/presence/rules'
 import {
@@ -79,6 +80,55 @@ function user_presence_patch(presence: chat_presence_payload) {
     ),
     user_typing_at: presence.typing_at,
   }
+}
+
+function latest_activity_time(row: reception_room) {
+  return new Date(row.latest_activity_at ?? row.updated_at ?? 0).getTime()
+}
+
+function sort_room_cards(rows: reception_room[]) {
+  return [...rows].sort((a, b) => latest_activity_time(b) - latest_activity_time(a))
+}
+
+function room_summary(row: reception_room) {
+  return build_room_card_summary({
+    latest_message_text: row.preview,
+    user_is_typing: row.user_is_typing,
+    user_typing_at: row.user_typing_at,
+    admin_support_staff: row.admin_support_staff,
+  })
+}
+
+function room_summary_line(row: reception_room) {
+  const summary = room_summary(row)
+
+  if (!summary.summary_text) {
+    return ''
+  }
+
+  return `${reception_channel_label(row.last_incoming_channel)} ・ ${summary.summary_text}`
+}
+
+function send_room_card_summary_debug(input: {
+  event: string
+  room: reception_room
+  summary_type?: room_card_summary_type | null
+}) {
+  const summary = room_summary(input.room)
+
+  send_chat_realtime_debug({
+    event: input.event,
+    room_uuid: input.room.room_uuid,
+    source_channel: 'admin',
+    summary_type: input.summary_type ?? summary.summary_type,
+    summary_text: summary.summary_text,
+    active_admin_count: summary.active_admin_count,
+    typing_exists: summary.typing_exists,
+    unread_count: input.room.unread_count ?? 0,
+    latest_activity_at:
+      input.room.latest_activity_at ?? input.room.updated_at ?? null,
+    phase: 'admin_room_card_summary',
+  })
 }
 
 export default function AdminReceptionRoomListLive({
@@ -207,6 +257,20 @@ export default function AdminReceptionRoomListLive({
     }
 
     const channels: RealtimeChannel[] = []
+    const timeout_sweep = window.setInterval(() => {
+      for (const room_uuid of room_uuids) {
+        void fetch('/api/chat/presence', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            room_uuid,
+            action: 'admin_support_timeout_check',
+            last_channel: 'admin',
+          }),
+        }).catch(() => {})
+      }
+    }, 10_000)
 
     room_uuids.forEach((room_uuid) => {
       const list_title =
@@ -229,7 +293,7 @@ export default function AdminReceptionRoomListLive({
           const last_message_at = message.created_at ?? new Date().toISOString()
 
           send_chat_realtime_debug({
-            event: 'admin_room_list_realtime_payload_received',
+            event: 'room_card_realtime_message_received',
             room_uuid: message.room_uuid,
             message_uuid: message.archive_uuid,
             payload_message_uuid: message.archive_uuid,
@@ -252,14 +316,6 @@ export default function AdminReceptionRoomListLive({
             row_msg.text && row_msg.text.trim().length > 0
               ? row_msg.text.trim()
               : null
-          const next_preview = resolve_chat_room_list_preview_text({
-            audience: 'admin_inbox',
-            latest_message_text: latest_text,
-            typing_user_active: false,
-            typing_staff_lines: [],
-            typing_placeholder_ja: '入力中...',
-            fallback_when_empty: 'メッセージ',
-          })
           const next_channel =
             direction === 'incoming'
               ? source_channel ?? channel
@@ -301,15 +357,26 @@ export default function AdminReceptionRoomListLive({
               }
 
               matched = true
-
-              return {
+              const next_row = {
                 ...row,
-                preview: next_preview,
+                preview: latest_text ?? row.preview,
                 updated_at: last_message_at,
+                latest_activity_at: last_message_at,
                 mode: row.mode,
                 last_incoming_channel:
                   next_channel ?? row.last_incoming_channel,
               }
+
+              send_room_card_summary_debug({
+                event: 'room_card_summary_build_started',
+                room: next_row,
+              })
+              send_room_card_summary_debug({
+                event: 'room_card_summary_updated',
+                room: next_row,
+              })
+
+              return next_row
             })
 
             if (!matched) {
@@ -330,14 +397,10 @@ export default function AdminReceptionRoomListLive({
               return previous
             }
 
-            const sorted = [...mapped].sort(
-              (a, b) =>
-                new Date(b.updated_at ?? 0).getTime() -
-                new Date(a.updated_at ?? 0).getTime(),
-            )
+            const sorted = sort_room_cards(mapped)
 
             send_chat_realtime_debug({
-              event: 'admin_room_card_resorted',
+              event: 'room_card_resorted',
               room_uuid: message.room_uuid,
               message_uuid: message.archive_uuid,
               payload_message_uuid: message.archive_uuid,
@@ -407,14 +470,47 @@ export default function AdminReceptionRoomListLive({
                 }
 
                 matched = true
-
-                return {
+                const activity_at =
+                  patch.user_is_typing && presence.typing_at
+                    ? presence.typing_at
+                    : row.latest_activity_at ?? row.updated_at ?? null
+                const next_row = {
                   ...row,
                   ...patch,
+                  latest_activity_at: activity_at,
+                  updated_at: activity_at ?? row.updated_at,
                   last_incoming_channel:
                     normalize_reception_channel(presence.source_channel) ??
                     row.last_incoming_channel,
                 }
+
+                send_chat_realtime_debug({
+                  event: 'room_card_realtime_presence_received',
+                  room_uuid: presence.room_uuid,
+                  participant_uuid: presence.participant_uuid,
+                  user_uuid: presence.user_uuid,
+                  source_channel: presence.source_channel ?? 'web',
+                  is_typing: patch.user_is_typing,
+                  last_seen_at: presence.last_seen_at,
+                  typing_at: presence.typing_at,
+                  summary_type: room_summary(next_row).summary_type,
+                  summary_text: room_summary(next_row).summary_text,
+                  active_admin_count: room_summary(next_row).active_admin_count,
+                  typing_exists: room_summary(next_row).typing_exists,
+                  unread_count: next_row.unread_count ?? 0,
+                  latest_activity_at: next_row.latest_activity_at ?? null,
+                  phase: 'admin_room_list_presence',
+                })
+                send_room_card_summary_debug({
+                  event: 'room_card_summary_build_started',
+                  room: next_row,
+                })
+                send_room_card_summary_debug({
+                  event: 'room_card_summary_updated',
+                  room: next_row,
+                })
+
+                return next_row
               })
 
               send_chat_realtime_debug({
@@ -445,7 +541,7 @@ export default function AdminReceptionRoomListLive({
                 })
               }
 
-              return matched ? next : previous
+              return matched ? sort_room_cards(next) : previous
             })
 
             return
@@ -472,12 +568,22 @@ export default function AdminReceptionRoomListLive({
                 staff,
                 now,
               })
+              const activity_at =
+                presence.last_seen_at ?? row.latest_activity_at ?? row.updated_at
+              const next_row = {
+                ...row,
+                ...built,
+                latest_activity_at: activity_at,
+                updated_at: activity_at ?? row.updated_at,
+              }
+              const summary = room_summary(next_row)
 
               send_chat_realtime_debug({
-                event: 'admin_support_status_updated',
+                event: 'room_card_support_state_received',
                 room_uuid: presence.room_uuid,
                 active_room_uuid: null,
                 participant_uuid: presence.participant_uuid,
+                admin_user_uuid: presence.user_uuid,
                 user_uuid: presence.user_uuid,
                 role: presence.role,
                 source_channel: presence.source_channel ?? 'admin',
@@ -485,17 +591,28 @@ export default function AdminReceptionRoomListLive({
                 is_typing: presence.is_typing,
                 last_seen_at: presence.last_seen_at,
                 typing_at: presence.typing_at,
+                summary_type: summary.summary_type,
+                summary_text: summary.summary_text,
+                active_admin_count: summary.active_admin_count,
+                typing_exists: summary.typing_exists,
+                unread_count: next_row.unread_count ?? 0,
+                latest_activity_at: next_row.latest_activity_at ?? null,
                 ignored_reason: null,
                 phase: 'admin_room_list_support_presence',
               })
+              send_room_card_summary_debug({
+                event: 'room_card_summary_build_started',
+                room: next_row,
+              })
+              send_room_card_summary_debug({
+                event: 'room_card_summary_updated',
+                room: next_row,
+              })
 
-              return {
-                ...row,
-                ...built,
-              }
+              return next_row
             })
 
-            return matched ? next : previous
+            return matched ? sort_room_cards(next) : previous
           })
         },
       })
@@ -627,18 +744,28 @@ export default function AdminReceptionRoomListLive({
               }
 
               matched = true
-
-              return {
+              const next_row = {
                 ...row,
                 unread_count:
                   unread_admin_count !== null
                     ? unread_admin_count
                     : (row.unread_count ?? 0),
                 updated_at: updated_at_row ?? row.updated_at,
+                latest_activity_at: updated_at_row ?? row.latest_activity_at,
                 last_incoming_channel:
                   last_inc !== null ? last_inc : row.last_incoming_channel,
                 preview: preview_body ?? row.preview,
               }
+              send_room_card_summary_debug({
+                event: 'room_card_summary_build_started',
+                room: next_row,
+              })
+              send_room_card_summary_debug({
+                event: 'room_card_summary_updated',
+                room: next_row,
+              })
+
+              return next_row
             })
 
             send_chat_realtime_debug({
@@ -718,11 +845,18 @@ export default function AdminReceptionRoomListLive({
               return previous
             }
 
-            return [...mapped].sort(
-              (a, b) =>
-                new Date(b.updated_at ?? 0).getTime() -
-                new Date(a.updated_at ?? 0).getTime(),
-            )
+            const sorted = sort_room_cards(mapped)
+
+            send_chat_realtime_debug({
+              event: 'room_card_resorted',
+              room_uuid: ru,
+              source_channel: 'admin',
+              unread_count: unread_admin_count,
+              latest_activity_at: updated_at_row,
+              phase: 'admin_room_list_rooms_realtime',
+            })
+
+            return sorted
           })
         },
       )
@@ -743,6 +877,7 @@ export default function AdminReceptionRoomListLive({
           cleanup_reason: 'admin_reception_room_list_unmount',
         })
       })
+      window.clearInterval(timeout_sweep)
       void supabase.removeChannel(rooms_unread_channel)
     }
   }, [room_key, session?.role, session?.tier, session?.user_uuid])
@@ -790,16 +925,11 @@ export default function AdminReceptionRoomListLive({
                   {format_time(room.updated_at)}
                 </span>
               </div>
-              <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-600">
-                {resolve_chat_room_list_preview_text({
-                  audience: 'admin_inbox',
-                  latest_message_text: room.preview,
-                  typing_user_active: room.user_is_typing ?? false,
-                  typing_staff_lines: [],
-                  typing_placeholder_ja: 'ユーザー入力中...',
-                  fallback_when_empty: room.preview,
-                })}
-              </p>
+              {room_summary_line(room) ? (
+                <p className="mt-0.5 truncate text-[12px] leading-tight text-neutral-600">
+                  {room_summary_line(room)}
+                </p>
+              ) : null}
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium leading-none text-neutral-500">
                 <span className="font-mono text-neutral-400">
                   {room.room_uuid.slice(0, 8)}
@@ -814,9 +944,6 @@ export default function AdminReceptionRoomListLive({
                 </span>
                 <span className="text-neutral-500">
                   {presence_meta_line_for_room(room)}
-                </span>
-                <span className="max-w-full truncate text-neutral-600">
-                  {room.admin_support_card_line ?? '対応者なし'}
                 </span>
               </div>
             </div>

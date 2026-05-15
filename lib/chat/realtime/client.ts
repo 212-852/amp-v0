@@ -155,6 +155,7 @@ export type chat_realtime_debug_payload = {
   room_uuid: string | null
   active_room_uuid?: string | null
   participant_uuid?: string | null
+  admin_user_uuid?: string | null
   user_uuid?: string | null
   role?: string | null
   tier?: string | null
@@ -224,6 +225,12 @@ export type chat_realtime_debug_payload = {
   unread_admin_count?: number | null
   admin_last_read_at?: string | null
   actor_admin_user_uuid?: string | null
+  summary_type?: string | null
+  summary_text?: string | null
+  active_admin_count?: number | null
+  typing_exists?: boolean | null
+  unread_count?: number | null
+  latest_activity_at?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
@@ -661,6 +668,10 @@ export function subscribe_chat_room_realtime(input: {
             table: 'participants',
             payload_room_uuid: presence.room_uuid,
             participant_uuid: presence.participant_uuid,
+            admin_user_uuid:
+              presence.role === 'admin' || presence.role === 'concierge'
+                ? presence.user_uuid
+                : null,
             user_uuid: presence.user_uuid,
             role: presence.role,
             source_channel:
@@ -684,6 +695,7 @@ export function subscribe_chat_room_realtime(input: {
               ...base_debug,
               active_room_uuid: input.active_room_uuid ?? null,
               participant_uuid: presence.participant_uuid,
+              admin_user_uuid: null,
               user_uuid: presence.user_uuid,
               source_channel:
                 presence.source_channel ?? input.source_channel ?? 'web',
@@ -706,6 +718,7 @@ export function subscribe_chat_room_realtime(input: {
               ...base_debug,
               active_room_uuid: input.active_room_uuid ?? null,
               participant_uuid: presence.participant_uuid,
+              admin_user_uuid: null,
               user_uuid: presence.user_uuid,
               source_channel:
                 presence.source_channel ?? input.source_channel ?? 'web',
@@ -719,6 +732,7 @@ export function subscribe_chat_room_realtime(input: {
               ...base_debug,
               active_room_uuid: input.active_room_uuid ?? null,
               participant_uuid: presence.participant_uuid,
+              admin_user_uuid: presence.user_uuid,
               user_uuid: presence.user_uuid,
               role: presence.role,
               source_channel:

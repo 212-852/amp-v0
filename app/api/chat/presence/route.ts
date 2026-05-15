@@ -6,6 +6,7 @@ import {
   mark_admin_support_join,
   mark_admin_support_leave,
   mark_admin_support_recovered_notice,
+  expire_admin_support_presence,
   mark_room_entered,
   mark_room_left,
   mark_typing_started,
@@ -29,6 +30,26 @@ export async function POST(request: Request) {
   const last_channel_raw =
     body?.last_channel ??
     (raw_action.startsWith('admin_support') ? 'admin' : undefined)
+
+  if (raw_action === 'admin_support_timeout_check') {
+    try {
+      await expire_admin_support_presence({
+        room_uuid: typeof body?.room_uuid === 'string' ? body.room_uuid : null,
+      })
+
+      return NextResponse.json({ ok: true })
+    } catch (error) {
+      console.error('[chat_presence] timeout_check_failed', {
+        room_uuid: body?.room_uuid,
+        error: error instanceof Error ? error.message : String(error),
+      })
+
+      return NextResponse.json(
+        { ok: false, error: 'presence_timeout_check_failed' },
+        { status: 500 },
+      )
+    }
+  }
 
   const context = resolve_presence_mutation_context({
     room_uuid: body?.room_uuid,
@@ -80,6 +101,12 @@ export async function POST(request: Request) {
       await mark_admin_support_heartbeat({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_leave') {
       await mark_admin_support_leave({ room_uuid, participant_uuid })
+    } else if (body?.action === 'admin_support_page_unload') {
+      await mark_admin_support_leave({
+        room_uuid,
+        participant_uuid,
+        debug_event_name: 'admin_presence_page_unload',
+      })
     } else if (body?.action === 'admin_support_idle') {
       await mark_admin_support_idle_notice({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_recovered') {

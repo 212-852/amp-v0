@@ -195,10 +195,6 @@ export function admin_support_tier_from_row(
     return 'typing'
   }
 
-  if (row.is_active === false) {
-    return 'left'
-  }
-
   const last = row.last_seen_at ? new Date(row.last_seen_at).getTime() : NaN
 
   if (Number.isNaN(last)) {
@@ -206,6 +202,10 @@ export function admin_support_tier_from_row(
   }
 
   const age = now.getTime() - last
+
+  if (row.is_active === false) {
+    return age <= admin_support_idle_within_ms ? 'idle' : 'left'
+  }
 
   if (age <= admin_support_active_within_ms) {
     return 'active'

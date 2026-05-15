@@ -6,6 +6,7 @@ import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 
 import {
+  admin_support_active_within_ms,
   decide_active_participants,
   decide_typing_participants,
   is_participant_role,
@@ -214,13 +215,38 @@ export async function mark_participant_last_channel(input: {
 export async function mark_room_left(input: {
   room_uuid: string
   participant_uuid: string
+  visibility_state?: string | null
+  debug_event_name?: string | null
 }) {
+  const now = new Date().toISOString()
+
   await update_participant_presence({
-    ...input,
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
     patch: {
       is_active: false,
       is_typing: false,
-      last_seen_at: new Date().toISOString(),
+      typing_at: null,
+      last_seen_at: now,
+    },
+  })
+
+  const snap = await load_participant_admin_support_event_payload(input)
+
+  if (!snap) {
+    return
+  }
+
+  const event = input.debug_event_name ?? 'admin_presence_marked_inactive'
+
+  await debug_event({
+    category: 'admin_chat',
+    event,
+    payload: {
+      ...snap,
+      admin_user_uuid: snap.user_uuid,
+      visibility_state: input.visibility_state ?? null,
+      timeout_seconds: null,
     },
   })
 }
@@ -405,7 +431,7 @@ export async function mark_admin_support_join(input: {
 
   await debug_event({
     category: 'admin_chat',
-    event: 'admin_support_presence_started',
+    event: 'admin_presence_joined',
     payload: snap,
   })
   await debug_event({
@@ -419,6 +445,8 @@ export async function mark_admin_support_heartbeat(input: {
   room_uuid: string
   participant_uuid: string
 }) {
+  const before = await load_participant_admin_support_event_payload(input)
+
   await mark_room_entered({
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
@@ -432,18 +460,39 @@ export async function mark_admin_support_heartbeat(input: {
 
   await debug_event({
     category: 'admin_chat',
-    event: 'admin_support_presence_heartbeat',
-    payload: snap,
+    event: 'admin_presence_heartbeat',
+    payload: {
+      ...snap,
+      admin_user_uuid: snap.user_uuid,
+      visibility_state: 'visible',
+      timeout_seconds: 10,
+    },
   })
+
+  if (before && before.is_active === false) {
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_presence_recovered',
+      payload: {
+        ...snap,
+        admin_user_uuid: snap.user_uuid,
+        visibility_state: 'visible',
+        timeout_seconds: null,
+      },
+    })
+  }
 }
 
 export async function mark_admin_support_leave(input: {
   room_uuid: string
   participant_uuid: string
+  debug_event_name?: string | null
 }) {
   await mark_room_left({
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
+    visibility_state: 'hidden',
+    debug_event_name: input.debug_event_name ?? 'admin_presence_marked_inactive',
   })
   const snap = await load_participant_admin_support_event_payload(input)
 
@@ -451,11 +500,6 @@ export async function mark_admin_support_leave(input: {
     return
   }
 
-  await debug_event({
-    category: 'admin_chat',
-    event: 'admin_support_presence_left',
-    payload: snap,
-  })
   await debug_event({
     category: 'admin_chat',
     event: 'admin_support_left',
@@ -467,6 +511,12 @@ export async function mark_admin_support_idle_notice(input: {
   room_uuid: string
   participant_uuid: string
 }) {
+  await mark_room_left({
+    room_uuid: input.room_uuid,
+    participant_uuid: input.participant_uuid,
+    visibility_state: 'hidden',
+    debug_event_name: 'admin_presence_visibility_hidden',
+  })
   const snap = await load_participant_admin_support_event_payload(input)
 
   if (!snap) {
@@ -502,9 +552,92 @@ export async function mark_admin_support_recovered_notice(input: {
 
   await debug_event({
     category: 'admin_chat',
-    event: 'admin_support_recovered',
-    payload: snap,
+    event: 'admin_presence_recovered',
+    payload: {
+      ...snap,
+      admin_user_uuid: snap.user_uuid,
+      visibility_state: 'visible',
+      timeout_seconds: null,
+    },
   })
+}
+
+export async function expire_admin_support_presence(input: {
+  room_uuid?: string | null
+}) {
+  const cutoff_ms = Date.now() - admin_support_active_within_ms
+  let query = supabase
+    .from('participants')
+    .select('participant_uuid, room_uuid, user_uuid, role, is_active, is_typing, last_seen_at, last_channel')
+    .in('role', ['admin', 'concierge'])
+    .eq('is_active', true)
+
+  if (input.room_uuid) {
+    query = query.eq('room_uuid', input.room_uuid)
+  }
+
+  const result = await query
+
+  if (result.error) {
+    throw result.error
+  }
+
+  const rows = (result.data ?? []) as Array<{
+    participant_uuid: string
+    room_uuid: string | null
+    user_uuid: string | null
+    role: string | null
+    is_active: boolean | null
+    is_typing: boolean | null
+    last_seen_at: string | null
+    last_channel: string | null
+  }>
+
+  for (const row of rows) {
+    if (!row.room_uuid) {
+      continue
+    }
+
+    const last_seen_ms = row.last_seen_at
+      ? new Date(row.last_seen_at).getTime()
+      : NaN
+
+    if (!Number.isNaN(last_seen_ms) && last_seen_ms >= cutoff_ms) {
+      continue
+    }
+
+    await update_participant_presence({
+      room_uuid: row.room_uuid,
+      participant_uuid: row.participant_uuid,
+      patch: {
+        is_active: false,
+        is_typing: false,
+        typing_at: null,
+      },
+    })
+
+    const age_seconds = Number.isNaN(last_seen_ms)
+      ? null
+      : Math.floor((Date.now() - last_seen_ms) / 1000)
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_presence_timeout_expired',
+      payload: {
+        room_uuid: row.room_uuid,
+        participant_uuid: row.participant_uuid,
+        admin_user_uuid: row.user_uuid,
+        user_uuid: row.user_uuid,
+        role: row.role,
+        is_active: false,
+        is_typing: false,
+        visibility_state: null,
+        last_seen_at: row.last_seen_at,
+        source_channel: row.last_channel,
+        timeout_seconds: age_seconds,
+      },
+    })
+  }
 }
 
 async function load_profiles(participants: participant_row[]) {

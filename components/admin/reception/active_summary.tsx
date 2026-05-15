@@ -287,6 +287,7 @@ export default function AdminReceptionActiveSummary({
             room_uuid: presence.room_uuid,
             active_room_uuid: room_uuid,
             participant_uuid: presence.participant_uuid,
+            admin_user_uuid: presence.user_uuid,
             user_uuid: presence.user_uuid,
             source_channel: presence.source_channel ?? 'web',
             is_typing,

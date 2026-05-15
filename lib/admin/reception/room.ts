@@ -4,7 +4,6 @@ import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import {
   build_admin_support_ui_strings,
   is_participant_role,
-  resolve_chat_room_list_preview_text,
   typing_timestamp_is_fresh,
   type admin_support_staff_row,
   type participant_role,
@@ -37,6 +36,7 @@ import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 
 import {
+  build_room_card_summary,
   format_admin_room_unread_label,
   normalize_reception_channel,
   reception_channel_label,
@@ -45,6 +45,7 @@ import {
 } from '@/lib/admin/reception/display'
 
 export {
+  build_room_card_summary,
   format_admin_room_unread_label,
   normalize_reception_channel,
   reception_channel_label,
@@ -254,7 +255,7 @@ function reception_preview_from_room_row(
     return from_row
   }
 
-  return '対応が必要です'
+  return ''
 }
 
 function normalize_room(
@@ -285,6 +286,7 @@ function normalize_room(
     title: display_name,
     preview: reception_preview_from_room_row(row, enrichment?.preview),
     updated_at: row.updated_at,
+    latest_activity_at: row.last_message_at ?? row.updated_at,
     mode,
     last_incoming_channel: normalize_reception_channel(row.last_incoming_channel),
     unread_count: Math.max(0, Math.floor(unread_raw)),
@@ -297,7 +299,7 @@ function normalize_room(
     ),
     user_typing_at: enrichment?.user_typing_at ?? null,
     admin_support_staff: enrichment?.admin_support_staff ?? [],
-    admin_support_card_line: enrichment?.admin_support_card_line ?? '対応者なし',
+    admin_support_card_line: enrichment?.admin_support_card_line ?? '',
     admin_support_active_header_line:
       enrichment?.admin_support_active_header_line ?? '対応者なし',
     admin_support_last_handled_label:
@@ -809,14 +811,7 @@ async function enrich_room_cards(
     const latest_summary = latest_summary_by_room.get(row.room_uuid) ?? null
     const base_preview = latest_summary?.preview ?? null
     const typing_snapshot = end_user_typing_snapshot(room_ps, new Date())
-    const preview_resolved = resolve_chat_room_list_preview_text({
-      audience: 'admin_inbox',
-      latest_message_text: base_preview,
-      typing_user_active: typing_snapshot.is_typing,
-      typing_staff_lines: [],
-      typing_placeholder_ja: 'ユーザー入力中...',
-      fallback_when_empty: '対応が必要です',
-    })
+    const preview_resolved = base_preview?.trim() ?? ''
 
     const has_user_uuid = Boolean(customer_user_uuid)
     const has_display_name = Boolean(
@@ -967,6 +962,13 @@ async function enrich_room_cards(
       staff: admin_support_staff,
       now: now_support,
     })
+    const card_summary = build_room_card_summary({
+      latest_message_text: preview_resolved,
+      user_is_typing: typing_snapshot.is_typing,
+      user_typing_at: typing_snapshot.typing_at,
+      admin_support_staff,
+      now: now_support,
+    })
 
     enrichments.set(row.room_uuid, {
       display_name: resolved.title,
@@ -983,7 +985,11 @@ async function enrich_room_cards(
       presence_source_channel: normalize_reception_channel(customer?.last_channel),
       user_typing_at: typing_snapshot.typing_at,
       admin_support_staff,
-      admin_support_card_line: support_strings.card_line,
+      admin_support_card_line:
+        card_summary.summary_type === 'admin_active' ||
+        card_summary.summary_type === 'admin_idle'
+          ? card_summary.summary_text
+          : '',
       admin_support_active_header_line: support_strings.active_header_line,
       admin_support_last_handled_label: support_strings.last_handled_label,
     })

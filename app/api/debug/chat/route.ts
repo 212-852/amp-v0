@@ -7,6 +7,7 @@ type chat_debug_body = {
   room_uuid?: unknown
   active_room_uuid?: unknown
   participant_uuid?: unknown
+  admin_user_uuid?: unknown
   user_uuid?: unknown
   role?: unknown
   tier?: unknown
@@ -73,6 +74,12 @@ type chat_debug_body = {
   unread_admin_count?: unknown
   admin_last_read_at?: unknown
   actor_admin_user_uuid?: unknown
+  summary_type?: unknown
+  summary_text?: unknown
+  active_admin_count?: unknown
+  typing_exists?: unknown
+  unread_count?: unknown
+  latest_activity_at?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -101,6 +108,7 @@ export async function POST(request: Request) {
       room_uuid: string_or_null(body?.room_uuid),
       active_room_uuid: string_or_null(body?.active_room_uuid),
       participant_uuid: string_or_null(body?.participant_uuid),
+      admin_user_uuid: string_or_null(body?.admin_user_uuid),
       user_uuid: string_or_null(body?.user_uuid),
       role: string_or_null(body?.role),
       tier: string_or_null(body?.tier),
@@ -180,6 +188,13 @@ export async function POST(request: Request) {
       unread_admin_count: number_or_null(body?.unread_admin_count),
       admin_last_read_at: string_or_null(body?.admin_last_read_at),
       actor_admin_user_uuid: string_or_null(body?.actor_admin_user_uuid),
+      summary_type: string_or_null(body?.summary_type),
+      summary_text: string_or_null(body?.summary_text),
+      active_admin_count: number_or_null(body?.active_admin_count),
+      typing_exists:
+        typeof body?.typing_exists === 'boolean' ? body.typing_exists : null,
+      unread_count: number_or_null(body?.unread_count),
+      latest_activity_at: string_or_null(body?.latest_activity_at),
     },
   })
 
