@@ -223,6 +223,7 @@ function normalize_room(
     updated_at: row.updated_at,
     mode,
     last_incoming_channel: normalize_reception_channel(row.last_incoming_channel),
+    unread_count: 0,
   }
 }
 

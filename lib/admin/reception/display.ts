@@ -9,6 +9,7 @@ export type reception_room = {
   updated_at: string | null
   mode: string | null
   last_incoming_channel: string | null
+  unread_count?: number
 }
 
 export function normalize_reception_channel(value: unknown): string | null {

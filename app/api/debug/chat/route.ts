@@ -38,6 +38,8 @@ type chat_debug_body = {
   error_hint?: unknown
   prev_message_count?: unknown
   next_message_count?: unknown
+  prev_room_count?: unknown
+  next_room_count?: unknown
   dedupe_hit?: unknown
   cleanup_reason?: unknown
   is_self_sender?: unknown
@@ -53,6 +55,9 @@ type chat_debug_body = {
   message_channel?: unknown
   message_source_channel?: unknown
   message_direction?: unknown
+  channel?: unknown
+  direction?: unknown
+  last_message_at?: unknown
   payload_channel?: unknown
   payload_source_channel?: unknown
   payload_direction?: unknown
@@ -122,6 +127,8 @@ export async function POST(request: Request) {
       error_hint: string_or_null(body?.error_hint),
       prev_message_count: number_or_null(body?.prev_message_count),
       next_message_count: number_or_null(body?.next_message_count),
+      prev_room_count: number_or_null(body?.prev_room_count),
+      next_room_count: number_or_null(body?.next_room_count),
       dedupe_hit:
         typeof body?.dedupe_hit === 'boolean' ? body.dedupe_hit : null,
       cleanup_reason: string_or_null(body?.cleanup_reason),
@@ -148,6 +155,9 @@ export async function POST(request: Request) {
       message_channel: string_or_null(body?.message_channel),
       message_source_channel: string_or_null(body?.message_source_channel),
       message_direction: string_or_null(body?.message_direction),
+      channel: string_or_null(body?.channel),
+      direction: string_or_null(body?.direction),
+      last_message_at: string_or_null(body?.last_message_at),
       payload_channel: string_or_null(body?.payload_channel),
       payload_source_channel: string_or_null(body?.payload_source_channel),
       payload_direction: string_or_null(body?.payload_direction),

@@ -1,12 +1,12 @@
 import Link from 'next/link'
 
+import AdminReceptionActiveSummary from '@/components/admin/reception/active_summary'
 import AdminChatTimeline from '@/components/admin/c'
 import AdminHandoffMemo from '@/components/admin/memo'
 import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import {
   list_reception_room_messages,
   read_reception_room,
-  reception_channel_label,
   resolve_room_subject,
   type reception_room,
   type reception_room_message,
@@ -159,27 +159,13 @@ export default async function AdminReceptionRoomPage({
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
         <div className="shrink-0 border-b border-neutral-200 px-6 py-4">
           <div className="flex flex-col gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[16px] font-semibold leading-tight text-black">
-                {subject.display_name}
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-neutral-500">
-                <span>
-                  {subject.role ?? 'user'} / {subject.tier ?? 'guest'}
-                </span>
-                {room?.mode ? (
-                  <>
-                    <span aria-hidden>{'/'}</span>
-                    <span>{room.mode}</span>
-                  </>
-                ) : null}
-                <span aria-hidden>{'/'}</span>
-                <span className="font-mono">{room_uuid.slice(0, 8)}</span>
-                <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-white">
-                  {reception_channel_label(room?.last_incoming_channel)}
-                </span>
-              </div>
-            </div>
+            <AdminReceptionActiveSummary
+              room_uuid={room_uuid}
+              room={room}
+              subject={subject}
+              staff_user_uuid={access.user_uuid}
+              staff_tier={access.tier}
+            />
             <AdminHandoffMemo
               room_uuid={room_uuid}
               initial_memos={memos}

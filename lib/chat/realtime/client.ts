@@ -173,6 +173,8 @@ export type chat_realtime_debug_payload = {
   error_hint?: string | null
   prev_message_count?: number | null
   next_message_count?: number | null
+  prev_room_count?: number | null
+  next_room_count?: number | null
   dedupe_hit?: boolean | null
   phase: string
   cleanup_reason?: string | null
@@ -189,6 +191,9 @@ export type chat_realtime_debug_payload = {
   message_channel?: string | null
   message_source_channel?: string | null
   message_direction?: string | null
+  channel?: string | null
+  direction?: string | null
+  last_message_at?: string | null
   /** `messages.channel` (e.g. line); distinct from listener `source_channel`. */
   payload_channel?: string | null
   /** Body `source_channel` (e.g. line). */
