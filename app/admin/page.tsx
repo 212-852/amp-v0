@@ -15,7 +15,11 @@ async function load_top_rooms(state: 'open' | 'offline'): Promise<reception_room
   }
 
   try {
-    return await list_reception_rooms({ mode: 'concierge', limit: 3 })
+    return await list_reception_rooms({
+      mode: 'concierge',
+      limit: 3,
+      used_by: 'top',
+    })
   } catch (error) {
     console.error('[admin_home] list_reception_rooms_failed', {
       error: error instanceof Error ? error.message : String(error),

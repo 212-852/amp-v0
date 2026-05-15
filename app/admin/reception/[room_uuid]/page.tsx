@@ -7,11 +7,10 @@ import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import {
   list_reception_room_messages,
   read_reception_room,
-  resolve_room_subject,
   type reception_room,
   type reception_room_message,
-  type reception_room_subject,
 } from '@/lib/admin/reception/room'
+import { customer_display_name_fallback } from '@/lib/chat/identity/customer_display_name'
 import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
 import { resolve_admin_reception_send_context } from '@/lib/chat/room'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
@@ -68,27 +67,6 @@ async function load_messages(
   }
 }
 
-async function load_subject(
-  room_uuid: string,
-): Promise<reception_room_subject> {
-  try {
-    return await resolve_room_subject(room_uuid)
-  } catch (error) {
-    console.error('[admin_reception_room_page] resolve_subject_failed', {
-      room_uuid,
-      error: error instanceof Error ? error.message : String(error),
-    })
-
-    return {
-      display_name: 'お客様',
-      role: 'user',
-      tier: 'guest',
-      user_uuid: null,
-      visitor_uuid: null,
-    }
-  }
-}
-
 async function load_memos(room_uuid: string): Promise<handoff_memo[]> {
   const session = await get_session_user()
 
@@ -132,10 +110,11 @@ export default async function AdminReceptionRoomPage({
     access.user_uuid,
   )
   const room_result = await load_room(room_uuid)
-  const subject = await load_subject(room_uuid)
   const memos = await load_memos(room_uuid)
   const message_result = await load_messages(room_uuid)
   const room = room_result.room
+  const customer_display_name =
+    room?.display_name?.trim() || customer_display_name_fallback
 
   return (
     <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
@@ -156,7 +135,7 @@ export default async function AdminReceptionRoomPage({
           </Link>
           <span aria-hidden>{'>'}</span>
           <span className="truncate text-neutral-900">
-            {subject.display_name}
+            {customer_display_name}
           </span>
         </nav>
       </header>
@@ -167,7 +146,7 @@ export default async function AdminReceptionRoomPage({
             <AdminReceptionActiveSummary
               room_uuid={room_uuid}
               room={room}
-              customer_display_name={subject.display_name}
+              customer_display_name={customer_display_name}
               staff_user_uuid={access.user_uuid}
               staff_tier={access.tier}
               staff_participant_uuid={staff_participant_uuid}
@@ -188,7 +167,7 @@ export default async function AdminReceptionRoomPage({
           staff_display_name={staff_display_name}
           staff_user_uuid={access.user_uuid}
           staff_tier={access.tier}
-          room_display_title={subject.display_name}
+          room_display_title={customer_display_name}
         />
       </section>
     </div>

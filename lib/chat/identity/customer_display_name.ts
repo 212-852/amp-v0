@@ -189,22 +189,26 @@ export function resolve_customer_display_name(input: {
   }
 }
 
+export type customer_display_used_by = 'top' | 'list' | 'detail'
+
 export async function emit_customer_display_name_resolved(input: {
   user_uuid: string | null
   room_uuid?: string | null
+  used_by?: customer_display_used_by | null
   result: resolve_customer_display_name_result
 }) {
   await debug_event({
     category: 'admin_chat',
     event: 'customer_display_name_resolved',
     payload: {
-      user_uuid: input.user_uuid,
       room_uuid: input.room_uuid ?? null,
+      user_uuid: input.user_uuid,
+      resolved_name: input.result.display_name.slice(0, 200),
       resolved_source: input.result.source,
+      used_by: input.used_by ?? null,
       has_profile_display_name: input.result.debug.has_profile_display_name,
       has_user_display_name: input.result.debug.has_user_display_name,
       has_identity_name: input.result.debug.has_identity_name,
-      resolved_display_name: input.result.display_name.slice(0, 200),
     },
   })
 }

@@ -15,20 +15,21 @@ import {
   archived_messages_to_reception_timeline,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
-import {
-  load_admin_chat_schema_snapshot,
-  pick_users_select_list,
-} from '@/lib/auth/customer_display'
+import { load_admin_chat_schema_snapshot } from '@/lib/auth/customer_display'
 import {
   admin_chat_unset_customer_label,
   summarize_admin_chat_identity_payload_shape,
 } from '@/lib/chat/identity/admin_list_customer_name'
+import { customer_display_name_fallback } from '@/lib/chat/identity/customer_display_name'
 import {
-  customer_display_name_fallback,
-  emit_customer_display_name_resolved,
-  resolve_customer_display_name,
-  type resolved_customer_display_source,
-} from '@/lib/chat/identity/customer_display_name'
+  choose_customer_user_participant,
+  fetch_reception_customer_display_prefetch,
+  resolve_reception_customer_display_from_prefetch,
+  resolve_reception_room_customer_display,
+  type customer_display_used_by,
+} from '@/lib/admin/reception/customer_display'
+import { emit_customer_display_name_resolved } from '@/lib/chat/identity/customer_display_name'
+import type { resolved_customer_display_source } from '@/lib/chat/identity/customer_display_name'
 import {
   is_missing_room_last_incoming_columns_error,
   is_missing_room_optional_select_columns_error,
@@ -229,14 +230,6 @@ type normalize_room_options = {
   room_uuid_label_fallback?: boolean
 }
 
-const guest_subject: reception_room_subject = {
-  display_name: customer_display_name_fallback,
-  role: 'user',
-  tier: 'guest',
-  user_uuid: null,
-  visitor_uuid: null,
-}
-
 function reception_preview_from_room_row(
   row: room_row,
   enrichment_preview: string | null | undefined,
@@ -417,43 +410,6 @@ async function emit_customer_identity_resolve(input: {
   })
 }
 
-async function fetch_customer_profiles_by_user(
-  user_uuids: string[],
-): Promise<Map<string, { display_name: string | null }>> {
-  const map = new Map<string, { display_name: string | null }>()
-
-  if (user_uuids.length === 0) {
-    return map
-  }
-
-  try {
-    const result = await supabase
-      .from('profiles')
-      .select('user_uuid, display_name')
-      .in('user_uuid', user_uuids)
-
-    if (result.error) {
-      return map
-    }
-
-    for (const raw of (result.data ?? []) as Record<string, unknown>[]) {
-      const uid = pick_string(raw['user_uuid'])
-
-      if (!uid) {
-        continue
-      }
-
-      map.set(uid, {
-        display_name: pick_string(raw['display_name']),
-      })
-    }
-  } catch {
-    return map
-  }
-
-  return map
-}
-
 async function fetch_user_profile_row_by_uuid(
   user_uuid: string,
   users_select: string,
@@ -582,19 +538,6 @@ function latest_user_sender_display_name(
   return null
 }
 
-function choose_customer_user_participant(
-  participants: participant_row[],
-): participant_row | null {
-  const user_rows = participants.filter((participant) => {
-    const role = participant.role?.trim().toLowerCase() ?? ''
-    return role === 'user'
-  })
-
-  return (
-    user_rows.find((row) => string_value(row.user_uuid)) ?? user_rows[0] ?? null
-  )
-}
-
 function end_user_typing_snapshot(
   room_ps: participant_row[],
   now: Date,
@@ -637,6 +580,7 @@ let admin_chat_schema_columns_debug_emitted = false
 async function enrich_room_cards(
   rows: room_row[],
   list_mode: reception_room_mode,
+  used_by: customer_display_used_by,
 ): Promise<Map<string, room_card_enrichment>> {
   const enrichments = new Map<string, room_card_enrichment>()
 
@@ -704,104 +648,24 @@ async function enrich_room_cards(
 
   const user_uuids = Array.from(new Set(user_uuid_by_room.values()))
 
-  const users_by_uuid = new Map<string, Record<string, unknown>>()
-  const identity_rows_by_user = new Map<string, Record<string, unknown>[]>()
-
-  if (user_uuids.length > 0) {
+  if (user_uuids.length > 0 && !admin_chat_schema_columns_debug_emitted) {
+    admin_chat_schema_columns_debug_emitted = true
     const schema_snapshot = await load_admin_chat_schema_snapshot(supabase)
-    const users_select_list = pick_users_select_list(schema_snapshot)
 
-    if (!admin_chat_schema_columns_debug_emitted) {
-      admin_chat_schema_columns_debug_emitted = true
-      await debug_event({
-        category: 'admin_chat',
-        event: 'admin_chat_schema_columns_loaded',
-        payload: {
-          users_columns: schema_snapshot?.users_columns ?? [],
-          identities_columns: schema_snapshot?.identities_columns ?? [],
-        },
-      })
-    }
-
-    try {
-      const user_result = await supabase
-        .from('users')
-        .select(users_select_list)
-        .in('user_uuid', user_uuids)
-
-      if (user_result.error) {
-        await emit_admin_chat_list_debug({
-          event: 'admin_chat_list_query_failed',
-          raw_room_count: rows.length,
-          filtered_room_count: null,
-          error: user_result.error,
-          phase: 'users_query',
-        })
-      } else {
-        for (const user of (user_result.data ?? []) as unknown as Record<
-          string,
-          unknown
-        >[]) {
-          const uid = pick_string(user['user_uuid'])
-
-          if (uid) {
-            users_by_uuid.set(uid, user)
-          }
-        }
-      }
-    } catch (error) {
-      await emit_admin_chat_list_debug({
-        event: 'admin_chat_list_query_failed',
-        raw_room_count: rows.length,
-        filtered_room_count: null,
-        error,
-        phase: 'users_query',
-      })
-    }
-
-    try {
-      const identity_result = await supabase
-        .from('identities')
-        .select('*')
-        .in('user_uuid', user_uuids)
-
-      if (identity_result.error) {
-        await emit_admin_chat_list_debug({
-          event: 'admin_chat_list_query_failed',
-          raw_room_count: rows.length,
-          filtered_room_count: null,
-          error: identity_result.error,
-          phase: 'identities_query',
-        })
-      } else {
-        const raw = (identity_result.data ?? []) as Record<string, unknown>[]
-
-        for (const row of raw) {
-          const uid = pick_string(row['user_uuid'])
-
-          if (!uid) {
-            continue
-          }
-
-          const list = identity_rows_by_user.get(uid) ?? []
-          list.push(row)
-          identity_rows_by_user.set(uid, list)
-        }
-      }
-    } catch (error) {
-      await emit_admin_chat_list_debug({
-        event: 'admin_chat_list_query_failed',
-        raw_room_count: rows.length,
-        filtered_room_count: null,
-        error,
-        phase: 'identities_query',
-      })
-    }
-
-    await backfill_missing_users(user_uuids, users_by_uuid, users_select_list)
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_chat_schema_columns_loaded',
+      payload: {
+        users_columns: schema_snapshot?.users_columns ?? [],
+        identities_columns: schema_snapshot?.identities_columns ?? [],
+      },
+    })
   }
 
-  const profiles_by_uuid = await fetch_customer_profiles_by_user(user_uuids)
+  const customer_prefetch =
+    await fetch_reception_customer_display_prefetch(user_uuids)
+  const { users_by_uuid, profiles_by_uuid, identity_rows_by_user } =
+    customer_prefetch
 
   let latest_summary_by_room = new Map<string, latest_message_summary>()
 
@@ -881,27 +745,19 @@ async function enrich_room_cards(
       })
     }
 
-    const customer_resolved = customer_user_uuid
-      ? resolve_customer_display_name({
-          profile: profiles_by_uuid.get(customer_user_uuid) ?? null,
-          user: customer_user ?? null,
-          identity_rows: identity_rows_for_user,
-        })
-      : {
-          display_name: customer_display_name_fallback,
-          source: 'fallback' as const,
-          debug: {
-            has_profile_display_name: false,
-            has_user_display_name: false,
-            has_identity_name: false,
-          },
-        }
+    const { resolution: customer_resolved, result: customer_result } =
+      resolve_reception_customer_display_from_prefetch({
+        room_uuid: row.room_uuid,
+        participants: room_ps,
+        prefetch: customer_prefetch,
+      })
 
     if (has_user_uuid) {
       await emit_customer_display_name_resolved({
         user_uuid: customer_user_uuid,
         room_uuid: row.room_uuid,
-        result: customer_resolved,
+        used_by,
+        result: customer_result,
       })
     }
 
@@ -1057,147 +913,31 @@ async function enrich_room_cards(
   return enrichments
 }
 
-function choose_subject_participant(
-  participants: participant_row[],
-): participant_row | null {
-  const non_bot = participants.filter((participant) => {
-    const role = participant.role?.trim().toLowerCase() ?? ''
-    return role !== 'bot'
-  })
-
-  return (
-    non_bot.find((participant) => participant.role === 'user') ??
-    non_bot.find((participant) => participant.user_uuid) ??
-    non_bot[0] ??
-    null
-  )
-}
-
 export async function resolve_room_subject(
   room_uuid: string,
 ): Promise<reception_room_subject> {
-  let participants: participant_row[] = []
-
-  try {
-    const participant_result = await supabase
-      .from('participants')
-      .select('*')
-      .eq('room_uuid', room_uuid)
-
-    if (participant_result.error) {
-      return guest_subject
-    }
-
-    participants = (participant_result.data ?? []) as participant_row[]
-  } catch {
-    return guest_subject
-  }
-
-  const subject_participant = choose_subject_participant(participants)
-
-  if (!subject_participant) {
-    return guest_subject
-  }
-
-  const user_uuid = subject_participant.user_uuid ?? null
-  const visitor_uuid = subject_participant.visitor_uuid ?? null
-
-  if (!user_uuid) {
-    return {
-      display_name: customer_display_name_fallback,
-      role: string_value(subject_participant.role) ?? 'user',
-      tier: 'guest',
-      user_uuid: null,
-      visitor_uuid,
-    }
-  }
-
-  const schema_snapshot = await load_admin_chat_schema_snapshot(supabase)
-  const users_select_list = pick_users_select_list(schema_snapshot)
-
-  let user: Record<string, unknown> | null = null
-
-  try {
-    const user_result = await supabase
-      .from('users')
-      .select(users_select_list)
-      .eq('user_uuid', user_uuid)
-      .maybeSingle()
-
-    if (!user_result.error) {
-      user = user_result.data as Record<string, unknown> | null
-    }
-  } catch {
-    user = null
-  }
-
-  if (!user) {
-    user = await fetch_user_profile_row_by_uuid(user_uuid, users_select_list)
-  }
-
-  let identity_rows: Record<string, unknown>[] = []
-
-  try {
-    const identity_result = await supabase
-      .from('identities')
-      .select('*')
-      .eq('user_uuid', user_uuid)
-
-    if (!identity_result.error) {
-      identity_rows = (identity_result.data ?? []) as Record<string, unknown>[]
-    }
-  } catch {
-    identity_rows = []
-  }
-
-  let profile: { display_name: string | null } | null = null
-
-  try {
-    const profile_result = await supabase
-      .from('profiles')
-      .select('display_name')
-      .eq('user_uuid', user_uuid)
-      .maybeSingle()
-
-    if (!profile_result.error && profile_result.data) {
-      profile = {
-        display_name: pick_string(profile_result.data.display_name),
-      }
-    }
-  } catch {
-    profile = null
-  }
-
-  const customer_resolved = resolve_customer_display_name({
-    profile,
-    user,
-    identity_rows,
-  })
-
-  await emit_customer_display_name_resolved({
-    user_uuid,
+  const resolved = await resolve_reception_room_customer_display({
     room_uuid,
-    result: customer_resolved,
+    used_by: 'detail',
   })
 
   return {
-    display_name: customer_resolved.display_name,
-    role:
-      pick_string(user?.['role']) ??
-      string_value(subject_participant.role) ??
-      'user',
-    tier: pick_string(user?.['tier']) ?? 'guest',
-    user_uuid,
-    visitor_uuid,
+    display_name: resolved.display_name,
+    role: resolved.role,
+    tier: resolved.tier,
+    user_uuid: resolved.user_uuid,
+    visitor_uuid: resolved.visitor_uuid,
   }
 }
 
 export async function list_reception_rooms({
   mode,
   limit,
+  used_by = 'list',
 }: {
   mode: reception_room_mode
   limit?: number
+  used_by?: customer_display_used_by
 }): Promise<reception_room[]> {
   const normalized_limit =
     typeof limit === 'number' && Number.isFinite(limit)
@@ -1319,7 +1059,7 @@ export async function list_reception_rooms({
   let enrichments = new Map<string, room_card_enrichment>()
 
   try {
-    enrichments = await enrich_room_cards(rows, mode)
+    enrichments = await enrich_room_cards(rows, mode, used_by)
   } catch (error) {
     await emit_admin_chat_list_debug({
       event: 'admin_chat_list_query_failed',
@@ -1435,7 +1175,7 @@ export async function get_reception_room(
   const row = result.data as unknown as room_row
   const list_mode: reception_room_mode =
     row.mode === 'bot' ? 'bot' : 'concierge'
-  const enrichments = await enrich_room_cards([row], list_mode)
+  const enrichments = await enrich_room_cards([row], list_mode, 'detail')
 
   return normalize_room(row, enrichments.get(row.room_uuid) ?? null, {
     room_uuid_label_fallback: false,
