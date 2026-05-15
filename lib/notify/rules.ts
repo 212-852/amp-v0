@@ -92,6 +92,7 @@ export type notify_event =
       created_at: string
       admin_display_label: string
       customer_display_name: string
+      admin_internal_name?: string | null
       admin_user_uuid: string
       admin_participant_uuid: string | null
       customer_user_uuid: string | null

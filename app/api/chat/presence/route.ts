@@ -123,7 +123,6 @@ export async function POST(request: Request) {
     } else if (body?.action === 'admin_support_heartbeat') {
       await mark_admin_support_heartbeat({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_leave') {
-      await mark_admin_support_leave({ room_uuid, participant_uuid })
       await record_admin_support_left_session({
         room_uuid,
         staff_participant_uuid: participant_uuid,
@@ -141,12 +140,8 @@ export async function POST(request: Request) {
             : null,
         support_session_key: support_session_key_or_null(body),
       })
+      await mark_admin_support_leave({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_page_unload') {
-      await mark_admin_support_leave({
-        room_uuid,
-        participant_uuid,
-        debug_event_name: 'admin_presence_page_unload',
-      })
       await record_admin_support_left_session({
         room_uuid,
         staff_participant_uuid: participant_uuid,
@@ -163,6 +158,11 @@ export async function POST(request: Request) {
             ? body.next_active_room_uuid
             : null,
         support_session_key: support_session_key_or_null(body),
+      })
+      await mark_admin_support_leave({
+        room_uuid,
+        participant_uuid,
+        debug_event_name: 'admin_presence_page_unload',
       })
     } else if (body?.action === 'admin_support_idle') {
       await mark_admin_support_idle_notice({ room_uuid, participant_uuid })

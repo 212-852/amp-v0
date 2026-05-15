@@ -90,6 +90,11 @@ type chat_debug_body = {
   latest_activity_at?: unknown
   previous_preview?: unknown
   next_preview?: unknown
+  previous_room_uuid?: unknown
+  next_room_uuid?: unknown
+  leave_reason?: unknown
+  pathname?: unknown
+  action_type?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -216,6 +221,11 @@ export async function POST(request: Request) {
       next_count: number_or_null(body?.next_count),
       previous_preview: string_or_null(body?.previous_preview),
       next_preview: string_or_null(body?.next_preview),
+      previous_room_uuid: string_or_null(body?.previous_room_uuid),
+      next_room_uuid: string_or_null(body?.next_room_uuid),
+      leave_reason: string_or_null(body?.leave_reason),
+      pathname: string_or_null(body?.pathname),
+      action_type: string_or_null(body?.action_type),
     },
   })
 

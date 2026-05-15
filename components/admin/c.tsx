@@ -805,6 +805,18 @@ export default function AdminChatTimeline({
                 phase: 'admin_chat_support_action',
               })
 
+              if (action.action_type === 'support_left') {
+                send_chat_realtime_debug({
+                  event: 'support_left_realtime_ignored',
+                  room_uuid: action.room_uuid,
+                  active_room_uuid: locked_room,
+                  action_uuid: action.action_uuid,
+                  action_type: action.action_type,
+                  ignored_reason: 'action_uuid_dedupe',
+                  phase: 'admin_chat_support_action',
+                })
+              }
+
               return previous
             }
 
@@ -828,24 +840,12 @@ export default function AdminChatTimeline({
 
           emit_chat_action_realtime_rendered({
             room_uuid: locked_room,
+            active_room_uuid: locked_room,
             action,
             inserted_index,
             source_channel: 'admin',
             phase: 'admin_chat_support_action',
           })
-
-          if (action.action_type === 'support_left') {
-            send_chat_realtime_debug({
-              event: 'support_left_realtime_rendered',
-              room_uuid: locked_room,
-              active_room_uuid: locked_room,
-              action_uuid: action.action_uuid,
-              event_type: action.action_type,
-              actor_name: action.actor_display_name,
-              inserted_index,
-              phase: 'admin_chat_support_action',
-            })
-          }
 
           if (near_bottom_before) {
             bottom_ref.current?.scrollIntoView({

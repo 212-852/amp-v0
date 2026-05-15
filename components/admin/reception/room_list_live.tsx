@@ -1083,6 +1083,7 @@ export default function AdminReceptionRoomListLive({
 
           emit_chat_action_realtime_rendered({
             room_uuid,
+            active_room_uuid: room_uuid,
             action,
             inserted_index,
             source_channel: 'admin',

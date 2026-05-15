@@ -2856,10 +2856,23 @@ export async function record_admin_support_left_session(input: {
     return
   }
 
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_auto_leave_decision_started',
+    payload: {
+      room_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      leave_reason: input.leave_reason ?? null,
+      previous_active_room_uuid: input.previous_active_room_uuid ?? null,
+      next_active_room_uuid: input.next_active_room_uuid ?? null,
+      support_session_key,
+    },
+  })
+
   const [staff_pick, user_pick, bot_pick, room_pick] = await Promise.all([
     supabase
       .from('participants')
-      .select('participant_uuid, user_uuid, last_seen_at')
+      .select('participant_uuid, user_uuid, last_seen_at, is_active')
       .eq('room_uuid', room_uuid)
       .eq('participant_uuid', staff_participant_uuid)
       .maybeSingle(),
@@ -2885,14 +2898,19 @@ export async function record_admin_support_left_session(input: {
       .maybeSingle(),
   ])
 
-  const raw_staff_seen =
-    (staff_pick.data as { last_seen_at?: unknown } | null)?.last_seen_at
+  const staff_row = staff_pick.data as {
+    user_uuid?: string
+    last_seen_at?: unknown
+    is_active?: boolean | null
+  } | null
+
+  const raw_staff_seen = staff_row?.last_seen_at
   const staff_last_seen_at =
     typeof raw_staff_seen === 'string' ? raw_staff_seen : null
 
-  const admin_uuid = clean_uuid(
-    (staff_pick.data as { user_uuid?: string } | null)?.user_uuid ?? null,
-  )
+  const staff_is_active = staff_row?.is_active === true
+
+  const admin_uuid = clean_uuid(staff_row?.user_uuid ?? null)
   const user_participant_uuid = clean_uuid(
     (user_pick.data as { participant_uuid?: string } | null)?.participant_uuid ??
       null,
@@ -2917,15 +2935,23 @@ export async function record_admin_support_left_session(input: {
     support_session_key,
   }
 
-  if (!admin_uuid || !user_participant_uuid) {
+  const decision_skip = async (skipped_reason: string, already_left: boolean) => {
     await debug_event({
       category: 'admin_chat',
-      event: 'admin_auto_leave_skipped',
+      event: 'admin_auto_leave_decision_skipped',
       payload: {
-        ...skip_payload_base,
-        skipped_reason: 'missing_admin_or_customer_participant',
+        room_uuid,
+        support_mode,
+        is_active: staff_is_active,
+        already_left,
+        last_seen_at: staff_last_seen_at,
+        skipped_reason,
       },
     })
+  }
+
+  if (!admin_uuid || !user_participant_uuid) {
+    await decision_skip('missing_admin_or_customer_participant', false)
 
     return
   }
@@ -2967,21 +2993,14 @@ export async function record_admin_support_left_session(input: {
   }
 
   if (await session_support_left_duplicate_exists()) {
+    await decision_skip('duplicate_support_left_same_session', true)
+
     await debug_event({
       category: 'admin_chat',
       event: 'support_left_duplicate_skipped',
       payload: {
         ...skip_payload_base,
         skipped_reason: 'support_session_key_already_left',
-      },
-    })
-
-    await debug_event({
-      category: 'admin_chat',
-      event: 'admin_auto_leave_skipped',
-      payload: {
-        ...skip_payload_base,
-        skipped_reason: 'duplicate_support_left_same_session',
       },
     })
 
@@ -3001,6 +3020,8 @@ export async function record_admin_support_left_session(input: {
     .limit(1)
 
   if (!recent.error && (recent.data ?? []).length > 0) {
+    await decision_skip('recent_support_left_exists', true)
+
     await debug_event({
       category: 'admin_chat',
       event: 'support_left_duplicate_skipped',
@@ -3010,17 +3031,34 @@ export async function record_admin_support_left_session(input: {
       },
     })
 
-    await debug_event({
-      category: 'admin_chat',
-      event: 'admin_auto_leave_skipped',
-      payload: {
-        ...skip_payload_base,
-        skipped_reason: 'recent_support_left_exists',
-      },
-    })
-
     return
   }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_auto_leave_decision_succeeded',
+    payload: {
+      room_uuid,
+      support_mode,
+      is_active: staff_is_active,
+      already_left: false,
+      last_seen_at: staff_last_seen_at,
+      skipped_reason: null,
+    },
+  })
+
+  const profile_pick = await supabase
+    .from('profiles')
+    .select('internal_name')
+    .eq('user_uuid', admin_uuid)
+    .maybeSingle()
+
+  const admin_internal_name_raw =
+    typeof profile_pick.data?.internal_name === 'string'
+      ? profile_pick.data.internal_name.trim()
+      : ''
+  const admin_internal_name =
+    admin_internal_name_raw.length > 0 ? admin_internal_name_raw : null
 
   const display_name = await resolve_handoff_memo_saved_by_name(admin_uuid)
   const text = `${display_name} が退出しました`
@@ -3055,27 +3093,13 @@ export async function record_admin_support_left_session(input: {
 
   await debug_event({
     category: 'admin_chat',
-    event: 'admin_auto_leave_detected',
-    payload: {
-      room_uuid,
-      admin_user_uuid: admin_uuid,
-      admin_participant_uuid: staff_participant_uuid,
-      leave_reason: input.leave_reason ?? 'unknown',
-      previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
-      next_active_room_uuid: input.next_active_room_uuid ?? null,
-      support_mode,
-      last_seen_at: staff_last_seen_at,
-      support_session_key,
-    },
-  })
-
-  await debug_event({
-    category: 'admin_chat',
     event: 'support_left_action_create_started',
     payload: {
       room_uuid,
+      action_uuid: null,
       admin_user_uuid: admin_uuid,
       admin_participant_uuid: staff_participant_uuid,
+      admin_internal_name,
       discord_id_exists: Boolean(discord_thread_action_id),
       leave_reason: input.leave_reason ?? 'unknown',
       previous_active_room_uuid: input.previous_active_room_uuid ?? room_uuid,
@@ -3083,6 +3107,10 @@ export async function record_admin_support_left_session(input: {
       support_mode,
       last_seen_at: staff_last_seen_at,
       support_session_key,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
     },
   })
 
@@ -3097,7 +3125,7 @@ export async function record_admin_support_left_session(input: {
     discord_id: discord_thread_action_id,
     body: text,
     customer_display_name: subject.display_name,
-    admin_internal_name: null,
+    admin_internal_name,
     admin_display_label: display_name,
     support_session_key,
   })
@@ -3108,13 +3136,36 @@ export async function record_admin_support_left_session(input: {
       error: inserted.error,
     })
 
+    const ins_err = inserted.error
+    const err_code =
+      ins_err && typeof ins_err === 'object' && 'code' in ins_err
+        ? String((ins_err as { code?: unknown }).code ?? '')
+        : ''
+    const err_message =
+      ins_err instanceof Error
+        ? ins_err.message
+        : typeof ins_err === 'object' &&
+            ins_err !== null &&
+            'message' in ins_err
+          ? String((ins_err as { message?: unknown }).message ?? ins_err)
+          : String(ins_err)
+
     await debug_event({
       category: 'admin_chat',
       event: 'support_left_action_create_failed',
       payload: {
         room_uuid,
+        action_uuid: null,
         admin_user_uuid: admin_uuid,
-        error: inserted.error,
+        admin_participant_uuid: staff_participant_uuid,
+        admin_internal_name,
+        error_code: err_code.length > 0 ? err_code : null,
+        error_message: err_message,
+        error_details:
+          typeof ins_err === 'object' && ins_err !== null
+            ? JSON.stringify(ins_err).slice(0, 1200)
+            : null,
+        error_hint: 'check_chat_actions_schema_and_rls',
       },
     })
 
@@ -3128,6 +3179,12 @@ export async function record_admin_support_left_session(input: {
       room_uuid,
       action_uuid: inserted.action_row_id,
       admin_user_uuid: admin_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      admin_internal_name,
+      error_code: null,
+      error_message: null,
+      error_details: null,
+      error_hint: null,
     },
   })
   await debug_event({
@@ -3154,6 +3211,7 @@ export async function record_admin_support_left_session(input: {
     created_at: inserted.created_at,
     admin_display_label: display_name,
     customer_display_name: subject.display_name,
+    admin_internal_name,
     admin_user_uuid: admin_uuid,
     admin_participant_uuid: staff_participant_uuid,
     customer_user_uuid: clean_uuid(

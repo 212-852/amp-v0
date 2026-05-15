@@ -5,6 +5,8 @@ import {
   normalize_discord_thread_action_id,
   post_discord_action_webhook_message,
   discord_action_webhook_configured,
+  discord_thread_snowflake_from_action_id,
+  ensure_discord_action_thread_and_post_webhook,
   send_discord_notify,
   short_room_uuid,
   sync_discord_action_context,
@@ -546,42 +548,6 @@ async function deliver_admin_notification(input: {
   }
 }
 
-async function post_support_lifecycle_discord(input: {
-  room_uuid: string
-  discord_thread_action_id: string | null
-  content_line: string
-  /** When true, never create a new forum thread (support_left must target existing thread). */
-  require_existing_thread?: boolean
-}) {
-  const normalized = normalize_discord_thread_action_id(
-    input.discord_thread_action_id,
-  )
-
-  if (input.require_existing_thread && !normalized) {
-    return null
-  }
-
-  const result = await sync_discord_action_context({
-    title: `Support - ${short_room_uuid(input.room_uuid)}`,
-    content: input.content_line,
-    action_id: normalized,
-  })
-
-  if (result?.action_id && !normalized) {
-    const { supabase } = await import('@/lib/db/supabase')
-
-    await supabase
-      .from('rooms')
-      .update({
-        action_id: result.action_id,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('room_uuid', input.room_uuid)
-  }
-
-  return result
-}
-
 async function deliver_support_started(
   event: Extract<notify_event, { event: 'support_started' }>,
 ): Promise<notify_run_result> {
@@ -671,11 +637,70 @@ async function deliver_support_started(
 
   const discord_line = `${event.admin_display_label} が対応を開始しました`
 
-  const discord_result = await post_support_lifecycle_discord({
+  const thread_exists_before_discord_send = Boolean(
+    discord_thread_snowflake_from_action_id(normalized_thread_action_id),
+  )
+
+  await emit_support_started_admin_chat_debug(
+    'support_started_discord_send_started',
+    {
+      room_uuid: event.room_uuid,
+      discord_thread_id:
+        discord_thread_snowflake_from_action_id(normalized_thread_action_id),
+      admin_user_uuid: event.admin_user_uuid,
+      admin_internal_name: event.admin_internal_name,
+      action_type: 'support_started',
+      webhook_exists,
+      thread_exists: thread_exists_before_discord_send,
+      error_code: null,
+      error_message: null,
+    },
+  )
+
+  const webhook_out = await ensure_discord_action_thread_and_post_webhook({
     room_uuid: event.room_uuid,
-    discord_thread_action_id: normalized_thread_action_id,
-    content_line: discord_line,
+    normalized_action_id: normalized_thread_action_id,
+    forum_title: `Support - ${short_room_uuid(event.room_uuid)}`,
+    webhook_content: discord_line,
   })
+
+  if (!webhook_out.webhook_ok) {
+    await emit_support_started_admin_chat_debug(
+      'support_started_discord_send_failed',
+      {
+        room_uuid: event.room_uuid,
+        discord_thread_id: webhook_out.discord_thread_id,
+        admin_user_uuid: event.admin_user_uuid,
+        admin_internal_name: event.admin_internal_name,
+        action_type: 'support_started',
+        webhook_exists,
+        thread_exists: Boolean(webhook_out.discord_thread_id),
+        error_code: webhook_out.ensure_error_code ?? 'discord_webhook_failed',
+        error_message:
+          webhook_out.webhook_error_text ??
+          webhook_out.ensure_error_code ??
+          null,
+      },
+    )
+  } else {
+    await emit_support_started_admin_chat_debug(
+      'support_started_discord_send_succeeded',
+      {
+        room_uuid: event.room_uuid,
+        discord_thread_id: webhook_out.discord_thread_id,
+        admin_user_uuid: event.admin_user_uuid,
+        admin_internal_name: event.admin_internal_name,
+        action_type: 'support_started',
+        webhook_exists,
+        thread_exists: true,
+        error_code: null,
+        error_message: null,
+      },
+    )
+  }
+
+  const discord_webhook_delivered = webhook_out.webhook_ok
+  const discord_delivery_action_id = webhook_out.normalized_action_id
 
   const content = format_support_started_notify_content(event)
   const admin_route = await deliver_admin_notification({
@@ -688,38 +713,38 @@ async function deliver_support_started(
     source_channel: event.source_channel,
   })
 
-  if (admin_route.outcome === 'delivered' || discord_result?.action_id) {
+  if (admin_route.outcome === 'delivered' || discord_webhook_delivered) {
     await emit_support_started_admin_chat_debug(
       'support_started_notify_succeeded',
       {
         ...base_debug_payload,
-        notification_channel: discord_result?.action_id
-          ? 'discord_action_thread'
+        notification_channel: discord_webhook_delivered
+          ? 'discord_action_webhook_thread'
           : admin_route.transport,
       },
     )
 
     const deliveries = [...admin_route.deliveries]
 
-    if (discord_result?.action_id) {
+    if (discord_webhook_delivered && discord_delivery_action_id) {
       deliveries.push({
         channel: 'discord',
-        action_id: discord_result.action_id,
+        action_id: discord_delivery_action_id,
       })
     }
 
     return support_started_notify_run(deliveries, {
       outcome: 'delivered',
-      transport: discord_result?.action_id
+      transport: discord_webhook_delivered
         ? 'discord_action_webhook'
         : admin_route.transport,
     })
   }
 
   if (admin_route.transport === 'toast' || admin_route.transport === 'none') {
-    if (discord_result?.action_id) {
+    if (discord_webhook_delivered && discord_delivery_action_id) {
       return support_started_notify_run(
-        [{ channel: 'discord', action_id: discord_result.action_id }],
+        [{ channel: 'discord', action_id: discord_delivery_action_id }],
         {
           outcome: 'delivered',
           transport: 'discord_action_webhook',
@@ -781,6 +806,11 @@ async function deliver_support_left(
     event.discord_thread_action_id,
   )
 
+  const webhook_exists = discord_action_webhook_configured()
+  const thread_exists_before_discord_send = Boolean(
+    discord_thread_snowflake_from_action_id(normalized_thread_action_id),
+  )
+
   const base_debug_payload = {
     room_uuid: event.room_uuid,
     action_uuid: event.action_uuid,
@@ -812,59 +842,99 @@ async function deliver_support_left(
     })
   }
 
-  if (!normalized_thread_action_id) {
+  const content_line = format_support_left_notify_content(event)
+
+  await emit_support_started_admin_chat_debug(
+    'support_left_discord_send_started',
+    {
+      room_uuid: event.room_uuid,
+      discord_thread_id:
+        discord_thread_snowflake_from_action_id(normalized_thread_action_id),
+      webhook_exists,
+      thread_exists: thread_exists_before_discord_send,
+      error_code: null,
+      error_message: null,
+      admin_internal_name: event.admin_internal_name ?? null,
+      action_type: 'support_left',
+    },
+  )
+
+  const webhook_out = await ensure_discord_action_thread_and_post_webhook({
+    room_uuid: event.room_uuid,
+    normalized_action_id: normalized_thread_action_id,
+    forum_title: `Support - ${short_room_uuid(event.room_uuid)}`,
+    webhook_content: content_line,
+  })
+
+  if (!webhook_out.webhook_ok) {
+    await emit_support_started_admin_chat_debug(
+      'support_left_discord_send_failed',
+      {
+        room_uuid: event.room_uuid,
+        discord_thread_id: webhook_out.discord_thread_id,
+        webhook_exists,
+        thread_exists: Boolean(webhook_out.discord_thread_id),
+        error_code: webhook_out.ensure_error_code ?? 'discord_webhook_failed',
+        error_message:
+          webhook_out.webhook_error_text ??
+          webhook_out.ensure_error_code ??
+          null,
+        admin_internal_name: event.admin_internal_name ?? null,
+        action_type: 'support_left',
+      },
+    )
+
     await emit_support_started_admin_chat_debug('support_left_notify_failed', {
       ...base_debug_payload,
-      error_code: 'discord_thread_missing',
-      error_message: 'rooms.action_id discord thread required for support_left',
+      error_code: webhook_out.ensure_error_code ?? 'discord_webhook_failed',
+      error_message:
+        webhook_out.webhook_error_text ??
+        webhook_out.ensure_error_code ??
+        'support_left discord webhook failed',
     })
 
     return support_started_notify_run([], {
       outcome: 'failed',
       transport: 'discord_action_webhook',
-      error_code: 'discord_thread_missing',
-      error_message: 'rooms.action_id discord thread required for support_left',
+      error_code: webhook_out.ensure_error_code ?? 'discord_webhook_failed',
+      error_message:
+        webhook_out.webhook_error_text ??
+        webhook_out.ensure_error_code ??
+        'support_left discord webhook failed',
     })
   }
 
-  const content_line = format_support_left_notify_content(event)
-  const discord_result = await post_support_lifecycle_discord({
-    room_uuid: event.room_uuid,
-    discord_thread_action_id: normalized_thread_action_id,
-    content_line,
-    require_existing_thread: true,
-  })
+  await emit_support_started_admin_chat_debug(
+    'support_left_discord_send_succeeded',
+    {
+      room_uuid: event.room_uuid,
+      discord_thread_id: webhook_out.discord_thread_id,
+      webhook_exists,
+      thread_exists: true,
+      error_code: null,
+      error_message: null,
+      admin_internal_name: event.admin_internal_name ?? null,
+      action_type: 'support_left',
+    },
+  )
 
-  if (discord_result?.action_id) {
-    await emit_support_started_admin_chat_debug(
-      'support_left_notify_succeeded',
-      {
-        ...base_debug_payload,
-        notification_channel: 'discord_action_thread',
-      },
-    )
+  await emit_support_started_admin_chat_debug(
+    'support_left_notify_succeeded',
+    {
+      ...base_debug_payload,
+      notification_channel: 'discord_action_webhook_thread',
+    },
+  )
 
-    return support_started_notify_run(
-      [{ channel: 'discord', action_id: discord_result.action_id }],
-      {
-        outcome: 'delivered',
-        transport: 'discord_action_webhook',
-      },
-    )
-  }
-
-  await emit_support_started_admin_chat_debug('support_left_notify_failed', {
-    ...base_debug_payload,
-    error_code: 'discord_action_thread_failed',
-    error_message: 'support_left discord thread post failed',
-  })
-
-  return support_started_notify_run([], {
-    outcome: 'failed',
-    transport: 'discord_action_webhook',
-    error_code: 'discord_action_thread_failed',
-    error_message: 'support_left discord thread post failed',
-  })
+  return support_started_notify_run(
+    webhook_out.normalized_action_id
+      ? [{ channel: 'discord', action_id: webhook_out.normalized_action_id }]
+      : [],
+    {
+      outcome: 'delivered',
+      transport: 'discord_action_webhook',
+    },
+  )
 }
 
 export async function sync_room_action_context(input: {

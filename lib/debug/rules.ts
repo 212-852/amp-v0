@@ -322,6 +322,9 @@ export function resolve_debug_rule(input: {
     'support_started_notify_started',
     'support_started_notify_succeeded',
     'support_started_notify_skipped',
+    'support_started_discord_send_started',
+    'support_started_discord_send_succeeded',
+    'support_started_discord_send_failed',
   ])
 
   if (
@@ -351,8 +354,13 @@ export function resolve_debug_rule(input: {
   const admin_support_presence_lifecycle = new Set([
     'admin_presence_entered',
     'admin_presence_heartbeat',
-    'admin_auto_leave_detected',
-    'admin_auto_leave_skipped',
+    'admin_leave_heartbeat_timeout_detected',
+    'admin_auto_leave_decision_started',
+    'admin_auto_leave_decision_succeeded',
+    'admin_auto_leave_decision_skipped',
+    'admin_presence_leave_update_started',
+    'admin_presence_leave_update_succeeded',
+    'admin_presence_leave_update_failed',
     'support_left_duplicate_skipped',
     'admin_support_presence_started',
     'admin_support_presence_heartbeat',
@@ -397,6 +405,9 @@ export function resolve_debug_rule(input: {
     'support_left_notify_started',
     'support_left_notify_succeeded',
     'support_left_notify_failed',
+    'support_left_discord_send_started',
+    'support_left_discord_send_succeeded',
+    'support_left_discord_send_failed',
   ])
 
   if (
@@ -641,6 +652,14 @@ export function resolve_debug_rule(input: {
     'admin_support_action_rendered',
     'admin_support_action_ignored',
     'chat_action_realtime_ignored',
+    'support_left_realtime_received',
+    'support_left_realtime_rendered',
+    'support_left_realtime_ignored',
+    'admin_leave_route_change_detected',
+    'admin_leave_room_change_detected',
+    'admin_leave_visibility_hidden_detected',
+    'admin_leave_pagehide_detected',
+    'admin_leave_beforeunload_detected',
   ])
 
   const chat_realtime_success_gated = new Set([

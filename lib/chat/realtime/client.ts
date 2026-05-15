@@ -266,6 +266,11 @@ export type chat_realtime_debug_payload = {
   latest_activity_at?: string | null
   previous_preview?: string | null
   next_preview?: string | null
+  previous_room_uuid?: string | null
+  next_room_uuid?: string | null
+  leave_reason?: string | null
+  pathname?: string | null
+  action_type?: string | null
 }
 
 export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {

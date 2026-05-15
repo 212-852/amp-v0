@@ -282,6 +282,18 @@ export function subscribe_chat_actions_realtime(input: {
           phase: 'postgres_changes_chat_actions',
         })
 
+        if (action?.action_type === 'support_left') {
+          send_chat_realtime_debug({
+            event: 'support_left_realtime_received',
+            room_uuid: action.room_uuid,
+            active_room_uuid: input.room_uuid,
+            action_uuid: action.action_uuid,
+            action_type: action.action_type,
+            ignored_reason: null,
+            phase: 'postgres_changes_chat_actions',
+          })
+        }
+
         if (!action) {
           send_chat_realtime_debug({
             event: 'chat_action_realtime_ignored',
@@ -295,6 +307,18 @@ export function subscribe_chat_actions_realtime(input: {
         }
 
         if (action.room_uuid !== input.room_uuid) {
+          if (action.action_type === 'support_left') {
+            send_chat_realtime_debug({
+              event: 'support_left_realtime_ignored',
+              room_uuid: action.room_uuid,
+              active_room_uuid: input.room_uuid,
+              action_uuid: action.action_uuid,
+              action_type: action.action_type,
+              ignored_reason: 'payload_room_uuid_mismatch',
+              phase: 'postgres_changes_chat_actions',
+            })
+          }
+
           send_chat_realtime_debug({
             event: 'chat_action_realtime_ignored',
             ...chat_action_debug_payload(action, inserted_index),
@@ -313,6 +337,18 @@ export function subscribe_chat_actions_realtime(input: {
             scope: input.scope,
           })
         ) {
+          if (action.action_type === 'support_left') {
+            send_chat_realtime_debug({
+              event: 'support_left_realtime_ignored',
+              room_uuid: action.room_uuid,
+              active_room_uuid: input.room_uuid,
+              action_uuid: action.action_uuid,
+              action_type: action.action_type,
+              ignored_reason: 'unsupported_action_type_or_visibility',
+              phase: 'postgres_changes_chat_actions',
+            })
+          }
+
           send_chat_realtime_debug({
             event: 'chat_action_realtime_ignored',
             ...chat_action_debug_payload(action, inserted_index),
@@ -377,16 +413,32 @@ export function cleanup_chat_actions_realtime(input: {
 
 export function emit_chat_action_realtime_rendered(input: {
   room_uuid: string
+  active_room_uuid?: string | null
   action: chat_action_realtime_payload
   inserted_index: number
   source_channel?: string | null
   phase?: string
 }) {
+  const active_room_uuid = input.active_room_uuid ?? input.room_uuid
+
   send_chat_realtime_debug({
     event: 'chat_action_realtime_rendered',
     ...chat_action_debug_payload(input.action, input.inserted_index),
     room_uuid: input.room_uuid,
+    active_room_uuid,
     source_channel: input.source_channel ?? 'web',
     phase: input.phase ?? 'chat_action_timeline_render',
   })
+
+  if (input.action.action_type === 'support_left') {
+    send_chat_realtime_debug({
+      event: 'support_left_realtime_rendered',
+      room_uuid: input.action.room_uuid,
+      active_room_uuid,
+      action_uuid: input.action.action_uuid,
+      action_type: input.action.action_type,
+      ignored_reason: null,
+      phase: input.phase ?? 'chat_action_timeline_render',
+    })
+  }
 }

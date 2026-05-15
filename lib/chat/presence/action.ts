@@ -217,19 +217,68 @@ export async function mark_room_left(input: {
   participant_uuid: string
   visibility_state?: string | null
   debug_event_name?: string | null
+  trace_admin_presence_leave_update?: boolean
 }) {
   const now = new Date().toISOString()
 
-  await update_participant_presence({
-    room_uuid: input.room_uuid,
-    participant_uuid: input.participant_uuid,
-    patch: {
-      is_active: false,
-      is_typing: false,
-      typing_at: null,
-      last_seen_at: now,
-    },
-  })
+  if (input.trace_admin_presence_leave_update) {
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_presence_leave_update_started',
+      payload: {
+        room_uuid: input.room_uuid,
+        admin_participant_uuid: input.participant_uuid,
+        is_active: null,
+        last_seen_at: null,
+      },
+    })
+  }
+
+  try {
+    await update_participant_presence({
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      patch: {
+        is_active: false,
+        is_typing: false,
+        typing_at: null,
+        last_seen_at: now,
+      },
+    })
+
+    if (input.trace_admin_presence_leave_update) {
+      await debug_event({
+        category: 'admin_chat',
+        event: 'admin_presence_leave_update_succeeded',
+        payload: {
+          room_uuid: input.room_uuid,
+          admin_participant_uuid: input.participant_uuid,
+          is_active: false,
+          last_seen_at: now,
+          error_code: null,
+          error_message: null,
+        },
+      })
+    }
+  } catch (error) {
+    if (input.trace_admin_presence_leave_update) {
+      await debug_event({
+        category: 'admin_chat',
+        event: 'admin_presence_leave_update_failed',
+        payload: {
+          room_uuid: input.room_uuid,
+          admin_participant_uuid: input.participant_uuid,
+          is_active: null,
+          last_seen_at: null,
+          error_code: 'presence_patch_failed',
+          error_message:
+            error instanceof Error ? error.message : String(error),
+        },
+      })
+    }
+
+    throw error
+  }
 
   const snap = await load_participant_admin_support_event_payload(input)
 
@@ -513,6 +562,7 @@ export async function mark_admin_support_leave(input: {
     participant_uuid: input.participant_uuid,
     visibility_state: 'hidden',
     debug_event_name: input.debug_event_name ?? 'admin_presence_marked_inactive',
+    trace_admin_presence_leave_update: true,
   })
   const snap = await load_participant_admin_support_event_payload(input)
 
@@ -626,6 +676,21 @@ export async function expire_admin_support_presence(input: {
     if (!Number.isNaN(last_seen_ms) && last_seen_ms >= cutoff_ms) {
       continue
     }
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_leave_heartbeat_timeout_detected',
+      payload: {
+        room_uuid: row.room_uuid,
+        previous_room_uuid: row.room_uuid,
+        next_room_uuid: null,
+        admin_user_uuid: row.user_uuid,
+        admin_participant_uuid: row.participant_uuid,
+        visibility_state: null,
+        pathname: null,
+        leave_reason: 'heartbeat_timeout',
+      },
+    })
 
     await update_participant_presence({
       room_uuid: row.room_uuid,

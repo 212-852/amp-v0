@@ -85,6 +85,19 @@ export function normalize_discord_thread_action_id(
   return null
 }
 
+/** Bare forum thread snowflake from `discord:<id>` or legacy bare snowflake. */
+export function discord_thread_snowflake_from_action_id(
+  raw: string | null | undefined,
+): string | null {
+  const normalized = normalize_discord_thread_action_id(raw)
+
+  if (!normalized) {
+    return null
+  }
+
+  return discord_thread_id_from_action_id(normalized)
+}
+
 export function mask_discord_action_id_for_log(
   raw: string | null | undefined,
 ): string | null {
@@ -490,6 +503,8 @@ export function discord_action_webhook_configured(): boolean {
 export async function post_discord_action_webhook_message(input: {
   content: string
   thread_id?: string | null
+  /** Forum rule: never POST to the webhook base URL without `thread_id`. */
+  require_thread_id?: boolean
 }): Promise<
   | { ok: true }
   | { ok: false; http_status?: number; error_text?: string | null }
@@ -510,6 +525,14 @@ export async function post_discord_action_webhook_message(input: {
     typeof input.thread_id === 'string' && input.thread_id.trim()
       ? input.thread_id.trim()
       : null
+
+  if (input.require_thread_id && !thread_id) {
+    return {
+      ok: false,
+      error_text: 'missing_thread_id',
+    }
+  }
+
   const target_url = thread_id
     ? `${url}?thread_id=${encodeURIComponent(thread_id)}`
     : url
@@ -535,6 +558,105 @@ export async function post_discord_action_webhook_message(input: {
   }
 
   return { ok: true }
+}
+
+export type ensure_discord_action_thread_webhook_result = {
+  thread_existed_before_ensure: boolean
+  normalized_action_id: string | null
+  discord_thread_id: string | null
+  webhook_ok: boolean
+  webhook_http_status?: number | null
+  webhook_error_text?: string | null
+  ensure_error_code?: string | null
+}
+
+/**
+ * Ensures a forum action thread exists (`rooms.action_id` as `discord:<snowflake>`),
+ * persists it on `rooms`, then posts `webhook_content` via DISCORD_ACTION_WEBHOOK_URL
+ * with `?thread_id=` only (never without a thread).
+ */
+export async function ensure_discord_action_thread_and_post_webhook(input: {
+  room_uuid: string
+  normalized_action_id: string | null
+  forum_title: string
+  webhook_content: string
+}): Promise<ensure_discord_action_thread_webhook_result> {
+  let normalized = normalize_discord_thread_action_id(
+    input.normalized_action_id,
+  )
+  let snowflake = discord_thread_snowflake_from_action_id(normalized)
+  const thread_existed_before_ensure = Boolean(snowflake)
+
+  if (!snowflake) {
+    const created = await create_discord_action_context({
+      title: input.forum_title,
+      content: '(support)',
+    })
+
+    normalized = normalize_discord_thread_action_id(created?.action_id ?? null)
+    snowflake = discord_thread_snowflake_from_action_id(normalized)
+
+    if (normalized && snowflake) {
+      const { supabase } = await import('@/lib/db/supabase')
+
+      await supabase
+        .from('rooms')
+        .update({
+          action_id: normalized,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('room_uuid', input.room_uuid)
+    }
+  }
+
+  if (!snowflake || !normalized) {
+    return {
+      thread_existed_before_ensure,
+      normalized_action_id: normalized,
+      discord_thread_id: null,
+      webhook_ok: false,
+      ensure_error_code: 'discord_action_thread_unavailable',
+      webhook_error_text: null,
+    }
+  }
+
+  const webhook_url = discord_action_webhook_url()
+
+  if (!webhook_url) {
+    return {
+      thread_existed_before_ensure,
+      normalized_action_id: normalized,
+      discord_thread_id: snowflake,
+      webhook_ok: false,
+      ensure_error_code: 'missing_DISCORD_ACTION_WEBHOOK_URL',
+      webhook_error_text: null,
+    }
+  }
+
+  const posted = await post_discord_action_webhook_message({
+    content: input.webhook_content,
+    thread_id: snowflake,
+    require_thread_id: true,
+  })
+
+  if (!posted.ok) {
+    return {
+      thread_existed_before_ensure,
+      normalized_action_id: normalized,
+      discord_thread_id: snowflake,
+      webhook_ok: false,
+      webhook_http_status: posted.http_status ?? null,
+      webhook_error_text: posted.error_text ?? null,
+      ensure_error_code: 'discord_action_webhook_non_ok',
+    }
+  }
+
+  return {
+    thread_existed_before_ensure,
+    normalized_action_id: normalized,
+    discord_thread_id: snowflake,
+    webhook_ok: true,
+  }
 }
 
 function build_discord_content(event: notify_event) {
