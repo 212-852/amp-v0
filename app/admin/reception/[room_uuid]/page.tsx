@@ -7,7 +7,7 @@ import {
   read_reception_room,
   type reception_room,
   type reception_room_message,
-} from '@/lib/admin/reception/room'
+} from '@/lib/admin/reception/load_room'
 import { customer_display_name_fallback } from '@/lib/chat/identity/customer_display_name'
 import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
 import { resolve_admin_reception_send_context } from '@/lib/chat/room'
@@ -162,6 +162,9 @@ export default async function AdminReceptionRoomPage({
         room_uuid={live_room_uuid}
         admin_user_uuid={admin_user_uuid}
         admin_participant_uuid={admin_participant_uuid}
+        staff_user_uuid={admin_user_uuid}
+        staff_tier={access.tier}
+        staff_participant_uuid={staff_participant_uuid}
       />
     </>
   )

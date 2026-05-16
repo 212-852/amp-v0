@@ -9,7 +9,7 @@ import {
   register_admin_reception_live_action,
   register_admin_reception_live_message,
   register_admin_reception_live_support_action,
-} from '@/components/admin/reception/live'
+} from '@/components/admin/reception/live_listeners'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import type { handoff_memo } from '@/lib/chat/handoff'
 import type {
