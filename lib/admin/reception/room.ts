@@ -9,9 +9,15 @@ import {
 } from '@/lib/chat/presence/rules'
 import { debug_control } from '@/lib/debug/control'
 import { debug_event } from '@/lib/debug/index'
+import { public_actions_table_name } from '@/lib/actions/table'
 import { load_archived_messages } from '@/lib/chat/archive'
 import {
-  archived_messages_to_reception_timeline,
+  archived_message_to_timeline_message,
+  is_admin_timeline_chat_action_type,
+  merge_timeline_items,
+  parse_chat_action_timeline_row,
+  timeline_item_from_action,
+  timeline_item_from_message_row,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
 import { load_admin_chat_schema_snapshot } from '@/lib/auth/customer_display'
@@ -1280,8 +1286,31 @@ export async function list_reception_room_messages({
   room_uuid: string
 }): Promise<reception_room_message[]> {
   const archived = await load_archived_messages(room_uuid)
+  const message_items = archived
+    .map(archived_message_to_timeline_message)
+    .map((row) => timeline_item_from_message_row(row, 'initial_fetch'))
+    .filter((item): item is NonNullable<typeof item> => item !== null)
 
-  return archived_messages_to_reception_timeline(archived)
+  const actions_table = public_actions_table_name()
+  const actions_result = await supabase
+    .from(actions_table)
+    .select(
+      'room_uuid, action_uuid, action_type, body, created_at, actor_user_uuid, actor_display_name, source_channel, visibility',
+    )
+    .eq('room_uuid', room_uuid)
+    .order('created_at', { ascending: true })
+
+  if (actions_result.error) {
+    throw actions_result.error
+  }
+
+  const action_items = (actions_result.data ?? [])
+    .map((row) => parse_chat_action_timeline_row(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .filter((row) => is_admin_timeline_chat_action_type(row.action_type))
+    .map((row) => timeline_item_from_action(row, 'initial_fetch'))
+
+  return merge_timeline_items([...message_items, ...action_items]).rows
 }
 
 function normalize_memo(row: memo_row): reception_room_memo {

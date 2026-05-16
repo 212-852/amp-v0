@@ -10,8 +10,10 @@ import type { admin_support_session_ref_value } from '@/components/admin/recepti
 import {
   archived_message_to_timeline_message,
   chat_timeline_time_bounds,
-  normalize_chat_timeline_messages,
+  merge_timeline_message_rows,
+  timeline_render_key,
   type chat_room_timeline_message,
+  type timeline_item_duplicate_skip,
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
 import {
@@ -58,9 +60,27 @@ type AdminChatTimelineProps = {
   admin_participant_uuid: string
 }
 
+function emit_timeline_duplicate_skips(skips: timeline_item_duplicate_skip[]) {
+  for (const skip of skips) {
+    send_admin_chat_debug({
+      event: 'timeline_item_duplicate_skipped',
+      room_uuid: skip.room_uuid,
+      active_room_uuid: skip.room_uuid,
+      action_uuid: skip.kind === 'action' ? skip.uuid : null,
+      message_uuid: skip.kind === 'message' ? skip.uuid : null,
+      item_key: skip.item_key,
+      event_type: skip.kind,
+      reason: skip.source,
+      component_file,
+      phase: 'merge_timeline_items',
+    })
+  }
+}
+
 function merge_timeline_rows(
   previous: chat_room_timeline_message[],
   addition: chat_room_timeline_message[],
+  source: 'initial_fetch' | 'realtime' = 'realtime',
 ): {
   rows: chat_room_timeline_message[]
   prev_message_count: number
@@ -71,18 +91,17 @@ function merge_timeline_rows(
   newest_created_at: string | null
 } {
   const combined_len_before_normalize = previous.length + addition.length
-  const rows = normalize_chat_timeline_messages([
-    ...previous,
-    ...addition,
-  ])
-  const dedupe_hit = combined_len_before_normalize > rows.length
-  const bounds = chat_timeline_time_bounds(rows)
+  const merged = merge_timeline_message_rows(previous, addition, source)
+
+  emit_timeline_duplicate_skips(merged.duplicates_skipped)
+
+  const bounds = chat_timeline_time_bounds(merged.rows)
 
   return {
-    rows,
+    rows: merged.rows,
     prev_message_count: previous.length,
-    next_message_count: rows.length,
-    dedupe_hit,
+    next_message_count: merged.rows.length,
+    dedupe_hit: merged.duplicates_skipped.length > 0,
     combined_len_before_normalize,
     oldest_created_at: bounds.oldest_created_at,
     newest_created_at: bounds.newest_created_at,
@@ -167,7 +186,7 @@ export default function AdminChatTimeline({
   const typing_broadcast_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
-    normalize_chat_timeline_messages(initial_messages),
+    merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
@@ -667,7 +686,7 @@ export default function AdminChatTimeline({
 
           set_rows((previous) => {
             try {
-              const result = merge_timeline_rows(previous, [mapped])
+              const result = merge_timeline_rows(previous, [mapped], 'realtime')
 
               update_result = {
                 prev_message_count: result.prev_message_count,
@@ -715,7 +734,7 @@ export default function AdminChatTimeline({
               admin_participant_uuid: dbg_ctx.staff_participant_uuid,
               component_file,
               message_uuid: mapped.message_uuid,
-              ignored_reason: 'message_uuid_dedupe',
+              ignored_reason: 'timeline_item_duplicate_skipped',
               phase: 'admin_chat_messages',
             })
 
@@ -1022,7 +1041,9 @@ export default function AdminChatTimeline({
 
       const mapped = returned.map(archived_payload_to_reception_message)
 
-      set_rows((previous) => merge_timeline_rows(previous, mapped).rows)
+      set_rows(
+        (previous) => merge_timeline_rows(previous, mapped, 'realtime').rows,
+      )
       set_reply_text('')
     } catch (error) {
       console.error('[admin_reception] submit_reply_failed', error)
@@ -1058,7 +1079,7 @@ export default function AdminChatTimeline({
               if (message.bundle_type === 'room_action_log') {
                 return (
                   <li
-                    key={message.message_uuid}
+                    key={timeline_render_key(message)}
                     className="flex justify-center px-2"
                   >
                     <div className="max-w-[92%] rounded-full bg-neutral-100 px-4 py-1.5 text-center text-[11px] font-medium text-neutral-600">
@@ -1073,7 +1094,7 @@ export default function AdminChatTimeline({
 
               return (
                 <li
-                  key={message.message_uuid}
+                  key={timeline_render_key(message)}
                   className={`flex ${is_outgoing ? 'justify-end' : 'justify-start'}`}
                 >
                   <div

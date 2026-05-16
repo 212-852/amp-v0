@@ -6,31 +6,21 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { archived_message } from '@/lib/chat/archive'
 import type { message_bundle } from '@/lib/chat/message'
 import {
-  normalize_chat_timeline_messages,
+  admin_timeline_chat_action_types,
+  chat_action_timeline_text,
+  chat_action_to_admin_timeline_row,
+  merge_timeline_message_rows,
+  parse_chat_action_timeline_row,
+  type chat_action_timeline_payload,
   type chat_room_timeline_message,
+  is_admin_timeline_chat_action_type,
 } from '@/lib/chat/timeline_display'
 
 import { send_chat_realtime_debug } from './client'
 
-export const realtime_timeline_chat_action_types = new Set([
-  'support_started',
-  'support_left',
-  'concierge_enabled',
-  'bot_enabled',
-  'handoff',
-  'internal_note_created',
-])
+export const realtime_timeline_chat_action_types = admin_timeline_chat_action_types
 
-export type chat_action_realtime_payload = {
-  room_uuid: string
-  action_uuid: string
-  action_type: string
-  body: string | null
-  created_at: string | null
-  actor_user_uuid: string | null
-  actor_display_name: string | null
-  source_channel: string | null
-}
+export type chat_action_realtime_payload = chat_action_timeline_payload
 
 /** @deprecated Use chat_action_realtime_payload */
 export type chat_support_action_payload = chat_action_realtime_payload
@@ -50,64 +40,16 @@ export function chat_actions_realtime_channel_name(
 export function is_realtime_timeline_chat_action_type(
   action_type: string,
 ): boolean {
-  return realtime_timeline_chat_action_types.has(action_type.trim())
+  return is_admin_timeline_chat_action_type(action_type)
 }
 
 export function parse_chat_action_realtime_row(
   value: unknown,
 ): chat_action_realtime_payload | null {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-
-  const row = value as Record<string, unknown>
-  const room_uuid =
-    typeof row.room_uuid === 'string' ? row.room_uuid.trim() : ''
-  const action_type =
-    typeof row.action_type === 'string' ? row.action_type.trim() : ''
-
-  if (!room_uuid || !action_type) {
-    return null
-  }
-
-  const action_uuid_raw =
-    row.action_uuid ?? row.uuid ?? row.id ?? row.action_id
-  const action_uuid =
-    typeof action_uuid_raw === 'string' && action_uuid_raw.trim()
-      ? action_uuid_raw.trim()
-      : ''
-
-  if (!action_uuid) {
-    return null
-  }
-
-  const actor_user_uuid =
-    typeof row.actor_user_uuid === 'string'
-      ? row.actor_user_uuid
-      : typeof row.admin_user_uuid === 'string'
-        ? row.admin_user_uuid
-        : null
-  const actor_display_name =
-    typeof row.actor_display_name === 'string'
-      ? row.actor_display_name
-      : null
-  const source_channel =
-    typeof row.source_channel === 'string' ? row.source_channel : null
-  const body = typeof row.body === 'string' ? row.body : null
-  const created_at =
-    typeof row.created_at === 'string' ? row.created_at : null
-
-  return {
-    room_uuid,
-    action_uuid,
-    action_type,
-    body,
-    created_at,
-    actor_user_uuid,
-    actor_display_name,
-    source_channel,
-  }
+  return parse_chat_action_timeline_row(value)
 }
+
+export { chat_action_timeline_text, chat_action_to_admin_timeline_row }
 
 export function chat_action_visible_to_listener_scope(input: {
   action_type: string
@@ -134,63 +76,6 @@ export function chat_action_visible_to_listener_scope(input: {
   }
 
   return true
-}
-
-export function chat_action_timeline_text(
-  action: chat_action_realtime_payload,
-): string {
-  const body = action.body?.trim()
-
-  if (body) {
-    return body
-  }
-
-  const name = action.actor_display_name?.trim() || 'Admin'
-
-  switch (action.action_type) {
-    case 'support_started':
-      return `${name} が対応を開始しました`
-    case 'support_left':
-      return `${name} が退出しました`
-    case 'concierge_enabled':
-      return 'コンシェルジュ対応に切り替えました'
-    case 'bot_enabled':
-      return 'ボット対応に切り替えました'
-    case 'handoff':
-      return '引き継ぎが記録されました'
-    case 'internal_note_created':
-      return '内部メモが追加されました'
-    default:
-      return action.action_type
-  }
-}
-
-export function chat_action_to_admin_timeline_row(
-  action: chat_action_realtime_payload,
-): chat_room_timeline_message {
-  const kind:
-    | 'support_started'
-    | 'support_left'
-    | null =
-    action.action_type === 'support_started' ||
-    action.action_type === 'support_left'
-      ? action.action_type
-      : null
-
-  return {
-    message_uuid: action.action_uuid,
-    room_uuid: action.room_uuid,
-    sequence: null,
-    text: chat_action_timeline_text(action),
-    created_at: action.created_at ?? new Date().toISOString(),
-    direction: 'system',
-    sender: 'system',
-    role: 'system',
-    bundle_type: 'room_action_log',
-    timeline_support_kind: kind,
-    timeline_source: 'chat_actions',
-    chat_action_uuid: action.action_uuid,
-  }
 }
 
 export function chat_action_to_archived_message(
@@ -242,47 +127,37 @@ function chat_action_debug_payload(
   }
 }
 
+function emit_timeline_duplicate_skips(
+  skips: import('@/lib/chat/timeline_display').timeline_item_duplicate_skip[],
+) {
+  for (const skip of skips) {
+    send_chat_realtime_debug({
+      category: 'admin_chat',
+      event: 'timeline_item_duplicate_skipped',
+      room_uuid: skip.room_uuid,
+      active_room_uuid: skip.room_uuid,
+      action_uuid: skip.kind === 'action' ? skip.uuid : null,
+      message_uuid: skip.kind === 'message' ? skip.uuid : null,
+      event_type: skip.kind,
+      ignored_reason: skip.item_key,
+      reason: skip.source,
+      phase: 'merge_timeline_items',
+    })
+  }
+}
+
 export function append_chat_action_to_admin_timeline(
   previous: chat_room_timeline_message[],
   action: chat_action_realtime_payload,
 ): { rows: chat_room_timeline_message[]; appended: boolean } {
-  if (previous.some((row) => row.message_uuid === action.action_uuid)) {
-    send_chat_realtime_debug({
-      event: 'support_action_duplicate_skipped',
-      room_uuid: action.room_uuid,
-      active_room_uuid: action.room_uuid,
-      action_uuid: action.action_uuid,
-      event_type: action.action_type,
-      ignored_reason: 'same_action_uuid_in_timeline',
-      prev_message_count: previous.length,
-      next_message_count: previous.length,
-      phase: 'append_chat_action_to_admin_timeline',
-    })
-
-    return { rows: previous, appended: false }
-  }
-
   const system_row = chat_action_to_admin_timeline_row(action)
-  const combined = [...previous, system_row]
-  const rows = normalize_chat_timeline_messages(combined)
+  const merged = merge_timeline_message_rows(previous, [system_row], 'realtime')
 
-  if (rows.length < combined.length) {
-    send_chat_realtime_debug({
-      event: 'support_action_duplicate_skipped',
-      room_uuid: action.room_uuid,
-      active_room_uuid: action.room_uuid,
-      action_uuid: action.action_uuid,
-      event_type: action.action_type,
-      ignored_reason: 'normalize_removed_parallel_support_row',
-      prev_message_count: combined.length,
-      next_message_count: rows.length,
-      phase: 'append_chat_action_to_admin_timeline',
-    })
-  }
+  emit_timeline_duplicate_skips(merged.duplicates_skipped)
 
   return {
-    rows,
-    appended: true,
+    rows: merged.rows,
+    appended: merged.rows.length > previous.length,
   }
 }
 

@@ -29,6 +29,9 @@ export function send_admin_chat_debug(input: {
   leave_reason?: string | null
   filter?: string | null
   phase?: string | null
+  item_key?: string | null
+  event_type?: string | null
+  reason?: string | null
 }) {
   const pathname =
     input.pathname ??
@@ -70,6 +73,9 @@ export function send_admin_chat_debug(input: {
       leave_reason: input.leave_reason ?? null,
       filter: input.filter ?? null,
       phase: input.phase ?? null,
+      item_key: input.item_key ?? input.ignored_reason ?? null,
+      event_type: input.event_type ?? null,
+      reason: input.reason ?? null,
     }),
   }).catch(() => {})
 }

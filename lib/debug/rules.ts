@@ -726,6 +726,7 @@ export function resolve_debug_rule(input: {
     'support_action_realtime_rendered',
     'support_action_realtime_ignored',
     'support_action_duplicate_skipped',
+    'timeline_item_duplicate_skipped',
     'support_started_realtime_rendered',
     'admin_chat_room_rendered',
     'admin_chat_room_mounted',
