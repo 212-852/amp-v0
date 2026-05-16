@@ -238,6 +238,11 @@ export type chat_realtime_debug_payload = {
   channel?: string | null
   direction?: string | null
   last_message_at?: string | null
+  selected_room_uuid?: string | null
+  support_mode?: string | null
+  skipped_reason?: string | null
+  dependency_values?: string | null
+  mounted_at?: string | null
   /** `messages.channel` (e.g. line); distinct from listener `source_channel`. */
   payload_channel?: string | null
   /** Body `source_channel` (e.g. line). */

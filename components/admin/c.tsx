@@ -30,6 +30,7 @@ import {
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
 import {
+  call_leave_support_room,
   call_enter_support_room,
   support_room_api_action_to_realtime,
 } from '@/lib/chat/realtime/support_room_client'
@@ -152,6 +153,51 @@ export default function AdminChatTimeline({
   staff_tier,
   room_display_title,
 }: AdminChatTimelineProps) {
+  const render_pathname =
+    typeof window !== 'undefined' ? window.location.pathname : null
+  const render_mounted_at = new Date().toISOString()
+  const render_dependency_values = JSON.stringify({
+    room_uuid,
+    staff_participant_uuid,
+    staff_user_uuid,
+    staff_tier,
+  })
+
+  if (typeof console !== 'undefined') {
+    console.debug('[admin_chat_component_rendered]', {
+      room_uuid,
+      selected_room_uuid: room_uuid,
+      active_room_uuid: room_uuid,
+      pathname: render_pathname,
+      admin_user_uuid: staff_user_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      support_mode: null,
+      mounted_at: render_mounted_at,
+      dependency_values: render_dependency_values,
+    })
+  }
+
+  if (typeof window !== 'undefined') {
+    send_chat_realtime_debug({
+      event: 'admin_chat_component_rendered',
+      room_uuid,
+      selected_room_uuid: room_uuid,
+      active_room_uuid: room_uuid,
+      participant_uuid: staff_participant_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      admin_user_uuid: staff_user_uuid,
+      user_uuid: staff_user_uuid,
+      role: 'admin',
+      tier: staff_tier,
+      source_channel: 'admin',
+      pathname: render_pathname,
+      support_mode: null,
+      mounted_at: render_mounted_at,
+      dependency_values: render_dependency_values,
+      phase: 'admin_chat_render',
+    })
+  }
+
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
   const realtime_channel_ref = useRef<RealtimeChannel | null>(null)
@@ -189,6 +235,7 @@ export default function AdminChatTimeline({
   const subscribed_chat_actions_room_ref = useRef<string | null>(null)
   const support_enter_session_ref = useRef<string | null>(null)
   const show_jump_button_ref = useRef(false)
+  const mounted_at_ref = useRef(render_mounted_at)
 
   useEffect(() => {
     const pathname =
@@ -197,6 +244,7 @@ export default function AdminChatTimeline({
     send_chat_realtime_debug({
       event: 'admin_chat_detail_mounted',
       room_uuid,
+      selected_room_uuid: room_uuid,
       active_room_uuid: room_uuid,
       previous_room_uuid: null,
       next_room_uuid: room_uuid,
@@ -207,6 +255,14 @@ export default function AdminChatTimeline({
       tier: staff_tier,
       source_channel: 'admin',
       pathname,
+      support_mode: null,
+      mounted_at: mounted_at_ref.current,
+      dependency_values: JSON.stringify({
+        room_uuid,
+        staff_participant_uuid,
+        staff_user_uuid,
+        staff_tier,
+      }),
       reason: 'component_mount',
       phase: 'admin_chat_detail_lifecycle',
     })
@@ -215,6 +271,7 @@ export default function AdminChatTimeline({
       send_chat_realtime_debug({
         event: 'admin_chat_detail_unmounted',
         room_uuid,
+        selected_room_uuid: room_uuid,
         active_room_uuid: room_uuid,
         previous_room_uuid: room_uuid,
         next_room_uuid: null,
@@ -226,6 +283,14 @@ export default function AdminChatTimeline({
         source_channel: 'admin',
         pathname:
           typeof window !== 'undefined' ? window.location.pathname : null,
+        support_mode: null,
+        mounted_at: mounted_at_ref.current,
+        dependency_values: JSON.stringify({
+          room_uuid,
+          staff_participant_uuid,
+          staff_user_uuid,
+          staff_tier,
+        }),
         reason: 'component_unmount',
         phase: 'admin_chat_detail_lifecycle',
       })
@@ -240,6 +305,7 @@ export default function AdminChatTimeline({
     send_chat_realtime_debug({
       event: 'admin_active_room_ready',
       room_uuid,
+      selected_room_uuid: room_uuid,
       active_room_uuid: room_uuid,
       previous_room_uuid: null,
       next_room_uuid: room_uuid,
@@ -251,6 +317,14 @@ export default function AdminChatTimeline({
       source_channel: 'admin',
       pathname:
         typeof window !== 'undefined' ? window.location.pathname : null,
+      support_mode: null,
+      mounted_at: mounted_at_ref.current,
+      dependency_values: JSON.stringify({
+        room_uuid,
+        staff_participant_uuid,
+        staff_user_uuid,
+        staff_tier,
+      }),
       reason: staff_user_uuid ? 'admin_session_resolved' : 'room_resolved',
       phase: 'admin_chat_detail_lifecycle',
     })
@@ -352,24 +426,108 @@ export default function AdminChatTimeline({
   const run_enter_support_room = useCallback(async () => {
     const locked_room = latest_room_uuid_ref.current
     const participant_uuid = staff_participant_uuid_ref.current
+    const ctx = admin_rt_ctx_ref.current
+    const pathname =
+      typeof window !== 'undefined' ? window.location.pathname : null
+    const dependency_values = JSON.stringify({
+      room_uuid: locked_room,
+      staff_participant_uuid: participant_uuid,
+      staff_user_uuid: ctx.staff_user_uuid,
+      staff_tier: ctx.staff_tier,
+    })
 
     if (!locked_room || !participant_uuid) {
+      send_chat_realtime_debug({
+        event: !locked_room
+          ? 'admin_chat_useeffect_skipped_no_room'
+          : 'admin_chat_useeffect_skipped_no_admin',
+        room_uuid: locked_room || null,
+        selected_room_uuid: locked_room || null,
+        active_room_uuid: locked_room || null,
+        participant_uuid: participant_uuid || null,
+        admin_participant_uuid: participant_uuid || null,
+        admin_user_uuid: ctx.staff_user_uuid,
+        user_uuid: ctx.staff_user_uuid,
+        role: 'admin',
+        tier: ctx.staff_tier,
+        source_channel: 'admin',
+        pathname,
+        support_mode: null,
+        skipped_reason: !locked_room ? 'missing_active_room_uuid' : 'missing_admin_participant_uuid',
+        dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_enter',
+      })
       return
     }
 
     const session_key = `${locked_room}|${participant_uuid}`
 
+    if (!ctx.staff_user_uuid) {
+      send_chat_realtime_debug({
+        event: 'admin_chat_useeffect_skipped_no_admin',
+        room_uuid: locked_room,
+        selected_room_uuid: locked_room,
+        active_room_uuid: locked_room,
+        participant_uuid,
+        admin_participant_uuid: participant_uuid,
+        admin_user_uuid: null,
+        user_uuid: null,
+        role: 'admin',
+        tier: ctx.staff_tier,
+        source_channel: 'admin',
+        pathname,
+        support_mode: null,
+        skipped_reason: 'missing_admin_user_uuid',
+        dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_enter',
+      })
+
+      return
+    }
+
+    if (support_enter_session_ref.current === session_key) {
+      send_chat_realtime_debug({
+        event: 'admin_chat_useeffect_skipped_already_active',
+        room_uuid: locked_room,
+        selected_room_uuid: locked_room,
+        active_room_uuid: locked_room,
+        participant_uuid,
+        admin_participant_uuid: participant_uuid,
+        admin_user_uuid: ctx.staff_user_uuid,
+        user_uuid: ctx.staff_user_uuid,
+        role: 'admin',
+        tier: ctx.staff_tier,
+        source_channel: 'admin',
+        pathname,
+        support_mode: null,
+        skipped_reason: 'same_room_same_admin_already_invoked',
+        dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_enter',
+      })
+
+      return
+    }
+
     send_chat_realtime_debug({
-      event: 'admin_support_enter_call_started',
+      event: 'admin_support_enter_invocation_started',
       room_uuid: locked_room,
+      selected_room_uuid: locked_room,
       active_room_uuid: locked_room,
       participant_uuid,
-      admin_user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
-      user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+      admin_participant_uuid: participant_uuid,
+      admin_user_uuid: ctx.staff_user_uuid,
+      user_uuid: ctx.staff_user_uuid,
       role: 'admin',
-      tier: admin_rt_ctx_ref.current.staff_tier,
+      tier: ctx.staff_tier,
       source_channel: 'admin',
-      phase: 'admin_support_enter',
+      pathname,
+      support_mode: null,
+      dependency_values,
+      mounted_at: mounted_at_ref.current,
+      phase: 'admin_chat_detail_support_enter',
     })
 
     try {
@@ -384,20 +542,27 @@ export default function AdminChatTimeline({
 
       send_chat_realtime_debug({
         event: result.ok
-          ? 'admin_support_enter_call_succeeded'
-          : 'admin_support_enter_call_failed',
+          ? 'admin_support_enter_invocation_succeeded'
+          : 'admin_support_enter_invocation_failed',
         room_uuid: locked_room,
+        selected_room_uuid: locked_room,
         active_room_uuid: locked_room,
         participant_uuid,
-        admin_user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
-        user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        admin_participant_uuid: participant_uuid,
+        admin_user_uuid: ctx.staff_user_uuid,
+        user_uuid: ctx.staff_user_uuid,
         role: 'admin',
-        tier: admin_rt_ctx_ref.current.staff_tier,
+        tier: ctx.staff_tier,
         source_channel: 'admin',
+        pathname,
+        support_mode: null,
         skip_reason: result.ok && result.skipped ? 'duplicate' : null,
+        skipped_reason: result.ok && result.skipped ? 'duplicate' : null,
         error_code: result.ok ? null : result.error,
         error_message: result.ok ? null : result.error,
-        phase: 'admin_support_enter',
+        dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_enter',
       })
 
       if (result.ok) {
@@ -405,21 +570,240 @@ export default function AdminChatTimeline({
       }
     } catch (error) {
       send_chat_realtime_debug({
-        event: 'admin_support_enter_call_failed',
+        event: 'admin_support_enter_invocation_failed',
         room_uuid: locked_room,
+        selected_room_uuid: locked_room,
         active_room_uuid: locked_room,
         participant_uuid,
-        admin_user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
-        user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        admin_participant_uuid: participant_uuid,
+        admin_user_uuid: ctx.staff_user_uuid,
+        user_uuid: ctx.staff_user_uuid,
         role: 'admin',
-        tier: admin_rt_ctx_ref.current.staff_tier,
+        tier: ctx.staff_tier,
         source_channel: 'admin',
+        pathname,
+        support_mode: null,
         error_code: 'support_enter_call_failed',
         error_message: error instanceof Error ? error.message : String(error),
-        phase: 'admin_support_enter',
+        dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_enter',
       })
     }
   }, [apply_support_action_to_timeline])
+
+  useEffect(() => {
+    const pathname =
+      typeof window !== 'undefined' ? window.location.pathname : null
+    const dependency_values = JSON.stringify({
+      room_uuid,
+      staff_participant_uuid,
+      staff_user_uuid,
+      staff_tier,
+    })
+
+    send_chat_realtime_debug({
+      event: 'admin_chat_useeffect_triggered',
+      room_uuid,
+      selected_room_uuid: room_uuid,
+      active_room_uuid: room_uuid,
+      participant_uuid: staff_participant_uuid,
+      admin_participant_uuid: staff_participant_uuid,
+      admin_user_uuid: staff_user_uuid,
+      user_uuid: staff_user_uuid,
+      role: 'admin',
+      tier: staff_tier,
+      source_channel: 'admin',
+      pathname,
+      support_mode: null,
+      dependency_values,
+      mounted_at: mounted_at_ref.current,
+      phase: 'admin_chat_detail_support_lifecycle',
+    })
+
+    if (!room_uuid) {
+      send_chat_realtime_debug({
+        event: 'admin_chat_useeffect_skipped_no_room',
+        room_uuid: null,
+        selected_room_uuid: null,
+        active_room_uuid: null,
+        participant_uuid: staff_participant_uuid,
+        admin_participant_uuid: staff_participant_uuid,
+        admin_user_uuid: staff_user_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'admin',
+        tier: staff_tier,
+        source_channel: 'admin',
+        pathname,
+        support_mode: null,
+        skipped_reason: 'missing_active_room_uuid',
+        dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_lifecycle',
+      })
+
+      return
+    }
+
+    if (!staff_user_uuid || !staff_participant_uuid) {
+      send_chat_realtime_debug({
+        event: 'admin_chat_useeffect_skipped_no_admin',
+        room_uuid,
+        selected_room_uuid: room_uuid,
+        active_room_uuid: room_uuid,
+        participant_uuid: staff_participant_uuid || null,
+        admin_participant_uuid: staff_participant_uuid || null,
+        admin_user_uuid: staff_user_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'admin',
+        tier: staff_tier,
+        source_channel: 'admin',
+        pathname,
+        support_mode: null,
+        skipped_reason: !staff_user_uuid
+          ? 'missing_admin_user_uuid'
+          : 'missing_admin_participant_uuid',
+        dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_lifecycle',
+      })
+
+      return
+    }
+
+    void run_enter_support_room()
+
+    return () => {
+      const cleanup_pathname =
+        typeof window !== 'undefined' ? window.location.pathname : null
+      const cleanup_dependency_values = JSON.stringify({
+        room_uuid,
+        staff_participant_uuid,
+        staff_user_uuid,
+        staff_tier,
+      })
+
+      send_chat_realtime_debug({
+        event: 'admin_chat_cleanup_started',
+        room_uuid,
+        selected_room_uuid: room_uuid,
+        active_room_uuid: room_uuid,
+        previous_room_uuid: room_uuid,
+        next_room_uuid: null,
+        participant_uuid: staff_participant_uuid,
+        admin_participant_uuid: staff_participant_uuid,
+        admin_user_uuid: staff_user_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'admin',
+        tier: staff_tier,
+        source_channel: 'admin',
+        pathname: cleanup_pathname,
+        support_mode: null,
+        reason: 'component_cleanup',
+        dependency_values: cleanup_dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_lifecycle',
+      })
+
+      send_chat_realtime_debug({
+        event: 'admin_support_leave_invocation_started',
+        room_uuid,
+        selected_room_uuid: room_uuid,
+        active_room_uuid: room_uuid,
+        previous_room_uuid: room_uuid,
+        next_room_uuid: null,
+        participant_uuid: staff_participant_uuid,
+        admin_participant_uuid: staff_participant_uuid,
+        admin_user_uuid: staff_user_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'admin',
+        tier: staff_tier,
+        source_channel: 'admin',
+        pathname: cleanup_pathname,
+        support_mode: null,
+        reason: 'component_cleanup',
+        dependency_values: cleanup_dependency_values,
+        mounted_at: mounted_at_ref.current,
+        phase: 'admin_chat_detail_support_lifecycle',
+      })
+
+      void call_leave_support_room({
+        room_uuid,
+        participant_uuid: staff_participant_uuid,
+        leave_reason: 'component_cleanup',
+        support_session_key: `${room_uuid}|${staff_participant_uuid}`,
+        keepalive: true,
+      })
+        .then((result) => {
+          if (result.ok && result.action) {
+            apply_support_action_to_timeline(
+              support_room_api_action_to_realtime(result.action),
+              'leave_api',
+            )
+          }
+
+          send_chat_realtime_debug({
+            event: result.ok
+              ? 'admin_support_leave_invocation_succeeded'
+              : 'admin_support_leave_invocation_failed',
+            room_uuid,
+            selected_room_uuid: room_uuid,
+            active_room_uuid: room_uuid,
+            previous_room_uuid: room_uuid,
+            next_room_uuid: null,
+            participant_uuid: staff_participant_uuid,
+            admin_participant_uuid: staff_participant_uuid,
+            admin_user_uuid: staff_user_uuid,
+            user_uuid: staff_user_uuid,
+            role: 'admin',
+            tier: staff_tier,
+            source_channel: 'admin',
+            pathname: cleanup_pathname,
+            support_mode: null,
+            skipped_reason: result.ok && result.skipped ? 'duplicate' : null,
+            error_code: result.ok ? null : result.error,
+            error_message: result.ok ? null : result.error,
+            reason: 'component_cleanup',
+            dependency_values: cleanup_dependency_values,
+            mounted_at: mounted_at_ref.current,
+            phase: 'admin_chat_detail_support_lifecycle',
+          })
+        })
+        .catch((error) => {
+          send_chat_realtime_debug({
+            event: 'admin_support_leave_invocation_failed',
+            room_uuid,
+            selected_room_uuid: room_uuid,
+            active_room_uuid: room_uuid,
+            previous_room_uuid: room_uuid,
+            next_room_uuid: null,
+            participant_uuid: staff_participant_uuid,
+            admin_participant_uuid: staff_participant_uuid,
+            admin_user_uuid: staff_user_uuid,
+            user_uuid: staff_user_uuid,
+            role: 'admin',
+            tier: staff_tier,
+            source_channel: 'admin',
+            pathname: cleanup_pathname,
+            support_mode: null,
+            error_code: 'support_leave_invocation_failed',
+            error_message:
+              error instanceof Error ? error.message : String(error),
+            reason: 'component_cleanup',
+            dependency_values: cleanup_dependency_values,
+            mounted_at: mounted_at_ref.current,
+            phase: 'admin_chat_detail_support_lifecycle',
+          })
+        })
+    }
+  }, [
+    apply_support_action_to_timeline,
+    room_uuid,
+    run_enter_support_room,
+    staff_participant_uuid,
+    staff_tier,
+    staff_user_uuid,
+  ])
 
   use_admin_reception_support_presence({
     room_uuid,

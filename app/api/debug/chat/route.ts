@@ -65,6 +65,11 @@ type chat_debug_body = {
   channel?: unknown
   direction?: unknown
   last_message_at?: unknown
+  selected_room_uuid?: unknown
+  support_mode?: unknown
+  skipped_reason?: unknown
+  dependency_values?: unknown
+  mounted_at?: unknown
   payload_channel?: unknown
   payload_source_channel?: unknown
   payload_direction?: unknown
@@ -197,6 +202,11 @@ export async function POST(request: Request) {
       channel: string_or_null(body?.channel),
       direction: string_or_null(body?.direction),
       last_message_at: string_or_null(body?.last_message_at),
+      selected_room_uuid: string_or_null(body?.selected_room_uuid),
+      support_mode: string_or_null(body?.support_mode),
+      skipped_reason: string_or_null(body?.skipped_reason),
+      dependency_values: string_or_null(body?.dependency_values),
+      mounted_at: string_or_null(body?.mounted_at),
       payload_channel: string_or_null(body?.payload_channel),
       payload_source_channel: string_or_null(body?.payload_source_channel),
       payload_direction: string_or_null(body?.payload_direction),
