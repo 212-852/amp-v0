@@ -65,6 +65,7 @@ type message_realtime_debug_payload = {
   owner: message_realtime_owner
   room_uuid: string
   active_room_uuid: string
+  payload_room_uuid?: string | null
   message_uuid?: string | null
   source_channel?: string | null
   direction?: string | null
@@ -87,6 +88,7 @@ function emit_message_realtime_debug(
     active_room_uuid: payload.active_room_uuid,
     message_uuid: payload.message_uuid ?? null,
     payload_message_uuid: payload.message_uuid ?? null,
+    payload_room_uuid: payload.payload_room_uuid ?? payload.room_uuid ?? null,
     source_channel: payload.source_channel ?? null,
     direction: payload.direction ?? null,
     payload_source_channel: payload.source_channel ?? null,
@@ -224,6 +226,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
           owner,
           room_uuid,
           active_room_uuid,
+          payload_room_uuid,
           message_uuid: message.archive_uuid,
           source_channel: channels.source_channel,
           direction: channels.direction,
@@ -239,6 +242,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
             owner,
             room_uuid,
             active_room_uuid,
+            payload_room_uuid,
             message_uuid: message.archive_uuid,
             source_channel: channels.source_channel,
             direction: channels.direction,
@@ -252,6 +256,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
           owner,
           room_uuid,
           active_room_uuid,
+          payload_room_uuid,
           message_uuid: message.archive_uuid,
           source_channel: channels.source_channel,
           direction: channels.direction,
@@ -264,6 +269,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
             owner,
             room_uuid,
             active_room_uuid,
+            payload_room_uuid,
             message_uuid: message.archive_uuid,
             source_channel: channels.source_channel,
             direction: channels.direction,

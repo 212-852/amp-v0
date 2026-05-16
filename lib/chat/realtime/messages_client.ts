@@ -71,24 +71,6 @@ export function evaluate_realtime_message_acceptance(input: {
     return { accept: false, ignored_reason: 'payload_room_uuid_mismatch' }
   }
 
-  const { source_channel, direction } = resolve_realtime_message_channels(
-    input.message,
-  )
-
-  if (!realtime_message_source_channel_accepted(source_channel)) {
-    return {
-      accept: false,
-      ignored_reason: `unsupported_source_channel:${source_channel ?? ''}`,
-    }
-  }
-
-  if (!realtime_message_direction_accepted(direction)) {
-    return {
-      accept: false,
-      ignored_reason: `unsupported_direction:${direction ?? ''}`,
-    }
-  }
-
   return { accept: true, ignored_reason: null }
 }
 

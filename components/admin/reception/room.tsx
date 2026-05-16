@@ -87,7 +87,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
 
   const append_live_timeline_messages = useCallback(
     (addition: chat_room_timeline_message[]) => {
-      append_admin_reception_timeline_messages(addition)
+      return append_admin_reception_timeline_messages(addition)
     },
     [],
   )
@@ -148,7 +148,6 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
           admin_participant_uuid={props.admin_participant_uuid}
           realtime_messages_channel_ref={messages_channel_ref}
           on_append_timeline_messages={append_live_timeline_messages}
-          disable_message_realtime
         />
       </section>
     </div>

@@ -2,17 +2,11 @@
 
 import { useCallback, useLayoutEffect, useRef } from 'react'
 
-import {
-  append_admin_reception_realtime_action,
-  append_admin_reception_realtime_message,
-  set_admin_reception_messages_channel,
-} from '@/components/admin/reception/detail_state'
+import { append_admin_reception_realtime_action } from '@/components/admin/reception/detail_state'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import { send_chat_realtime_debug } from '@/lib/chat/realtime/client'
 import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
-import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import { use_action_realtime } from '@/lib/chat/realtime/use_action_realtime'
-import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
 import { use_support_lifecycle } from '@/lib/support/lifecycle/client'
 
 const component_file = 'components/admin/reception/runtime.tsx'
@@ -33,8 +27,6 @@ export default function AdminReceptionRuntime(props: admin_reception_runtime_pro
   const staff_participant_uuid = (
     props.staff_participant_uuid ?? props.admin_participant_uuid
   ).trim()
-  const staff_user_uuid = (props.staff_user_uuid ?? props.admin_user_uuid).trim()
-
   useLayoutEffect(() => {
     if (!room_uuid || runtime_mounted_ref.current === room_uuid) {
       return
@@ -68,10 +60,6 @@ export default function AdminReceptionRuntime(props: admin_reception_runtime_pro
     append_admin_reception_realtime_action(action)
   }, [])
 
-  const on_message = useCallback((message: realtime_archived_message) => {
-    return append_admin_reception_realtime_message(message)
-  }, [])
-
   const on_action = useCallback(
     (action: chat_action_realtime_payload, _inserted_index: number) => {
       return append_admin_reception_realtime_action(action)
@@ -84,20 +72,6 @@ export default function AdminReceptionRuntime(props: admin_reception_runtime_pro
     admin_user_uuid: props.admin_user_uuid,
     admin_participant_uuid: props.admin_participant_uuid,
     on_support_action,
-  })
-
-  use_message_realtime({
-    owner: 'admin',
-    room_uuid,
-    active_room_uuid: room_uuid,
-    enabled,
-    participant_uuid: staff_participant_uuid,
-    user_uuid: staff_user_uuid || null,
-    role: 'admin',
-    tier: props.staff_tier ?? null,
-    source_channel: 'admin',
-    on_messages_channel: set_admin_reception_messages_channel,
-    on_message,
   })
 
   use_action_realtime({

@@ -38,7 +38,11 @@ type AdminChatTimelineProps = {
   admin_user_uuid: string
   admin_participant_uuid: string
   realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
-  on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
+  on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => {
+    prev_count: number
+    next_count: number
+    dedupe_hit: boolean
+  }
   peer_typing_label?: string | null
   disable_message_realtime?: boolean
 }
@@ -241,12 +245,12 @@ export default function AdminChatTimeline({
       }
 
       if (on_append_timeline_messages) {
-        on_append_timeline_messages([mapped])
+        const appended = on_append_timeline_messages([mapped])
 
         return {
-          prev_count: 0,
-          next_count: 1,
-          dedupe_hit: false,
+          prev_count: appended.prev_count,
+          next_count: appended.next_count,
+          dedupe_hit: appended.dedupe_hit,
         }
       }
 

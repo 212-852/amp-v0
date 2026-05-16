@@ -6,7 +6,10 @@ import {
   useEffect,
   useRef,
   useState,
+  type MutableRefObject,
+  type ReactNode,
 } from 'react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { useUserChat } from '@/components/chat/context'
 import { use_session_profile } from '@/components/session/profile'
@@ -387,6 +390,75 @@ function WebChatMessageRow({ message }: { message: archived_message }) {
   return null
 }
 
+type web_chat_message_timeline_props = {
+  room_uuid: string
+  active_room_uuid: string
+  participant_uuid: string
+  user_uuid: string | null
+  tier: string | null
+  source_channel: 'web' | 'liff' | 'pwa' | 'line'
+  enabled: boolean
+  active_typing_identity_ref: MutableRefObject<{
+    user_uuid: string | null
+    participant_uuid: string | null
+    role: string | null
+  }>
+  export_messages_channel_ref: MutableRefObject<RealtimeChannel | null>
+  on_message: (
+    message: realtime_archived_message,
+  ) => {
+    prev_count: number
+    next_count: number
+    dedupe_hit: boolean
+  }
+  on_typing: (typing: chat_typing_payload) => void
+  on_presence: (presence: chat_presence_payload) => void
+  visible_messages: archived_message[]
+  typing_banner: string | null
+  set_scroll_container: (node: HTMLDivElement | null) => void
+  scroll_spacer?: ReactNode
+}
+
+function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
+  use_message_realtime({
+    owner: 'user',
+    room_uuid: props.room_uuid,
+    active_room_uuid: props.active_room_uuid,
+    enabled: props.enabled,
+    participant_uuid: props.participant_uuid,
+    user_uuid: props.user_uuid,
+    role: 'user',
+    tier: props.tier,
+    source_channel: props.source_channel,
+    active_typing_identity_ref: props.active_typing_identity_ref,
+    export_messages_channel_ref: props.export_messages_channel_ref,
+    on_message: props.on_message,
+    on_typing: props.on_typing,
+    on_presence: props.on_presence,
+  })
+
+  return (
+    <div
+      ref={props.set_scroll_container}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4"
+    >
+      <div className="flex flex-col gap-5">
+        {props.visible_messages.map((message) => (
+          <WebChatMessageRow key={message.archive_uuid} message={message} />
+        ))}
+      </div>
+      {props.typing_banner ? (
+        <div className="px-5 pb-2 pt-4 text-center text-[12px] font-medium text-[#8a7568]">
+          {props.typing_banner}
+        </div>
+      ) : null}
+      {props.scroll_spacer ?? (
+        <div className="h-[260px] shrink-0" aria-hidden="true" />
+      )}
+    </div>
+  )
+}
+
 export function WebChat({
   messages,
   room_uuid,
@@ -622,23 +694,6 @@ export function WebChat({
     [participant_uuid, room_uuid],
   )
 
-  use_message_realtime({
-    owner: 'user',
-    room_uuid,
-    active_room_uuid: active_room_uuid ?? room_uuid,
-    enabled: Boolean(room_uuid.trim()),
-    participant_uuid,
-    user_uuid: session?.user_uuid ?? null,
-    role: 'user',
-    tier: session?.tier ?? null,
-    source_channel: session?.source_channel ?? 'web',
-    active_typing_identity_ref,
-    export_messages_channel_ref: room_realtime_channelRef,
-    on_message: handle_realtime_message,
-    on_typing: handle_realtime_typing,
-    on_presence: handle_realtime_presence,
-  })
-
   useEffect(() => {
     if (!room_uuid.trim()) {
       return
@@ -746,25 +801,23 @@ export function WebChat({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div
-        ref={set_scroll_container}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4"
-      >
-        <div className="flex flex-col gap-5">
-          {visible_messages.map((message) => (
-            <WebChatMessageRow
-              key={message.archive_uuid}
-              message={message}
-            />
-          ))}
-        </div>
-        {typing_banner ? (
-          <div className="px-5 pb-2 pt-4 text-center text-[12px] font-medium text-[#8a7568]">
-            {typing_banner}
-          </div>
-        ) : null}
-        <div className="h-[260px] shrink-0" aria-hidden="true" />
-      </div>
+      <WebChatMessageTimeline
+        room_uuid={room_uuid}
+        active_room_uuid={active_room_uuid ?? room_uuid}
+        participant_uuid={participant_uuid}
+        user_uuid={session?.user_uuid ?? null}
+        tier={session?.tier ?? null}
+        source_channel={session?.source_channel ?? 'web'}
+        enabled={Boolean(room_uuid.trim())}
+        active_typing_identity_ref={active_typing_identity_ref}
+        export_messages_channel_ref={room_realtime_channelRef}
+        on_message={handle_realtime_message}
+        on_typing={handle_realtime_typing}
+        on_presence={handle_realtime_presence}
+        visible_messages={visible_messages}
+        typing_banner={typing_banner}
+        set_scroll_container={set_scroll_container}
+      />
     </div>
   )
 }

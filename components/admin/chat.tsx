@@ -20,9 +20,13 @@ type AdminChatProps = {
   admin_user_uuid: string
   admin_participant_uuid: string
   realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
-  on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
+  on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => {
+    prev_count: number
+    next_count: number
+    dedupe_hit: boolean
+  }
   peer_typing_label?: string | null
-  /** Reception detail: runtime owns message subscribe. */
+  /** Disable postgres_changes message subscribe in AdminChatTimeline. */
   disable_message_realtime?: boolean
 }
 
