@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, type RefObject } from 'react'
+import { useRef, type RefObject } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
@@ -38,11 +38,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
   const live_mounted_room_ref = useRef<string | null>(null)
   const room_uuid = props.room_uuid.trim()
 
-  useEffect(() => {
-    if (!room_uuid || live_mounted_room_ref.current === room_uuid) {
-      return
-    }
-
+  if (room_uuid && live_mounted_room_ref.current !== room_uuid) {
     live_mounted_room_ref.current = room_uuid
 
     send_admin_chat_debug({
@@ -54,11 +50,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
       component_file,
       phase: 'admin_reception_live',
     })
-  }, [
-    props.admin_participant_uuid,
-    props.admin_user_uuid,
-    room_uuid,
-  ])
+  }
 
   const lifecycle = use_support_lifecycle({
     room_uuid: props.room_uuid,

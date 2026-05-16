@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import AdminChat from '@/components/admin/chat'
@@ -50,11 +51,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   const room_rendered_debug_ref = useRef<string | null>(null)
   const live_room_uuid = props.room?.room_uuid ?? props.room_uuid
 
-  useEffect(() => {
-    if (room_rendered_debug_ref.current === props.room_uuid) {
-      return
-    }
-
+  if (room_rendered_debug_ref.current !== props.room_uuid) {
     room_rendered_debug_ref.current = props.room_uuid
 
     send_admin_chat_debug({
@@ -67,7 +64,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
       pathname: `/admin/reception/${props.room_uuid}`,
       phase: 'admin_reception_room',
     })
-  }, [props.admin_participant_uuid, props.admin_user_uuid, props.room_uuid])
+  }
 
   useEffect(() => {
     room_display_title_ref.current = props.customer_display_name
@@ -197,7 +194,29 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   )
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+    <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+      <header className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
+        <nav
+          aria-label="Breadcrumb"
+          className="flex items-center gap-1.5 text-[12px] font-medium text-neutral-500"
+        >
+          <Link href="/admin" className="transition-colors hover:text-black">
+            Home
+          </Link>
+          <span aria-hidden>{'>'}</span>
+          <Link
+            href="/admin/reception"
+            className="transition-colors hover:text-black"
+          >
+            チャット一覧
+          </Link>
+          <span aria-hidden>{'>'}</span>
+          <span className="truncate text-neutral-900">
+            {props.customer_display_name}
+          </span>
+        </nav>
+      </header>
+
       <AdminReceptionLive
         room_uuid={live_room_uuid}
         admin_user_uuid={props.admin_user_uuid}
@@ -243,6 +262,6 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         realtime_messages_channel_ref={realtime_messages_channel_ref}
         on_append_timeline_messages={append_live_timeline_messages}
       />
-    </section>
+    </div>
   )
 }
