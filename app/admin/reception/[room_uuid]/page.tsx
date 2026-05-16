@@ -136,12 +136,11 @@ export default async function AdminReceptionRoomPage({
     : null
   const customer_display_name =
     room?.display_name?.trim() || customer_display_name_fallback
-  const lifecycle_room_uuid = room?.room_uuid ?? room_uuid
-
   return (
     <>
       <AdminReceptionLifecycle
-        room_uuid={lifecycle_room_uuid}
+        key={room_uuid}
+        room_uuid={room_uuid}
         admin_user_uuid={admin_user_uuid}
         admin_participant_uuid={admin_participant_uuid}
       />

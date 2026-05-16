@@ -8,7 +8,7 @@ export const debug_control = {
   /** Reception room page + AdminChat + AdminChatTimeline lifecycle / realtime (Debug Cat). */
   admin_chat_lifecycle_discord_enabled: true,
   /** Emits gated support_started lifecycle traces to Discord (debug webhook). */
-  support_started_debug_enabled: false,
+  support_started_debug_enabled: true,
   /** Emits admin_support_* presence traces to Discord (debug webhook). */
   admin_support_presence_debug_enabled: false,
   /**

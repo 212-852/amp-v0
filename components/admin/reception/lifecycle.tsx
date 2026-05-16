@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import {
@@ -33,36 +33,29 @@ export default function AdminReceptionLifecycle(
 
   props_ref.current = props
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const room_uuid = props.room_uuid.trim()
+    const admin_user_uuid = props.admin_user_uuid.trim()
+    const admin_participant_uuid = props.admin_participant_uuid.trim()
 
     if (!room_uuid) {
       return
     }
 
-    if (mounted_room_ref.current === room_uuid) {
-      return
+    if (mounted_room_ref.current !== room_uuid) {
+      mounted_room_ref.current = room_uuid
+
+      send_admin_chat_debug({
+        event: 'support_lifecycle_mounted',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        admin_user_uuid: admin_user_uuid || null,
+        admin_participant_uuid: admin_participant_uuid || null,
+        component_file,
+        pathname: `/admin/reception/${room_uuid}`,
+        phase: 'admin_reception_lifecycle',
+      })
     }
-
-    mounted_room_ref.current = room_uuid
-
-    send_admin_chat_debug({
-      event: 'support_lifecycle_mounted',
-      room_uuid,
-      active_room_uuid: room_uuid,
-      admin_user_uuid: props.admin_user_uuid.trim() || null,
-      admin_participant_uuid: props.admin_participant_uuid.trim() || null,
-      component_file,
-      pathname: `/admin/reception/${room_uuid}`,
-      phase: 'admin_reception_lifecycle',
-    })
-  }, [props.admin_participant_uuid, props.admin_user_uuid, props.room_uuid])
-
-  useEffect(() => {
-    const room_uuid = props_ref.current.room_uuid.trim()
-    const admin_user_uuid = props_ref.current.admin_user_uuid.trim()
-    const admin_participant_uuid =
-      props_ref.current.admin_participant_uuid.trim()
 
     const run_enter = async () => {
       if (
@@ -126,17 +119,17 @@ export default function AdminReceptionLifecycle(
 
     const run_leave = (leave_reason: string) => {
       const current = support_session_ref.current
-      const admin_participant_uuid =
+      const leave_admin_participant_uuid =
         props_ref.current.admin_participant_uuid.trim()
-      const room_uuid = props_ref.current.room_uuid.trim()
+      const leave_room_uuid = props_ref.current.room_uuid.trim()
 
       if (!current || current.left_sent || !enter_sent_ref.current) {
         return
       }
 
       if (
-        current.room_uuid !== room_uuid ||
-        current.admin_participant_uuid !== admin_participant_uuid
+        current.room_uuid !== leave_room_uuid ||
+        current.admin_participant_uuid !== leave_admin_participant_uuid
       ) {
         return
       }
@@ -145,18 +138,18 @@ export default function AdminReceptionLifecycle(
 
       send_admin_chat_debug({
         event: 'support_left_action_create_started',
-        room_uuid,
-        active_room_uuid: room_uuid,
-        admin_participant_uuid,
+        room_uuid: leave_room_uuid,
+        active_room_uuid: leave_room_uuid,
+        admin_participant_uuid: leave_admin_participant_uuid,
         component_file,
         leave_reason,
-        pathname: `/admin/reception/${room_uuid}`,
+        pathname: `/admin/reception/${leave_room_uuid}`,
         phase: 'support_leave',
       })
 
       void call_leave_support_room({
-        room_uuid,
-        participant_uuid: admin_participant_uuid,
+        room_uuid: leave_room_uuid,
+        participant_uuid: leave_admin_participant_uuid,
         leave_reason,
         support_session_key: current.support_session_key,
         keepalive: true,
@@ -169,13 +162,13 @@ export default function AdminReceptionLifecycle(
           event: result.skipped
             ? 'support_left_duplicate_skipped'
             : 'support_left_action_create_succeeded',
-          room_uuid,
-          active_room_uuid: room_uuid,
-          admin_participant_uuid,
+          room_uuid: leave_room_uuid,
+          active_room_uuid: leave_room_uuid,
+          admin_participant_uuid: leave_admin_participant_uuid,
           action_uuid: result.action?.action_uuid ?? null,
           component_file,
           leave_reason,
-          pathname: `/admin/reception/${room_uuid}`,
+          pathname: `/admin/reception/${leave_room_uuid}`,
           phase: 'support_leave',
         })
       })
