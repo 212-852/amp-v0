@@ -168,6 +168,15 @@ export function chat_action_timeline_text(
 export function chat_action_to_admin_timeline_row(
   action: chat_action_realtime_payload,
 ): chat_room_timeline_message {
+  const kind:
+    | 'support_started'
+    | 'support_left'
+    | null =
+    action.action_type === 'support_started' ||
+    action.action_type === 'support_left'
+      ? action.action_type
+      : null
+
   return {
     message_uuid: action.action_uuid,
     room_uuid: action.room_uuid,
@@ -178,6 +187,9 @@ export function chat_action_to_admin_timeline_row(
     sender: 'system',
     role: 'system',
     bundle_type: 'room_action_log',
+    timeline_support_kind: kind,
+    timeline_source: 'chat_actions',
+    chat_action_uuid: action.action_uuid,
   }
 }
 
@@ -235,13 +247,41 @@ export function append_chat_action_to_admin_timeline(
   action: chat_action_realtime_payload,
 ): { rows: chat_room_timeline_message[]; appended: boolean } {
   if (previous.some((row) => row.message_uuid === action.action_uuid)) {
+    send_chat_realtime_debug({
+      event: 'support_action_duplicate_skipped',
+      room_uuid: action.room_uuid,
+      active_room_uuid: action.room_uuid,
+      action_uuid: action.action_uuid,
+      event_type: action.action_type,
+      ignored_reason: 'same_action_uuid_in_timeline',
+      prev_message_count: previous.length,
+      next_message_count: previous.length,
+      phase: 'append_chat_action_to_admin_timeline',
+    })
+
     return { rows: previous, appended: false }
   }
 
   const system_row = chat_action_to_admin_timeline_row(action)
+  const combined = [...previous, system_row]
+  const rows = normalize_chat_timeline_messages(combined)
+
+  if (rows.length < combined.length) {
+    send_chat_realtime_debug({
+      event: 'support_action_duplicate_skipped',
+      room_uuid: action.room_uuid,
+      active_room_uuid: action.room_uuid,
+      action_uuid: action.action_uuid,
+      event_type: action.action_type,
+      ignored_reason: 'normalize_removed_parallel_support_row',
+      prev_message_count: combined.length,
+      next_message_count: rows.length,
+      phase: 'append_chat_action_to_admin_timeline',
+    })
+  }
 
   return {
-    rows: normalize_chat_timeline_messages([...previous, system_row]),
+    rows,
     appended: true,
   }
 }

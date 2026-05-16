@@ -178,6 +178,7 @@ function admin_realtime_message_field_payload(input: {
 
 export type chat_realtime_debug_payload = {
   event: string
+  category?: 'admin_chat' | 'chat_realtime' | null
   room_uuid: string | null
   active_room_uuid?: string | null
   participant_uuid?: string | null
@@ -289,7 +290,10 @@ export function send_chat_realtime_debug(input: chat_realtime_debug_payload) {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      ...input,
+      category: input.category ?? undefined,
+    }),
   }).catch(() => {})
 }
 

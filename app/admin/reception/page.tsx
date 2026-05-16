@@ -3,11 +3,8 @@ import { Search } from 'lucide-react'
 
 import AdminReceptionRoomListLive from '@/components/admin/reception/room_list_live'
 import {
-  load_reception_channel_stats,
   list_reception_rooms,
-  reception_channel_label,
   type reception_room,
-  type reception_channel_stats,
   type reception_room_mode,
 } from '@/lib/admin/reception/room'
 
@@ -67,31 +64,12 @@ async function load_rooms(
   }
 }
 
-async function load_stats(): Promise<reception_channel_stats | null> {
-  try {
-    return await load_reception_channel_stats()
-  } catch (error) {
-    console.error('[admin_reception_page] load_channel_stats_failed', {
-      error: error instanceof Error ? error.message : String(error),
-    })
-
-    return null
-  }
-}
-
-function stat_text(stats: Record<string, number>) {
-  return ['line', 'liff', 'pwa', 'web']
-    .map((channel) => `${reception_channel_label(channel)} ${stats[channel] ?? 0}`)
-    .join(' / ')
-}
-
 export default async function AdminReceptionPage({
   searchParams,
 }: AdminReceptionPageProps) {
   const params = await searchParams
   const selected_mode = parse_mode(params?.mode)
   const result = await load_rooms(selected_mode)
-  const stats = await load_stats()
   const rooms = result.rooms
 
   return (
@@ -130,13 +108,6 @@ export default async function AdminReceptionPage({
         })}
       </div>
 
-      {stats ? (
-        <section className="rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-[11px] font-medium leading-[1.6] text-neutral-500">
-          <div>Messages: {stat_text(stats.messages_by_channel)}</div>
-          <div>Rooms: {stat_text(stats.rooms_by_last_incoming_channel)}</div>
-        </section>
-      ) : null}
-
       <section
         aria-label="Reception search"
         className="rounded-2xl border border-neutral-200 bg-white p-3 shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
@@ -165,7 +136,7 @@ export default async function AdminReceptionPage({
         <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
           {selected_mode === 'concierge'
             ? 'コンシェルジュ案件はまだありません'
-            : 'ボット対応中のルームはありません'}
+            : 'ボット対応中のルームはまだありません'}
         </div>
       ) : (
         <AdminReceptionRoomListLive initial_rooms={rooms} />

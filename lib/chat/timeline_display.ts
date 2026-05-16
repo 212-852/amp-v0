@@ -5,6 +5,8 @@ import type { message_bundle } from './message'
  * Admin reception timeline row derived from the same `archived_message` source
  * as user WebChat (`load_archived_messages` / message bundles).
  */
+export type chat_room_timeline_support_kind = 'support_started' | 'support_left'
+
 export type chat_room_timeline_message = {
   message_uuid: string
   room_uuid: string
@@ -16,6 +18,11 @@ export type chat_room_timeline_message = {
   sequence: number | null
   bundle_type: string | null
   inserted_at?: string | null
+  /** When set, merges duplicate archive message + chat_actions row for support lifecycle. */
+  timeline_support_kind?: chat_room_timeline_support_kind | null
+  timeline_source?: 'archive' | 'chat_actions'
+  /** Same as chat_actions row UUID when sourced from actions table. */
+  chat_action_uuid?: string | null
 }
 
 function timeline_text_from_bundle(bundle: message_bundle): string {
@@ -75,6 +82,21 @@ export function archived_message_to_timeline_message(
         ? bundle.metadata.actor_display_name.trim() || 'action'
         : 'action'
 
+    const meta =
+      bundle.metadata && typeof bundle.metadata === 'object' && !Array.isArray(bundle.metadata)
+        ? (bundle.metadata as Record<string, unknown>)
+        : null
+    const raw_action = meta?.action
+    const timeline_support_kind: chat_room_timeline_support_kind | null =
+      raw_action === 'support_started' || raw_action === 'support_left'
+        ? raw_action
+        : null
+    const chat_action_uuid_raw = meta?.chat_action_uuid
+    const chat_action_uuid =
+      typeof chat_action_uuid_raw === 'string' && chat_action_uuid_raw.trim()
+        ? chat_action_uuid_raw.trim()
+        : null
+
     return {
       message_uuid: row.archive_uuid,
       room_uuid: row.room_uuid,
@@ -86,6 +108,9 @@ export function archived_message_to_timeline_message(
       sequence: row.sequence,
       bundle_type: bundle.bundle_type,
       inserted_at: row.inserted_at ?? null,
+      timeline_support_kind,
+      timeline_source: 'archive',
+      chat_action_uuid,
     }
   }
 
@@ -109,6 +134,9 @@ export function archived_message_to_timeline_message(
     sequence: row.sequence,
     bundle_type: bundle.bundle_type,
     inserted_at: row.inserted_at ?? null,
+    timeline_support_kind: null,
+    timeline_source: 'archive',
+    chat_action_uuid: null,
   }
 }
 
@@ -216,12 +244,91 @@ export function dedupe_chat_timeline_messages_by_uuid(
   return Array.from(by_uuid.values())
 }
 
+function timeline_created_at_sort_ms_local(
+  iso: string | null | undefined,
+): number {
+  if (!iso) {
+    return 0
+  }
+
+  const t = new Date(iso).getTime()
+
+  return Number.isNaN(t) ? 0 : t
+}
+
+function is_support_timeline_row(row: chat_room_timeline_message): boolean {
+  return (
+    row.timeline_support_kind === 'support_started' ||
+    row.timeline_support_kind === 'support_left'
+  )
+}
+
+/**
+ * Drops archived `room_action_log` support rows when a chat_actions row exists
+ * for the same room, kind, body text, and nearby created_at (initial + realtime).
+ */
+export function dedupe_support_timeline_parallel(
+  rows: chat_room_timeline_message[],
+): chat_room_timeline_message[] {
+  if (!rows.some(is_support_timeline_row)) {
+    return rows
+  }
+
+  const others = rows.filter((r) => !is_support_timeline_row(r))
+  const support = rows.filter(is_support_timeline_row)
+
+  const from_actions = support.filter((r) => r.timeline_source === 'chat_actions')
+  const from_archive = support.filter((r) => r.timeline_source !== 'chat_actions')
+
+  const by_action = new Map<string, chat_room_timeline_message>()
+
+  for (const r of from_actions) {
+    const key = (r.chat_action_uuid ?? r.message_uuid).trim()
+    const prev = by_action.get(key)
+
+    if (!prev) {
+      by_action.set(key, r)
+      continue
+    }
+
+    by_action.set(
+      key,
+      compare_timeline_messages_chronological(prev, r) <= 0 ? r : prev,
+    )
+  }
+
+  const unique_actions = Array.from(by_action.values())
+  const kept_archives: chat_room_timeline_message[] = []
+
+  for (const ar of from_archive) {
+    const shadowed = unique_actions.some(
+      (ca) =>
+        ca.room_uuid === ar.room_uuid &&
+        ca.timeline_support_kind === ar.timeline_support_kind &&
+        ca.text.trim() === ar.text.trim() &&
+        Math.abs(
+          timeline_created_at_sort_ms_local(ca.created_at) -
+            timeline_created_at_sort_ms_local(ar.created_at),
+        ) < 20_000,
+    )
+
+    if (shadowed) {
+      continue
+    }
+
+    kept_archives.push(ar)
+  }
+
+  return [...others, ...unique_actions, ...kept_archives]
+}
+
 export function normalize_chat_timeline_messages(
   rows: chat_room_timeline_message[],
 ): chat_room_timeline_message[] {
-  return dedupe_chat_timeline_messages_by_uuid(rows).sort(
-    compare_timeline_messages_chronological,
-  )
+  const uuid_pass = dedupe_chat_timeline_messages_by_uuid(rows)
+  const merged = dedupe_support_timeline_parallel(uuid_pass)
+
+  return merged.sort(compare_timeline_messages_chronological)
 }
 
 export function chat_timeline_time_bounds(rows: chat_room_timeline_message[]): {

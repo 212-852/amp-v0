@@ -200,6 +200,12 @@ export function resolve_debug_rule(input: {
     'admin_chat_realtime_payload_ignored',
     'enter_support_room_call_payload_built',
     'enter_support_room_skipped_missing_admin_identity',
+    'admin_reception_list_realtime_subscribe_started',
+    'admin_reception_list_message_received',
+    'admin_reception_list_message_card_updated',
+    'admin_reception_list_action_received',
+    'admin_reception_list_action_card_updated',
+    'admin_reception_list_cards_sorted',
   ])
 
   if (
@@ -719,6 +725,7 @@ export function resolve_debug_rule(input: {
     'support_action_realtime_payload_received',
     'support_action_realtime_rendered',
     'support_action_realtime_ignored',
+    'support_action_duplicate_skipped',
     'support_started_realtime_rendered',
     'admin_chat_room_rendered',
     'admin_chat_room_mounted',
