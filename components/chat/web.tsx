@@ -12,7 +12,6 @@ import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
 import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
-import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
 import {
   chat_action_to_archived_message,
   emit_chat_action_realtime_rendered,
@@ -500,26 +499,6 @@ export function WebChat({
     page_room_uuid && active_participant_uuid,
   )
 
-  const {
-    handle_typing: handle_realtime_typing,
-    handle_presence: handle_realtime_presence,
-    clear_peer_participant: clear_peer_typing_on_message,
-  } = use_typing_realtime({
-    owner: 'user',
-    room_uuid: page_room_uuid,
-    active_room_uuid: page_room_uuid,
-    enabled: message_realtime_enabled,
-    participant_uuid: active_participant_uuid,
-    user_uuid: session?.user_uuid ?? null,
-    role: 'user',
-    tier: session?.tier ?? null,
-    source_channel: session?.source_channel ?? 'web',
-    channel_subscribe: 'shared',
-    locale: normalize_locale(locale),
-    active_typing_identity_ref,
-    on_label_change: set_staff_typing_label,
-  })
-
   const handle_realtime_message = useCallback(
     (message: realtime_archived_message) => {
       if (
@@ -533,11 +512,7 @@ export function WebChat({
         }
       }
 
-      const sender_participant_uuid = message.sender_participant_uuid?.trim()
-
-      if (sender_participant_uuid) {
-        clear_peer_typing_on_message(sender_participant_uuid)
-      }
+      set_staff_typing_label(null)
 
       const update_result = append_realtime_message_ref.current(message)
 
@@ -547,7 +522,7 @@ export function WebChat({
         dedupe_hit: update_result.dedupe_hit,
       }
     },
-    [clear_peer_typing_on_message],
+    [set_staff_typing_label],
   )
 
   use_message_realtime({
@@ -560,12 +535,12 @@ export function WebChat({
     role: 'user',
     tier: session?.tier ?? null,
     source_channel: session?.source_channel ?? 'web',
-    include_typing_broadcast: true,
+    include_typing_broadcast: false,
     active_typing_identity_ref,
     export_messages_channel_ref: room_realtime_channel_ref,
     on_message: handle_realtime_message,
-    on_typing: handle_realtime_typing,
-    on_presence: handle_realtime_presence,
+    on_typing: () => {},
+    on_presence: () => {},
   })
 
   const handle_realtime_action = useCallback(

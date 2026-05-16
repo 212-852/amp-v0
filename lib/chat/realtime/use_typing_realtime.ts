@@ -450,6 +450,18 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
           : 'HOOK_DISABLED',
       ignored_reason: enabled ? null : 'typing_realtime_disabled',
     })
+
+    if (owner === 'user') {
+      send_chat_realtime_debug({
+        category: 'chat_realtime',
+        event: 'staff_typing_realtime_mounted',
+        owner,
+        room_uuid,
+        active_room_uuid,
+        subscribe_status: enabled ? 'HOOK_MOUNTED' : 'HOOK_DISABLED',
+        phase: 'use_typing_realtime_staff',
+      })
+    }
   }, [active_room_uuid, channel_subscribe, enabled, owner, room_uuid])
 
   useEffect(() => {

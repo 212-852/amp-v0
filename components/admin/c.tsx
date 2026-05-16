@@ -14,7 +14,11 @@ import {
   type timeline_item_duplicate_skip,
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
-import { send_room_typing_status } from '@/lib/chat/realtime/typing_client'
+import { send_staff_typing_status } from '@/lib/chat/realtime/staff_typing_action'
+import {
+  cleanup_chat_room_realtime,
+  subscribe_chat_room_typing_realtime,
+} from '@/lib/chat/realtime/client'
 import type { locale_key } from '@/lib/locale/action'
 import { get_locale, subscribe_locale } from '@/lib/locale/state'
 import {
@@ -211,6 +215,7 @@ export default function AdminChatTimeline({
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
   const local_messages_channel_ref = useRef<RealtimeChannel | null>(null)
+  const staff_typing_channel_ref = useRef<RealtimeChannel | null>(null)
   const messages_channel_ref =
     parent_messages_channel_ref ?? local_messages_channel_ref
   const [rows, set_rows] = useState<chat_room_timeline_message[]>(() =>
@@ -551,9 +556,65 @@ export default function AdminChatTimeline({
     update_jump_button_visibility(!near_bottom)
   }, [update_jump_button_visibility])
 
+  useEffect(() => {
+    const focus_room_uuid = room_uuid.trim()
+
+    if (!bubble_realtime_enabled || !focus_room_uuid || !typing_participant_uuid) {
+      return
+    }
+
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      return
+    }
+
+    const channel = subscribe_chat_room_typing_realtime({
+      supabase,
+      room_uuid: focus_room_uuid,
+      active_room_uuid: focus_room_uuid,
+      participant_uuid: typing_participant_uuid,
+      user_uuid: staff_user_uuid,
+      role: 'concierge',
+      tier: staff_tier,
+      source_channel: 'web',
+      listener_scope: 'admin_active',
+      on_typing: () => {},
+    })
+
+    staff_typing_channel_ref.current = channel
+
+    return () => {
+      cleanup_chat_room_realtime({
+        supabase,
+        channel,
+        room_uuid: focus_room_uuid,
+        active_room_uuid: focus_room_uuid,
+        participant_uuid: typing_participant_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'concierge',
+        tier: staff_tier,
+        source_channel: 'web',
+        cleanup_reason: 'admin_staff_typing_channel_cleanup',
+      })
+
+      if (staff_typing_channel_ref.current === channel) {
+        staff_typing_channel_ref.current = null
+      }
+    }
+  }, [
+    bubble_realtime_enabled,
+    room_uuid,
+    staff_tier,
+    staff_user_uuid,
+    typing_participant_uuid,
+  ])
+
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {
-      if (!room_uuid || !typing_participant_uuid) {
+      const admin_participant = admin_participant_uuid.trim()
+
+      if (!room_uuid || !admin_participant) {
         return
       }
 
@@ -569,17 +630,15 @@ export default function AdminChatTimeline({
         typing_active_ref.current = false
       }
 
-      send_room_typing_status({
+      send_staff_typing_status({
         room_uuid,
         active_room_uuid: room_uuid,
-        participant_uuid: typing_participant_uuid,
+        participant_uuid: admin_participant,
         user_uuid: staff_user_uuid,
         role: 'concierge',
-        tier: staff_tier,
-        display_name: staff_display_name,
         is_typing: action === 'typing_start',
         source_channel: 'web',
-        channel: messages_channel_ref.current,
+        channel: staff_typing_channel_ref.current,
         typing_phase:
           action === 'typing_start'
             ? is_heartbeat
@@ -588,13 +647,7 @@ export default function AdminChatTimeline({
             : undefined,
       })
     },
-    [
-      room_uuid,
-      typing_participant_uuid,
-      staff_display_name,
-      staff_tier,
-      staff_user_uuid,
-    ],
+    [admin_participant_uuid, room_uuid, staff_user_uuid],
   )
 
   useEffect(() => {

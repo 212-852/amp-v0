@@ -32,6 +32,8 @@ import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_deci
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 
+import { UserStaffTypingBridge } from '@/components/chat/user_staff_typing_bridge'
+
 type chat_room_client_state = {
   room_uuid: string | null
   participant_uuid: string | null
@@ -578,6 +580,9 @@ export function UserChatProvider({
     }
   }, [room_state.mode, scroll_to_bottom])
 
+  const active_room_uuid = (room_state.room_uuid ?? '').trim()
+  const active_participant_uuid = (room_state.participant_uuid ?? '').trim()
+
   const value = useMemo(
     () => ({
       ...room_state,
@@ -623,6 +628,14 @@ export function UserChatProvider({
 
   return (
     <UserChatContext.Provider value={value}>
+      {active_room_uuid && active_participant_uuid ? (
+        <UserStaffTypingBridge
+          room_uuid={active_room_uuid}
+          participant_uuid={active_participant_uuid}
+          locale={room_state.locale}
+          on_staff_typing_label_change={set_staff_typing_label}
+        />
+      ) : null}
       {children}
     </UserChatContext.Provider>
   )
