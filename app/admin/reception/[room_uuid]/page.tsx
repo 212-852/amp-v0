@@ -4,13 +4,13 @@ import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import { debug_event } from '@/lib/debug'
 import {
   list_reception_room_messages,
+  load_admin_reception_participant_uuid,
   read_reception_room,
   type reception_room,
   type reception_room_message,
 } from '@/lib/admin/reception/load_room'
 import { customer_display_name_fallback } from '@/lib/chat/identity/customer_display_name'
 import { list_handoff_memos, type handoff_memo } from '@/lib/chat/action'
-import { resolve_admin_reception_send_context } from '@/lib/chat/room'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
 import { mark_reception_room_read_for_admin } from '@/lib/chat/room/admin_unread'
 
@@ -101,13 +101,10 @@ export default async function AdminReceptionRoomPage({
     room_uuid,
     actor_admin_user_uuid: access.user_uuid,
   })
-  const send_context = await resolve_admin_reception_send_context({
+  const staff_participant_uuid = await load_admin_reception_participant_uuid({
     room_uuid,
     staff_user_uuid: access.user_uuid,
   })
-  const staff_participant_uuid = send_context.ok
-    ? send_context.data.staff_participant_uuid
-    : ''
   const pathname = `/admin/reception/${room_uuid}`
   const admin_user_uuid = access.user_uuid
   const admin_participant_uuid = staff_participant_uuid.trim()
@@ -143,6 +140,12 @@ export default async function AdminReceptionRoomPage({
 
   return (
     <>
+      <AdminReceptionLifecycle
+        room_uuid={lifecycle_room_uuid}
+        admin_user_uuid={admin_user_uuid}
+        admin_participant_uuid={admin_participant_uuid}
+      />
+
       <AdminReceptionVisible
         room={room}
         room_uuid={room_uuid}
@@ -156,12 +159,6 @@ export default async function AdminReceptionRoomPage({
         memos={to_client_json(memos)}
         messages={to_client_json(message_result.messages)}
         load_failed={!message_result.ok}
-      />
-
-      <AdminReceptionLifecycle
-        room_uuid={lifecycle_room_uuid}
-        admin_user_uuid={admin_user_uuid}
-        admin_participant_uuid={admin_participant_uuid}
       />
     </>
   )
