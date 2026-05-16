@@ -20,6 +20,7 @@ import {
 } from '@/lib/chat/realtime/client'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
+import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
 import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { RefObject } from 'react'
@@ -179,8 +180,12 @@ export default function AdminChatTimeline({
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
   const [show_jump_button, set_show_jump_button] = useState(false)
+  const [local_peer_typing_label, set_local_peer_typing_label] =
+    useState<string | null>(null)
   const publish_typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
+  const display_peer_typing_label =
+    local_peer_typing_label ?? peer_typing_label
 
   const staff_participant_uuid_ref = useRef(staff_participant_uuid)
 
@@ -244,16 +249,6 @@ export default function AdminChatTimeline({
         dedupe_hit: false,
       }
 
-      if (on_append_timeline_messages) {
-        const appended = on_append_timeline_messages([mapped])
-
-        return {
-          prev_count: appended.prev_count,
-          next_count: appended.next_count,
-          dedupe_hit: appended.dedupe_hit,
-        }
-      }
-
       set_rows((previous) => {
         const merged = merge_timeline_rows(previous, [mapped], 'realtime')
 
@@ -266,16 +261,41 @@ export default function AdminChatTimeline({
         return merged.rows
       })
 
+      if (on_append_timeline_messages) {
+        on_append_timeline_messages([mapped])
+      }
+
       return update_result
     },
     [on_append_timeline_messages],
   )
 
+  const bubble_realtime_enabled =
+    Boolean(room_uuid.trim()) && !disable_message_realtime
+
+  const {
+    handle_typing: handle_realtime_typing,
+    handle_presence: handle_realtime_presence,
+    emit_typing_status_sent,
+  } = use_typing_realtime({
+    owner: 'admin',
+    room_uuid,
+    active_room_uuid: room_uuid,
+    enabled: bubble_realtime_enabled,
+    participant_uuid: staff_participant_uuid,
+    user_uuid: staff_user_uuid,
+    role: 'admin',
+    tier: staff_tier,
+    source_channel: 'admin',
+    shared_messages_channel_ref: messages_channel_ref,
+    on_label_change: set_local_peer_typing_label,
+  })
+
   use_message_realtime({
     owner: 'admin',
     room_uuid,
     active_room_uuid: room_uuid,
-    enabled: Boolean(room_uuid.trim()) && !disable_message_realtime,
+    enabled: bubble_realtime_enabled,
     participant_uuid: staff_participant_uuid,
     user_uuid: staff_user_uuid,
     role: 'admin',
@@ -283,6 +303,8 @@ export default function AdminChatTimeline({
     source_channel: 'admin',
     export_messages_channel_ref: messages_channel_ref,
     on_message: handle_realtime_message,
+    on_typing: handle_realtime_typing,
+    on_presence: handle_realtime_presence,
   })
 
   useEffect(() => {
@@ -293,7 +315,7 @@ export default function AdminChatTimeline({
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [rows.length, peer_typing_label])
+  }, [display_peer_typing_label, rows.length])
 
   const update_jump_button_visibility = useCallback((visible: boolean) => {
     if (show_jump_button_ref.current === visible) {
@@ -360,9 +382,22 @@ export default function AdminChatTimeline({
           is_typing: action === 'typing_start',
           source_channel: 'admin',
         })
+
+        emit_typing_status_sent({
+          participant_uuid: staff_participant_uuid,
+          is_typing: action === 'typing_start',
+          source_channel: 'admin',
+        })
       }
     },
-    [room_uuid, staff_display_name, staff_participant_uuid, staff_tier, staff_user_uuid],
+    [
+      emit_typing_status_sent,
+      room_uuid,
+      staff_display_name,
+      staff_participant_uuid,
+      staff_tier,
+      staff_user_uuid,
+    ],
   )
 
   useEffect(() => {
@@ -523,9 +558,9 @@ export default function AdminChatTimeline({
             })}
           </ol>
         )}
-        {peer_typing_label ? (
+        {display_peer_typing_label ? (
           <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-center text-[12px] font-medium text-neutral-600">
-            {peer_typing_label}
+            {display_peer_typing_label}
           </div>
         ) : null}
           <div ref={bottom_ref} className="h-1" aria-hidden="true" />

@@ -136,7 +136,7 @@ export default function AdminReceptionActiveSummary({
       role: 'admin',
       tier: staff_tier,
       source_channel: 'admin',
-      listener_scope: 'admin_active',
+      listener_scope: 'admin_summary',
       on_message: () => {},
       on_typing: () => {},
       on_presence: (presence) => {

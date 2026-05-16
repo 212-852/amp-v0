@@ -50,6 +50,7 @@ export function chat_room_realtime_channel_name(room_uuid: string) {
 export type chat_realtime_listener_scope =
   | 'default'
   | 'admin_list'
+  | 'admin_summary'
   | 'admin_active'
   | 'user_active'
 
@@ -60,6 +61,10 @@ export function chat_realtime_postgres_channel_name(
 ) {
   if (scope === 'admin_list') {
     return `admin_room_list:${room_uuid}`
+  }
+
+  if (scope === 'admin_summary') {
+    return `admin_room_summary:${room_uuid}`
   }
 
   if (scope === 'admin_active' || scope === 'user_active') {

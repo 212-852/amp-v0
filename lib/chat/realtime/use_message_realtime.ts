@@ -149,7 +149,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
   const source_channel =
     input.source_channel ?? (owner === 'admin' ? 'admin' : 'web')
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!enabled) {
       return
     }

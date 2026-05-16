@@ -187,11 +187,11 @@ export function peer_typing_label_for_admin(
   }
 
   if (user_typing) {
-    return 'ユーザー入力中...'
+    return 'ユーザー入力中'
   }
 
   if (staff_typing) {
-    return 'スタッフ入力中...'
+    return 'スタッフ入力中'
   }
 
   return null
@@ -223,7 +223,7 @@ export function peer_typing_label_for_user(
         now,
       })
     ) {
-      return 'スタッフ入力中...'
+      return 'スタッフ入力中'
     }
   }
 

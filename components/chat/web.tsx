@@ -14,18 +14,6 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { useUserChat } from '@/components/chat/context'
 import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
-import type {
-  chat_presence_payload,
-  chat_typing_payload,
-} from '@/lib/chat/realtime/client'
-import {
-  clear_peer_typing_participant,
-  handle_presence_typing_for_ui,
-  handle_typing_broadcast_for_ui,
-  peer_typing_label_for_user,
-  schedule_peer_typing_sweep,
-  type peer_typing_row,
-} from '@/lib/chat/realtime/typing_ui'
 import {
   chat_action_to_archived_message,
   emit_chat_action_realtime_rendered,
@@ -37,6 +25,7 @@ import {
   subscribe_chat_actions_realtime,
 } from '@/lib/chat/realtime/chat_actions'
 import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
+import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
@@ -411,15 +400,45 @@ type web_chat_message_timeline_props = {
     next_count: number
     dedupe_hit: boolean
   }
-  on_typing: (typing: chat_typing_payload) => void
-  on_presence: (presence: chat_presence_payload) => void
   visible_messages: archived_message[]
-  typing_banner: string | null
   set_scroll_container: (node: HTMLDivElement | null) => void
+  on_typing_banner_change?: (label: string | null) => void
   scroll_spacer?: ReactNode
 }
 
 function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
+  const [typing_banner, set_typing_banner] = useState<string | null>(null)
+
+  const {
+    handle_typing,
+    handle_presence,
+    clear_peer_participant,
+  } = use_typing_realtime({
+    owner: 'user',
+    room_uuid: props.room_uuid,
+    active_room_uuid: props.active_room_uuid,
+    enabled: props.enabled,
+    participant_uuid: props.participant_uuid,
+    user_uuid: props.user_uuid,
+    role: 'user',
+    tier: props.tier,
+    source_channel: props.source_channel,
+    shared_messages_channel_ref: props.export_messages_channel_ref,
+    active_typing_identity_ref: props.active_typing_identity_ref,
+    on_label_change: set_typing_banner,
+  })
+
+  const handle_message = useCallback(
+    (message: realtime_archived_message) => {
+      if (message.sender_participant_uuid) {
+        clear_peer_participant(message.sender_participant_uuid)
+      }
+
+      return props.on_message(message)
+    },
+    [clear_peer_participant, props.on_message],
+  )
+
   use_message_realtime({
     owner: 'user',
     room_uuid: props.room_uuid,
@@ -432,10 +451,14 @@ function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
     source_channel: props.source_channel,
     active_typing_identity_ref: props.active_typing_identity_ref,
     export_messages_channel_ref: props.export_messages_channel_ref,
-    on_message: props.on_message,
-    on_typing: props.on_typing,
-    on_presence: props.on_presence,
+    on_message: handle_message,
+    on_typing: handle_typing,
+    on_presence: handle_presence,
   })
+
+  useEffect(() => {
+    props.on_typing_banner_change?.(typing_banner)
+  }, [props.on_typing_banner_change, typing_banner])
 
   return (
     <div
@@ -447,9 +470,9 @@ function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
           <WebChatMessageRow key={message.archive_uuid} message={message} />
         ))}
       </div>
-      {props.typing_banner ? (
+      {typing_banner ? (
         <div className="px-5 pb-2 pt-4 text-center text-[12px] font-medium text-[#8a7568]">
-          {props.typing_banner}
+          {typing_banner}
         </div>
       ) : null}
       {props.scroll_spacer ?? (
@@ -516,8 +539,7 @@ export function WebChat({
   })
 
   const did_initial_scroll_ref = useRef(false)
-  const peer_typing_map_ref = useRef<Map<string, peer_typing_row>>(new Map())
-  const [typing_banner, set_typing_banner] = useState<string | null>(null)
+  const typing_banner_ref = useRef<string | null>(null)
 
   useEffect(() => {
     append_realtime_message_ref.current = append_realtime_message
@@ -560,19 +582,6 @@ export function WebChat({
       }
 
       const dbg = web_rt_ctx_ref.current
-      if (message.sender_participant_uuid) {
-        clear_peer_typing_participant(
-          peer_typing_map_ref.current,
-          message.sender_participant_uuid,
-        )
-        set_typing_banner(
-          peer_typing_label_for_user(
-            peer_typing_map_ref.current,
-            self_participant_uuid_ref.current,
-          ),
-        )
-      }
-
       const near_bottom_before = get_message_list_near_bottom()
       const update_result = append_realtime_message_ref.current(message)
 
@@ -648,50 +657,17 @@ export function WebChat({
     [get_message_list_near_bottom, scroll_to_bottom],
   )
 
-  const handle_realtime_typing = useCallback(
-    (typing: chat_typing_payload) => {
-      handle_typing_broadcast_for_ui({
-        owner: 'user',
-        room_uuid,
-        map: peer_typing_map_ref.current,
-        typing,
-        self_participant_uuid: participant_uuid,
-        on_label_change: set_typing_banner,
-        resolve_label: peer_typing_label_for_user,
-      })
-      schedule_peer_typing_sweep({
-        owner: 'user',
-        room_uuid,
-        map: peer_typing_map_ref.current,
-        self_participant_uuid: participant_uuid,
-        on_label_change: set_typing_banner,
-        resolve_label: peer_typing_label_for_user,
-      })
-    },
-    [participant_uuid, room_uuid],
-  )
+  const handle_typing_banner_change = useCallback(
+    (label: string | null) => {
+      typing_banner_ref.current = label
 
-  const handle_realtime_presence = useCallback(
-    (presence: chat_presence_payload) => {
-      handle_presence_typing_for_ui({
-        owner: 'user',
-        room_uuid,
-        map: peer_typing_map_ref.current,
-        presence,
-        self_participant_uuid: participant_uuid,
-        on_label_change: set_typing_banner,
-        resolve_label: peer_typing_label_for_user,
-      })
-      schedule_peer_typing_sweep({
-        owner: 'user',
-        room_uuid,
-        map: peer_typing_map_ref.current,
-        self_participant_uuid: participant_uuid,
-        on_label_change: set_typing_banner,
-        resolve_label: peer_typing_label_for_user,
-      })
+      if (!label) {
+        return
+      }
+
+      scroll_to_bottom('smooth')
     },
-    [participant_uuid, room_uuid],
+    [scroll_to_bottom],
   )
 
   useEffect(() => {
@@ -791,14 +767,6 @@ export function WebChat({
     scroll_to_bottom('smooth')
   }, [render_messages.length, scroll_to_bottom])
 
-  useEffect(() => {
-    if (!typing_banner) {
-      return
-    }
-
-    scroll_to_bottom('smooth')
-  }, [scroll_to_bottom, typing_banner])
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <WebChatMessageTimeline
@@ -812,11 +780,9 @@ export function WebChat({
         active_typing_identity_ref={active_typing_identity_ref}
         export_messages_channel_ref={room_realtime_channelRef}
         on_message={handle_realtime_message}
-        on_typing={handle_realtime_typing}
-        on_presence={handle_realtime_presence}
         visible_messages={visible_messages}
-        typing_banner={typing_banner}
         set_scroll_container={set_scroll_container}
+        on_typing_banner_change={handle_typing_banner_change}
       />
     </div>
   )
