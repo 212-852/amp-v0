@@ -17,14 +17,53 @@ import type { message_bundle } from '@/lib/chat/message'
 import { send_room_typing_status } from '@/lib/chat/realtime/typing_client'
 import type { locale_key } from '@/lib/locale/action'
 import { get_locale, subscribe_locale } from '@/lib/locale/state'
-import type { realtime_archived_message } from '@/lib/chat/realtime/row'
-import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
+import {
+  archived_message_from_message_row,
+  type message_insert_row,
+  type realtime_archived_message,
+} from '@/lib/chat/realtime/row'
 import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
 import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
+import { create_browser_supabase } from '@/lib/db/browser'
+import { send_chat_realtime_debug } from '@/lib/chat/realtime/client'
+import { resolve_realtime_message_channels } from '@/lib/chat/realtime/messages_client'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { RefObject } from 'react'
 
 const component_file = 'components/admin/c.tsx'
+
+function emit_admin_message_realtime_debug(
+  event: string,
+  payload: {
+    room_uuid?: string | null
+    active_room_uuid?: string | null
+    message_uuid?: string | null
+    source_channel?: string | null
+    direction?: string | null
+    subscribe_status?: string | null
+    error_message?: string | null
+    ignored_reason?: string | null
+    prev_count?: number | null
+    next_count?: number | null
+  },
+) {
+  send_chat_realtime_debug({
+    category: 'chat_realtime',
+    event,
+    owner: 'admin',
+    room_uuid: payload.room_uuid ?? null,
+    active_room_uuid: payload.active_room_uuid ?? payload.room_uuid ?? null,
+    message_uuid: payload.message_uuid ?? null,
+    source_channel: payload.source_channel ?? null,
+    direction: payload.direction ?? null,
+    subscribe_status: payload.subscribe_status ?? null,
+    error_message: payload.error_message ?? null,
+    ignored_reason: payload.ignored_reason ?? null,
+    prev_count: payload.prev_count ?? null,
+    next_count: payload.next_count ?? null,
+    phase: component_file,
+  })
+}
 
 type AdminChatTimelineProps = {
   messages: chat_room_timeline_message[]
@@ -312,11 +351,7 @@ export default function AdminChatTimeline({
     [on_append_timeline_messages],
   )
 
-  const {
-    handle_typing: handle_realtime_typing,
-    handle_presence: handle_realtime_presence,
-    clear_peer_participant: clear_peer_typing_on_message,
-  } = use_typing_realtime({
+  const { clear_peer_participant: clear_peer_typing_on_message } = use_typing_realtime({
     owner: 'admin',
     room_uuid,
     active_room_uuid: room_uuid,
@@ -326,37 +361,168 @@ export default function AdminChatTimeline({
     role: 'concierge',
     tier: staff_tier,
     source_channel: 'web',
-    channel_subscribe: 'shared',
+    channel_subscribe: 'standalone',
     locale: ui_locale,
     active_typing_identity_ref,
     on_label_change: set_local_peer_typing_label,
   })
 
-  use_message_realtime({
-    owner: 'admin',
-    room_uuid,
-    active_room_uuid: room_uuid,
-    enabled: bubble_realtime_enabled,
-    participant_uuid: staff_participant_uuid,
-    user_uuid: staff_user_uuid,
-    role: 'admin',
-    tier: staff_tier,
-    source_channel: 'admin',
-    include_typing_broadcast: true,
-    active_typing_identity_ref,
-    export_messages_channel_ref: messages_channel_ref,
-    on_message: (archived) => {
-      const sender_participant_uuid = archived.sender_participant_uuid?.trim()
+  useEffect(() => {
+    const focus_room_uuid = room_uuid.trim()
 
-      if (sender_participant_uuid) {
-        clear_peer_typing_on_message(sender_participant_uuid)
+    emit_admin_message_realtime_debug('message_realtime_mounted', {
+      room_uuid: focus_room_uuid || null,
+      active_room_uuid: focus_room_uuid || null,
+      subscribe_status: 'HOOK_MOUNTED',
+    })
+
+    if (!bubble_realtime_enabled || !focus_room_uuid) {
+      emit_admin_message_realtime_debug('message_realtime_subscribe_status', {
+        room_uuid: focus_room_uuid || null,
+        active_room_uuid: focus_room_uuid || null,
+        subscribe_status: bubble_realtime_enabled
+          ? 'DEFERRED_NO_ROOM_UUID'
+          : 'DISABLED',
+      })
+
+      return
+    }
+
+    emit_admin_message_realtime_debug('message_realtime_subscribe_started', {
+      room_uuid: focus_room_uuid,
+      active_room_uuid: focus_room_uuid,
+      subscribe_status: 'SUBSCRIBE_REQUESTED',
+    })
+
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      emit_admin_message_realtime_debug('message_realtime_subscribe_status', {
+        room_uuid: focus_room_uuid,
+        active_room_uuid: focus_room_uuid,
+        subscribe_status: 'SUPABASE_CLIENT_UNAVAILABLE',
+        error_message: 'create_browser_supabase_returned_null',
+      })
+
+      return
+    }
+
+    const postgres_filter = `room_uuid=eq.${focus_room_uuid}`
+    const channel_name = `message_realtime:admin_active:${focus_room_uuid}`
+
+    const channel = supabase
+      .channel(channel_name)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: postgres_filter,
+        },
+        (payload) => {
+          const row = payload.new as message_insert_row
+          const payload_room_uuid =
+            typeof row?.room_uuid === 'string' ? row.room_uuid.trim() : ''
+          const message_uuid =
+            typeof row?.message_uuid === 'string' ? row.message_uuid : null
+          const archived = archived_message_from_message_row(row)
+          const channels = archived
+            ? resolve_realtime_message_channels(archived)
+            : { source_channel: null, direction: null }
+
+          emit_admin_message_realtime_debug('message_realtime_payload_received', {
+            room_uuid: focus_room_uuid,
+            active_room_uuid: focus_room_uuid,
+            message_uuid: message_uuid ?? archived?.archive_uuid ?? null,
+            source_channel: channels.source_channel,
+            direction: channels.direction,
+          })
+
+          if (payload_room_uuid && payload_room_uuid !== focus_room_uuid) {
+            emit_admin_message_realtime_debug('message_realtime_payload_ignored', {
+              room_uuid: focus_room_uuid,
+              active_room_uuid: focus_room_uuid,
+              message_uuid: message_uuid ?? archived?.archive_uuid ?? null,
+              source_channel: channels.source_channel,
+              direction: channels.direction,
+              ignored_reason: 'payload_room_uuid_mismatch',
+            })
+
+            return
+          }
+
+          if (!archived) {
+            emit_admin_message_realtime_debug('message_realtime_payload_ignored', {
+              room_uuid: focus_room_uuid,
+              active_room_uuid: focus_room_uuid,
+              message_uuid,
+              ignored_reason: 'unparseable_message_row',
+            })
+
+            return
+          }
+
+          emit_admin_message_realtime_debug('message_realtime_payload_accepted', {
+            room_uuid: focus_room_uuid,
+            active_room_uuid: focus_room_uuid,
+            message_uuid: archived.archive_uuid,
+            source_channel: channels.source_channel,
+            direction: channels.direction,
+          })
+
+          const sender_participant_uuid = archived.sender_participant_uuid?.trim()
+
+          if (sender_participant_uuid) {
+            clear_peer_typing_on_message(sender_participant_uuid)
+          }
+
+          const update_result = handle_realtime_message(archived)
+
+          if (!update_result.dedupe_hit) {
+            emit_admin_message_realtime_debug('message_realtime_rendered', {
+              room_uuid: focus_room_uuid,
+              active_room_uuid: focus_room_uuid,
+              message_uuid: archived.archive_uuid,
+              source_channel: channels.source_channel,
+              direction: channels.direction,
+              prev_count: update_result.prev_count,
+              next_count: update_result.next_count,
+            })
+          }
+        },
+      )
+      .subscribe((status, err) => {
+        emit_admin_message_realtime_debug('message_realtime_subscribe_status', {
+          room_uuid: focus_room_uuid,
+          active_room_uuid: focus_room_uuid,
+          subscribe_status: status,
+          error_message: err ? String(err) : null,
+        })
+      })
+
+    messages_channel_ref.current = channel
+
+    return () => {
+      emit_admin_message_realtime_debug('message_realtime_subscribe_status', {
+        room_uuid: focus_room_uuid,
+        active_room_uuid: focus_room_uuid,
+        subscribe_status: 'CLEANUP',
+      })
+
+      void supabase.removeChannel(channel)
+
+      if (messages_channel_ref.current === channel) {
+        messages_channel_ref.current = null
       }
-
-      return handle_realtime_message(archived)
-    },
-    on_typing: handle_realtime_typing,
-    on_presence: handle_realtime_presence,
-  })
+    }
+  }, [
+    bubble_realtime_enabled,
+    clear_peer_typing_on_message,
+    handle_realtime_message,
+    messages_channel_ref,
+    room_uuid,
+  ])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {

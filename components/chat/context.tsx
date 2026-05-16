@@ -18,10 +18,16 @@ import {
   archived_messages_time_bounds,
   normalize_archived_messages,
 } from '@/lib/chat/messages_normalize'
+import { create_browser_supabase } from '@/lib/db/browser'
 import {
   chat_room_realtime_channel_name,
   send_chat_realtime_debug,
 } from '@/lib/chat/realtime/client'
+import { resolve_realtime_message_channels } from '@/lib/chat/realtime/messages_client'
+import {
+  archived_message_from_message_row,
+  type message_insert_row,
+} from '@/lib/chat/realtime/row'
 import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
@@ -34,6 +40,40 @@ type chat_room_client_state = {
 }
 
 const user_chat_merge_debug_source_channel = 'user_chat_context'
+const user_message_realtime_component = 'components/chat/context.tsx'
+
+function emit_user_message_realtime_debug(
+  event: string,
+  payload: {
+    room_uuid?: string | null
+    active_room_uuid?: string | null
+    message_uuid?: string | null
+    source_channel?: string | null
+    direction?: string | null
+    subscribe_status?: string | null
+    error_message?: string | null
+    ignored_reason?: string | null
+    prev_count?: number | null
+    next_count?: number | null
+  },
+) {
+  send_chat_realtime_debug({
+    category: 'chat_realtime',
+    event,
+    owner: 'user',
+    room_uuid: payload.room_uuid ?? null,
+    active_room_uuid: payload.active_room_uuid ?? payload.room_uuid ?? null,
+    message_uuid: payload.message_uuid ?? null,
+    source_channel: payload.source_channel ?? null,
+    direction: payload.direction ?? null,
+    subscribe_status: payload.subscribe_status ?? null,
+    error_message: payload.error_message ?? null,
+    ignored_reason: payload.ignored_reason ?? null,
+    prev_count: payload.prev_count ?? null,
+    next_count: payload.next_count ?? null,
+    phase: user_message_realtime_component,
+  })
+}
 
 type chat_context_value = chat_room_client_state & {
   messages: archived_message[]
@@ -337,6 +377,184 @@ export function UserChatProvider({
     },
     [],
   )
+
+  useEffect(() => {
+    const focus_room_uuid = (room_state.room_uuid ?? '').trim()
+    const active_room_uuid = focus_room_uuid
+
+    emit_user_message_realtime_debug('message_realtime_mounted', {
+      room_uuid: focus_room_uuid || null,
+      active_room_uuid: active_room_uuid || null,
+      subscribe_status: 'HOOK_MOUNTED',
+    })
+
+    if (!focus_room_uuid) {
+      emit_user_message_realtime_debug('message_realtime_subscribe_status', {
+        room_uuid: null,
+        active_room_uuid: null,
+        subscribe_status: 'DEFERRED_NO_ROOM_UUID',
+      })
+
+      return
+    }
+
+    emit_user_message_realtime_debug('message_realtime_subscribe_started', {
+      room_uuid: focus_room_uuid,
+      active_room_uuid: focus_room_uuid,
+      subscribe_status: 'SUBSCRIBE_REQUESTED',
+    })
+
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      emit_user_message_realtime_debug('message_realtime_subscribe_status', {
+        room_uuid: focus_room_uuid,
+        active_room_uuid: focus_room_uuid,
+        subscribe_status: 'SUPABASE_CLIENT_UNAVAILABLE',
+        error_message: 'create_browser_supabase_returned_null',
+      })
+
+      return
+    }
+
+    const postgres_filter = `room_uuid=eq.${focus_room_uuid}`
+    const channel_name = `message_realtime:user_active:${focus_room_uuid}`
+
+    const channel = supabase
+      .channel(channel_name)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: postgres_filter,
+        },
+        (payload) => {
+          const row = payload.new as message_insert_row
+          const payload_room_uuid =
+            typeof row?.room_uuid === 'string' ? row.room_uuid.trim() : ''
+          const message_uuid =
+            typeof row?.message_uuid === 'string' ? row.message_uuid : null
+
+          const archived = archived_message_from_message_row(row)
+
+          const channels = archived
+            ? resolve_realtime_message_channels(archived)
+            : { source_channel: null, direction: null }
+
+          emit_user_message_realtime_debug('message_realtime_payload_received', {
+            room_uuid: focus_room_uuid,
+            active_room_uuid: focus_room_uuid,
+            message_uuid: message_uuid ?? archived?.archive_uuid ?? null,
+            source_channel: channels.source_channel,
+            direction: channels.direction,
+          })
+
+          if (payload_room_uuid && payload_room_uuid !== focus_room_uuid) {
+            emit_user_message_realtime_debug('message_realtime_payload_ignored', {
+              room_uuid: focus_room_uuid,
+              active_room_uuid: focus_room_uuid,
+              message_uuid: message_uuid ?? archived?.archive_uuid ?? null,
+              source_channel: channels.source_channel,
+              direction: channels.direction,
+              ignored_reason: 'payload_room_uuid_mismatch',
+            })
+
+            return
+          }
+
+          if (!archived) {
+            emit_user_message_realtime_debug('message_realtime_payload_ignored', {
+              room_uuid: focus_room_uuid,
+              active_room_uuid: focus_room_uuid,
+              message_uuid,
+              ignored_reason: 'unparseable_message_row',
+            })
+
+            return
+          }
+
+          emit_user_message_realtime_debug('message_realtime_payload_accepted', {
+            room_uuid: focus_room_uuid,
+            active_room_uuid: focus_room_uuid,
+            message_uuid: archived.archive_uuid,
+            source_channel: channels.source_channel,
+            direction: channels.direction,
+          })
+
+          let render_result = {
+            prev_count: 0,
+            next_count: 0,
+            dedupe_hit: true,
+          }
+
+          set_messages((current) => {
+            const dedupe_hit = current.some(
+              (item) => item.archive_uuid === archived.archive_uuid,
+            )
+
+            if (dedupe_hit) {
+              render_result = {
+                prev_count: current.length,
+                next_count: current.length,
+                dedupe_hit: true,
+              }
+
+              return current
+            }
+
+            const next = normalize_archived_messages([...current, archived])
+
+            render_result = {
+              prev_count: current.length,
+              next_count: next.length,
+              dedupe_hit: false,
+            }
+
+            return next
+          })
+
+          if (!render_result.dedupe_hit) {
+            emit_user_message_realtime_debug('message_realtime_rendered', {
+              room_uuid: focus_room_uuid,
+              active_room_uuid: focus_room_uuid,
+              message_uuid: archived.archive_uuid,
+              source_channel: channels.source_channel,
+              direction: channels.direction,
+              prev_count: render_result.prev_count,
+              next_count: render_result.next_count,
+            })
+
+            window.setTimeout(() => scroll_to_bottom('smooth'), 0)
+          }
+        },
+      )
+      .subscribe((status, err) => {
+        emit_user_message_realtime_debug('message_realtime_subscribe_status', {
+          room_uuid: focus_room_uuid,
+          active_room_uuid: focus_room_uuid,
+          subscribe_status: status,
+          error_message: err ? String(err) : null,
+        })
+      })
+
+    room_realtime_channel_ref.current = channel
+
+    return () => {
+      emit_user_message_realtime_debug('message_realtime_subscribe_status', {
+        room_uuid: focus_room_uuid,
+        active_room_uuid: focus_room_uuid,
+        subscribe_status: 'CLEANUP',
+      })
+
+      void supabase.removeChannel(channel)
+
+      if (room_realtime_channel_ref.current === channel) {
+        room_realtime_channel_ref.current = null
+      }
+    }
+  }, [room_state.room_uuid, scroll_to_bottom])
 
   useEffect(() => {
     if (room_state.mode !== 'concierge') {
