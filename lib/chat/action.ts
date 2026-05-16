@@ -2439,6 +2439,7 @@ export type admin_reception_room_open_request_body = {
   room_uuid?: string | null
   admin_user_uuid?: string | null
   admin_participant_uuid?: string | null
+  trigger_source?: string | null
 }
 
 async function latest_admin_support_action(input: {
@@ -2452,6 +2453,7 @@ async function latest_admin_support_action(input: {
   actor_display_name: string | null
   actor_user_uuid: string | null
   source_channel: string | null
+  existing_action_count: number
 } | null> {
   const picked = await supabase
     .from(public_actions_table_name())
@@ -2462,14 +2464,13 @@ async function latest_admin_support_action(input: {
     .eq('actor_participant_uuid', input.admin_participant_uuid)
     .in('action_type', ['support_started', 'support_left'])
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .limit(20)
 
   if (picked.error) {
     return null
   }
 
-  const row = picked.data as {
+  const rows = (picked.data ?? []) as Array<{
     action_uuid?: unknown
     action_type?: unknown
     body?: unknown
@@ -2477,7 +2478,8 @@ async function latest_admin_support_action(input: {
     actor_display_name?: unknown
     actor_user_uuid?: unknown
     source_channel?: unknown
-  } | null
+  }>
+  const row = rows[0] ?? null
 
   if (!row) {
     return null
@@ -2499,6 +2501,7 @@ async function latest_admin_support_action(input: {
       typeof row.actor_user_uuid === 'string' ? row.actor_user_uuid : null,
     source_channel:
       typeof row.source_channel === 'string' ? row.source_channel : null,
+    existing_action_count: rows.length,
   }
 }
 
@@ -2506,6 +2509,10 @@ export async function handle_admin_reception_room_opened(
   body: admin_reception_room_open_request_body | null,
 ): Promise<{ status: number; body: admin_reception_room_open_result }> {
   const room_uuid = clean_uuid(body?.room_uuid ?? null)
+  const trigger_source =
+    typeof body?.trigger_source === 'string' && body.trigger_source.trim()
+      ? body.trigger_source.trim()
+      : null
 
   if (!room_uuid) {
     return {
@@ -2664,19 +2671,30 @@ export async function handle_admin_reception_room_opened(
           ? room_mode_row.data.mode
           : null
 
+      const duplicate_payload = {
+        room_uuid,
+        admin_user_uuid: admin_uuid,
+        admin_participant_uuid,
+        support_mode: support_mode_dup,
+        action_uuid: latest_support.action_uuid,
+        existing_action_uuid: latest_support.action_uuid,
+        existing_action_count: latest_support.existing_action_count,
+        created_at: latest_support.created_at,
+        skipped_reason: 'latest_support_started_without_later_left',
+        trigger_source,
+        reason: 'latest_support_started_without_later_left',
+      }
+
+      await debug_event({
+        category: 'admin_chat',
+        event: 'support_started_existing_active_found',
+        payload: duplicate_payload,
+      })
+
       await debug_event({
         category: 'admin_chat',
         event: 'support_started_duplicate_skipped',
-        payload: {
-          room_uuid,
-          admin_user_uuid: admin_uuid,
-          admin_participant_uuid,
-          support_mode: support_mode_dup,
-          action_uuid: latest_support.action_uuid,
-          created_at: latest_support.created_at,
-          skipped_reason: 'latest_support_started_without_later_left',
-          reason: 'latest_support_started_without_later_left',
-        },
+        payload: duplicate_payload,
       })
 
       return {
@@ -2719,6 +2737,7 @@ export async function handle_admin_reception_room_opened(
       discord_thread_id: null,
       error_code: null,
       error_message: null,
+      trigger_source,
     },
   })
 
@@ -2915,6 +2934,7 @@ export async function handle_admin_reception_room_opened(
     error_code: null,
     error_message: null,
     phase: 'actions_table_insert',
+    trigger_source,
   }
 
   await debug_event({
@@ -2936,6 +2956,9 @@ export async function handle_admin_reception_room_opened(
         'source_channel',
         'visibility',
       ],
+      existing_action_uuid: null,
+      existing_action_count: 0,
+      trigger_source,
     },
   })
 
@@ -3009,6 +3032,9 @@ export async function handle_admin_reception_room_opened(
       payload: {
         room_uuid,
         action_uuid,
+        created_action_uuid: action_uuid,
+        existing_action_uuid: null,
+        existing_action_count: 0,
         ...support_started_debug_participants,
         insert_payload_keys: inserted.insert_payload_keys,
       },

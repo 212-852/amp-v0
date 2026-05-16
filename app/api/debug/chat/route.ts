@@ -97,6 +97,9 @@ type chat_debug_body = {
   action_uuid?: unknown
   support_session_key?: unknown
   existing_left_action_uuid?: unknown
+  existing_action_uuid?: unknown
+  existing_action_count?: unknown
+  created_action_uuid?: unknown
   event_type?: unknown
   actor_name?: unknown
   inserted_index?: unknown
@@ -108,6 +111,9 @@ type chat_debug_body = {
   previous_room_uuid?: unknown
   next_room_uuid?: unknown
   leave_reason?: unknown
+  trigger_source?: unknown
+  stack_hint?: unknown
+  timestamp?: unknown
   reason?: unknown
   pathname?: unknown
   action_type?: unknown
@@ -261,6 +267,9 @@ export async function POST(request: Request) {
       action_uuid: string_or_null(body?.action_uuid),
       support_session_key: string_or_null(body?.support_session_key),
       existing_left_action_uuid: string_or_null(body?.existing_left_action_uuid),
+      existing_action_uuid: string_or_null(body?.existing_action_uuid),
+      existing_action_count: number_or_null(body?.existing_action_count),
+      created_action_uuid: string_or_null(body?.created_action_uuid),
       event_type: string_or_null(body?.event_type),
       actor_name: string_or_null(body?.actor_name),
       inserted_index: number_or_null(body?.inserted_index),
@@ -271,6 +280,9 @@ export async function POST(request: Request) {
       previous_room_uuid: string_or_null(body?.previous_room_uuid),
       next_room_uuid: string_or_null(body?.next_room_uuid),
       leave_reason: string_or_null(body?.leave_reason),
+      trigger_source: string_or_null(body?.trigger_source),
+      stack_hint: string_or_null(body?.stack_hint),
+      timestamp: string_or_null(body?.timestamp),
       reason: string_or_null(body?.reason),
       pathname: string_or_null(body?.pathname),
       action_type: string_or_null(body?.action_type),

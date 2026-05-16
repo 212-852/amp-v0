@@ -27,7 +27,14 @@ export function send_admin_chat_debug(input: {
   action_uuid?: string | null
   support_session_key?: string | null
   existing_left_action_uuid?: string | null
+  existing_action_uuid?: string | null
+  existing_action_count?: number | null
+  created_action_uuid?: string | null
   leave_reason?: string | null
+  trigger_source?: string | null
+  stack_hint?: string | null
+  timestamp?: string | null
+  skipped_reason?: string | null
   filter?: string | null
   phase?: string | null
   item_key?: string | null
@@ -72,7 +79,14 @@ export function send_admin_chat_debug(input: {
       action_uuid: input.action_uuid ?? null,
       support_session_key: input.support_session_key ?? null,
       existing_left_action_uuid: input.existing_left_action_uuid ?? null,
+      existing_action_uuid: input.existing_action_uuid ?? null,
+      existing_action_count: input.existing_action_count ?? null,
+      created_action_uuid: input.created_action_uuid ?? null,
       leave_reason: input.leave_reason ?? null,
+      trigger_source: input.trigger_source ?? null,
+      stack_hint: input.stack_hint ?? null,
+      timestamp: input.timestamp ?? null,
+      skipped_reason: input.skipped_reason ?? null,
       filter: input.filter ?? null,
       phase: input.phase ?? null,
       item_key: input.item_key ?? input.ignored_reason ?? null,

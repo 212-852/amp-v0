@@ -94,6 +94,10 @@ export async function enter_support_room(request: Request) {
       ? raw.admin_participant_uuid
       : null,
   )
+  const trigger_source =
+    typeof raw?.trigger_source === 'string' && raw.trigger_source.trim()
+      ? raw.trigger_source.trim()
+      : null
 
   await debug_event({
     category: 'admin_chat',
@@ -106,6 +110,7 @@ export async function enter_support_room(request: Request) {
       admin_user_uuid: request_admin_user_uuid,
       admin_participant_uuid: request_admin_participant_uuid,
       reason: 'api_reception_open',
+      trigger_source,
       error_code: null,
       error_message: null,
     },
@@ -116,6 +121,7 @@ export async function enter_support_room(request: Request) {
       room_uuid: room_uuid ?? null,
       admin_user_uuid: request_admin_user_uuid,
       admin_participant_uuid: request_admin_participant_uuid,
+      trigger_source,
     })
     const skipped = result.body.ok === true && result.body.skipped === true
 
@@ -129,6 +135,7 @@ export async function enter_support_room(request: Request) {
         next_room_uuid: room_uuid,
         admin_user_uuid: request_admin_user_uuid,
         admin_participant_uuid: request_admin_participant_uuid,
+        trigger_source,
         reason: skipped ? 'core_returned_skipped' : 'core_returned_ok',
         error_code: result.body.ok ? null : result.body.error,
         error_message: result.body.ok ? null : result.body.error,

@@ -416,6 +416,8 @@ export function resolve_debug_rule(input: {
     'admin_presence_leave_update_failed',
     'support_left_duplicate_skipped',
     'support_started_duplicate_skipped',
+    'support_started_trigger_detected',
+    'support_started_existing_active_found',
     'support_lifecycle_owner_registered',
     'support_lifecycle_duplicate_owner_skipped',
     'admin_support_presence_started',

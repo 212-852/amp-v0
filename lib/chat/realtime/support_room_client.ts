@@ -93,6 +93,7 @@ export async function call_enter_support_room(input: {
   room_uuid: string
   admin_user_uuid: string
   admin_participant_uuid: string
+  trigger_source?: string | null
 }): Promise<enter_support_room_client_result> {
   const response = await fetch('/api/chat/reception/open', {
     method: 'POST',
@@ -102,6 +103,7 @@ export async function call_enter_support_room(input: {
       room_uuid: input.room_uuid,
       admin_user_uuid: input.admin_user_uuid,
       admin_participant_uuid: input.admin_participant_uuid,
+      trigger_source: input.trigger_source ?? null,
     }),
   })
 

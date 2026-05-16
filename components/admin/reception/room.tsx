@@ -62,6 +62,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   const support_session_ref =
     useRef<admin_support_session_ref_value | null>(null)
   const enter_session_ref = useRef<string | null>(null)
+  const has_entered_support_ref = useRef(false)
   const owner_registered_ref = useRef(false)
   const [owner_registered, set_owner_registered] = useState(false)
   const latest_room_uuid_ref = useRef(props.room_uuid)
@@ -132,10 +133,33 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     props.room_uuid,
   ])
 
-  const run_enter_support_room = useCallback(async () => {
+  const run_enter_support_room = useCallback(async (trigger_source: string) => {
     const room_uuid = latest_room_uuid_ref.current
     const admin_user_uuid = admin_user_uuid_ref.current.trim()
     const admin_participant_uuid = admin_participant_uuid_ref.current.trim()
+    const timestamp = new Date().toISOString()
+    const stack_hint =
+      typeof Error === 'function'
+        ? new Error('support_started_trigger_detected').stack
+            ?.split('\n')
+            .slice(1, 5)
+            .join(' | ') ?? null
+        : null
+
+    send_admin_chat_debug({
+      event: 'support_started_trigger_detected',
+      room_uuid,
+      active_room_uuid: room_uuid,
+      admin_user_uuid: admin_user_uuid || null,
+      admin_participant_uuid: admin_participant_uuid || null,
+      component_file,
+      support_lifecycle_owner,
+      trigger_source,
+      stack_hint,
+      timestamp,
+      pathname,
+      phase: 'support_enter',
+    })
 
     if (!owner_registered_ref.current) {
       send_admin_chat_debug({
@@ -178,7 +202,10 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
 
     const enter_key = `${room_uuid}|${admin_participant_uuid}`
 
-    if (enter_session_ref.current === enter_key) {
+    if (
+      has_entered_support_ref.current ||
+      enter_session_ref.current === enter_key
+    ) {
       send_admin_chat_debug({
         event: 'support_started_duplicate_skipped',
         room_uuid,
@@ -187,13 +214,20 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         admin_participant_uuid,
         component_file,
         support_lifecycle_owner,
-        ignored_reason: 'client_enter_already_sent',
+        trigger_source,
+        stack_hint,
+        timestamp,
+        skipped_reason: 'already_entered_in_client_ref',
+        ignored_reason: 'already_entered_in_client_ref',
         pathname,
         phase: 'support_enter',
       })
 
       return
     }
+
+    has_entered_support_ref.current = true
+    enter_session_ref.current = enter_key
 
     send_admin_chat_debug({
       event: 'admin_support_enter_call_started',
@@ -203,6 +237,9 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
       admin_participant_uuid,
       component_file,
       support_lifecycle_owner,
+      trigger_source,
+      stack_hint,
+      timestamp,
       pathname,
       phase: 'support_enter',
     })
@@ -212,6 +249,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         room_uuid,
         admin_user_uuid,
         admin_participant_uuid,
+        trigger_source,
       })
 
       if (!result.ok) {
@@ -223,17 +261,20 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
           admin_participant_uuid,
           component_file,
           support_lifecycle_owner,
+          trigger_source,
+          stack_hint,
+          timestamp,
           pathname,
           error_code: result.error,
           error_message: result.error,
           phase: 'support_enter',
           level: 'error',
         })
+        has_entered_support_ref.current = false
+        enter_session_ref.current = null
 
         return
       }
-
-      enter_session_ref.current = enter_key
 
       if (result.action) {
         const action = support_room_api_action_to_realtime(result.action)
@@ -257,8 +298,19 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         admin_user_uuid,
         admin_participant_uuid,
         action_uuid: result.action?.action_uuid ?? null,
+        existing_action_uuid: result.skipped
+          ? result.action?.action_uuid ?? null
+          : null,
+        existing_action_count: result.skipped ? 1 : 0,
+        created_action_uuid: result.skipped
+          ? null
+          : result.action?.action_uuid ?? null,
         component_file,
         support_lifecycle_owner,
+        trigger_source,
+        stack_hint,
+        timestamp,
+        skipped_reason: result.skipped ? 'server_enter_skipped' : null,
         ignored_reason: result.skipped ? 'server_enter_skipped' : null,
         pathname,
         phase: 'support_enter',
@@ -272,12 +324,17 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         admin_participant_uuid,
         component_file,
         support_lifecycle_owner,
+        trigger_source,
+        stack_hint,
+        timestamp,
         pathname,
         error_code: 'enter_support_room_call_failed',
         error_message: error instanceof Error ? error.message : String(error),
         phase: 'support_enter',
         level: 'error',
       })
+      has_entered_support_ref.current = false
+      enter_session_ref.current = null
     }
   }, [pathname])
 
@@ -352,7 +409,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   )
 
   useEffect(() => {
-    void run_enter_support_room()
+    void run_enter_support_room('room_mount')
 
     return () => {
       run_leave_support_room('component_cleanup')
@@ -370,7 +427,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
       set_external_support_action(action)
     },
     on_recover_enter: () => {
-      void run_enter_support_room()
+      void run_enter_support_room('visibility_focus')
     },
   })
 
