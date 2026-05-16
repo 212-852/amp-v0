@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { is_reception_state } from '@/lib/admin/reception/rules'
-import { derive_presence_recent_within_ms } from '@/lib/chat/presence/rules'
+import { derive_presence_recent_from_timestamps } from '@/lib/chat/presence/rules'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 
@@ -244,7 +244,7 @@ export async function load_admin_notify_recipients(input: {
 
   const presence_result = await supabase
     .from('participants')
-    .select('participant_uuid, user_uuid')
+    .select('participant_uuid, user_uuid, last_seen_at, is_typing, typing_at')
     .eq('room_uuid', room_uuid)
     .in('role', ['admin', 'concierge'])
 
@@ -256,6 +256,7 @@ export async function load_admin_notify_recipients(input: {
     }
   }
 
+  const now = new Date()
   const active_admin_count = (presence_result.data ?? []).filter((row) => {
     const user_uuid =
       typeof row.user_uuid === 'string' && row.user_uuid.length > 0
@@ -266,7 +267,13 @@ export async function load_admin_notify_recipients(input: {
       return false
     }
 
-    return false
+    return derive_presence_recent_from_timestamps({
+      last_seen_at:
+        typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+      is_typing: row.is_typing === true,
+      typing_at: typeof row.typing_at === 'string' ? row.typing_at : null,
+      now,
+    })
   }).length
 
   return {

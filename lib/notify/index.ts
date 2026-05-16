@@ -407,144 +407,25 @@ async function deliver_admin_notification(input: {
   actor_user_uuid: string | null
   source_channel: string
 }): Promise<admin_notification_route_result> {
-  let recipients
+  const { route_admin_push_notification } = await import('./admin_push')
 
-  try {
-    recipients = await load_admin_notify_recipients({
-      room_uuid: input.room_uuid,
-      exclude_user_uuid: input.actor_user_uuid,
-    })
-  } catch (error) {
-    await notification_route_trace('admin_notify_target_resolved', {
-      admin_event: input.admin_event,
-      room_uuid: input.room_uuid,
-      message_uuid: input.message_uuid,
-      notification_route: 'skip',
-      skipped_reason: 'admin_targets_load_failed',
-      error_message: error instanceof Error ? error.message : String(error),
-      phase: 'admin_notify_target_resolved',
-    })
-
-    return {
-      outcome: 'skipped',
-      transport: 'none',
-      deliveries: [],
-      error_code: 'admin_targets_load_failed',
-      error_message: error instanceof Error ? error.message : String(error),
-    }
-  }
-
-  if (recipients.has_active_admin_page) {
-    await notification_route_trace('admin_notify_target_resolved', {
-      admin_event: input.admin_event,
-      room_uuid: input.room_uuid,
-      message_uuid: input.message_uuid,
-      notification_route: 'toast',
-      active_admin_count: recipients.active_admin_count,
-      target_count: recipients.admins.length,
-      skipped_reason: 'admin_page_open',
-      phase: 'open -> toast',
-    })
-
-    return {
-      outcome: 'skipped',
-      transport: 'toast',
-      deliveries: [],
-      error_code: 'admin_page_open',
-      error_message: 'open -> toast',
-    }
-  }
-
-  await notification_route_trace('admin_notify_target_resolved', {
+  const result = await route_admin_push_notification({
     admin_event: input.admin_event,
     room_uuid: input.room_uuid,
     message_uuid: input.message_uuid,
-    notification_route: 'push',
-    active_admin_count: recipients.active_admin_count,
-    target_count: recipients.admins.length,
-    skipped_reason: null,
-    phase: 'admin closed -> PWA push',
-  })
-
-  const push_results = await Promise.allSettled(
-    recipients.admins.map((recipient) =>
-      send_push_notify({
-        user_uuid: recipient.user_uuid,
-        title: input.title,
-        message: input.message,
-        room_uuid: input.room_uuid,
-        message_uuid: input.message_uuid,
-        kind: 'chat',
-        url: input.room_uuid
-          ? `/admin/reception/${encodeURIComponent(input.room_uuid)}`
-          : '/admin/reception',
-      }),
-    ),
-  )
-  const push_delivered = push_results.some(
-    (result) =>
-      result.status === 'fulfilled' &&
-      result.value.ok &&
-      result.value.available,
-  )
-
-  if (push_delivered) {
-    return {
-      outcome: 'delivered',
-      transport: 'push',
-      deliveries: [{ channel: 'push' }],
-    }
-  }
-
-  if (discord_action_webhook_configured()) {
-    await notification_route_trace('admin_notify_target_resolved', {
-      admin_event: input.admin_event,
-      room_uuid: input.room_uuid,
-      message_uuid: input.message_uuid,
-      notification_route: 'discord_action_webhook',
-      target_count: recipients.admins.length,
-      skipped_reason: 'pwa_push_unavailable',
-      phase: 'no PWA -> Discord fallback',
-    })
-
-    const webhook_result = await post_discord_action_webhook_message({
-      content: admin_notification_discord_content(input),
-    })
-
-    if (webhook_result.ok) {
-      return {
-        outcome: 'delivered',
-        transport: 'discord_action_webhook',
-        deliveries: [{ channel: 'discord' }],
-      }
-    }
-
-    return {
-      outcome: 'failed',
-      transport: 'discord_action_webhook',
-      deliveries: [],
-      http_status: webhook_result.http_status ?? null,
-      error_code: 'discord_action_webhook_non_ok',
-      error_message: webhook_result.error_text ?? 'webhook_post_failed',
-    }
-  }
-
-  await notification_route_trace('admin_notify_target_resolved', {
-    admin_event: input.admin_event,
-    room_uuid: input.room_uuid,
-    message_uuid: input.message_uuid,
-    notification_route: 'skip',
-    target_count: recipients.admins.length,
-    skipped_reason: 'no_pwa_or_discord_fallback',
-    phase: 'none -> skip',
+    title: input.title,
+    message: input.message,
+    actor_user_uuid: input.actor_user_uuid,
+    source_channel: input.source_channel,
   })
 
   return {
-    outcome: 'skipped',
-    transport: 'none',
-    deliveries: [],
-    error_code: 'no_pwa_or_discord_fallback',
-    error_message: 'none -> skip',
+    outcome: result.outcome,
+    transport: result.transport,
+    deliveries: result.deliveries,
+    http_status: result.http_status ?? null,
+    error_code: result.error_code ?? null,
+    error_message: result.error_message ?? null,
   }
 }
 

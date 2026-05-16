@@ -28,6 +28,7 @@ type notification_settings_props = {
   tier: string | null
   source_channel: string | null
   on_close: () => void
+  settings_only?: boolean
 }
 
 const default_preferences: notification_preferences = {
@@ -217,7 +218,10 @@ function Toggle(props: {
 }
 
 export default function NotificationSettings(props: notification_settings_props) {
-  const [active_tab, set_active_tab] = useState<notification_tab>('notices')
+  const settings_only = props.settings_only === true
+  const [active_tab, set_active_tab] = useState<notification_tab>(
+    settings_only ? 'settings' : 'notices',
+  )
   const [preferences, set_preferences] =
     useState<notification_preferences>(default_preferences)
   const [is_saving, set_is_saving] = useState(false)
@@ -350,9 +354,35 @@ export default function NotificationSettings(props: notification_settings_props)
           phase: 'notification_settings',
         }),
       })
+
+      if (settings_only) {
+        post_pwa_debug({
+          event: 'admin_notification_settings_saved',
+          ...debug_payload({
+            enabled: saved_preferences.pwa_push_enabled,
+            primary_channel: saved_preferences.primary_channel,
+            push_enabled: saved_preferences.pwa_push_enabled,
+            line_enabled: saved_preferences.line_enabled,
+            phase: 'admin_notification_settings',
+          }),
+        })
+      }
     },
-    [debug_payload, preferences],
+    [debug_payload, preferences, settings_only],
   )
+
+  useEffect(() => {
+    if (!settings_only) {
+      return
+    }
+
+    post_pwa_debug({
+      event: 'admin_notification_settings_rendered',
+      ...debug_payload({
+        phase: 'admin_notification_settings',
+      }),
+    })
+  }, [debug_payload, settings_only])
 
   useEffect(() => {
     let cancelled = false
@@ -529,7 +559,9 @@ export default function NotificationSettings(props: notification_settings_props)
       <div className="relative w-[92%] max-w-[430px] overflow-hidden rounded-[24px] bg-[#fdfaf8] px-6 py-6 shadow-[0_12px_40px_rgba(42,29,24,0.12)]">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-[21px] font-semibold leading-[1.35] text-[#2a1d18]">
-            {content.title[props.locale]}
+            {settings_only
+              ? content.settings_tab[props.locale]
+              : content.title[props.locale]}
           </h2>
 
           <button
@@ -542,30 +574,26 @@ export default function NotificationSettings(props: notification_settings_props)
           </button>
         </div>
 
-      <div className="mt-5 flex rounded-[10px] bg-[#f2e7df] p-1">
-        <button
-          type="button"
-          className={tab_class('notices')}
-          onClick={() => change_tab('notices')}
-        >
-          {content.notices_tab[props.locale]}
-        </button>
-        <button
-          type="button"
-          className={tab_class('settings')}
-          onClick={() => change_tab('settings')}
-        >
-          {content.settings_tab[props.locale]}
-        </button>
-      </div>
-
-      {active_tab === 'notices' ? (
-        <div className="mt-6 rounded-[8px] border border-[#eadbd0] bg-white px-4 py-5">
-          <p className="text-[14px] leading-[1.7] text-[#6d5c52]">
-            {content.empty_notices[props.locale]}
-          </p>
+      {settings_only ? null : (
+        <div className="mt-5 flex rounded-[10px] bg-[#f2e7df] p-1">
+          <button
+            type="button"
+            className={tab_class('notices')}
+            onClick={() => change_tab('notices')}
+          >
+            {content.notices_tab[props.locale]}
+          </button>
+          <button
+            type="button"
+            className={tab_class('settings')}
+            onClick={() => change_tab('settings')}
+          >
+            {content.settings_tab[props.locale]}
+          </button>
         </div>
-      ) : (
+      )}
+
+      {settings_only || active_tab === 'settings' ? (
         <>
           <div className="mt-5 space-y-5">
             <section className="rounded-[8px] border border-[#eadbd0] bg-white">
@@ -625,7 +653,7 @@ export default function NotificationSettings(props: notification_settings_props)
             </p>
           ) : null}
         </>
-      )}
+      ) : null}
       </div>
 
       <OverlayRoot

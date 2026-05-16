@@ -73,6 +73,7 @@ export default function UserHeader() {
   const [mounted, set_mounted] = useState(false)
   const [locale, set_locale] = useState<locale_key>('ja')
   const [connect_open, set_connect_open] = useState(false)
+  const [connect_dismiss_locked, set_connect_dismiss_locked] = useState(false)
   const [locale_open, set_locale_open] = useState(false)
   const [notification_open, set_notification_open] = useState(false)
   const render_locale = mounted ? locale : 'ja'
@@ -230,13 +231,26 @@ export default function UserHeader() {
 
       <OverlayRoot
         open={connect_open}
-        on_close={() => set_connect_open(false)}
+        on_close={() => {
+          if (connect_dismiss_locked) {
+            return
+          }
+
+          set_connect_open(false)
+        }}
         variant="center"
       >
         <ConnectModal
           locale={render_locale}
           connected_providers={connected_for_modal}
-          on_close={() => set_connect_open(false)}
+          on_close={() => {
+            if (connect_dismiss_locked) {
+              return
+            }
+
+            set_connect_open(false)
+          }}
+          on_dismiss_lock_change={set_connect_dismiss_locked}
         />
       </OverlayRoot>
 

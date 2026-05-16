@@ -35,6 +35,7 @@ type connect_props = {
   locale: locale_key
   connected_providers: connected_provider[]
   on_close: () => void
+  on_dismiss_lock_change?: (locked: boolean) => void
 }
 
 const content = {
@@ -143,6 +144,16 @@ const content = {
     en: 'Refresh',
     es: 'Actualizar',
   },
+  updating_title: {
+    ja: 'アプリを更新しています',
+    en: 'Updating App',
+    es: 'Actualizando la aplicación',
+  },
+  updating_description: {
+    ja: 'しばらくお待ちください',
+    en: 'Please wait a moment',
+    es: 'Por favor espere un momento',
+  },
 }
 
 const provider_labels: Record<connected_provider, string> = {
@@ -155,6 +166,7 @@ export default function ConnectModal({
   locale,
   connected_providers,
   on_close,
+  on_dismiss_lock_change,
 }: connect_props) {
   const router = useRouter()
   const [view, set_view] = useState<'list' | 'email'>('list')
@@ -163,7 +175,7 @@ export default function ConnectModal({
     'idle' | 'sending' | 'sent' | 'failed'
   >('idle')
   const [line_status, set_line_status] = useState<
-    'idle' | 'checking' | 'completed' | 'timeout' | 'failed'
+    'idle' | 'checking' | 'updating' | 'timeout' | 'failed'
   >('idle')
   const [line_poll_visitor_uuid, set_line_poll_visitor_uuid] = useState<
     string | null
@@ -171,6 +183,7 @@ export default function ConnectModal({
   const poll_started_at_ref = useRef<number | null>(null)
   const poll_timer_ref = useRef<number | null>(null)
   const polling_ref = useRef(false)
+  const reload_started_ref = useRef(false)
 
   const is_email_loading = email_status === 'sending'
   const has_connected_provider = connected_providers.length > 0
@@ -197,6 +210,15 @@ export default function ConnectModal({
 
   async function refresh_session_and_reload(visitor: string) {
     clear_pwa_line_link_error_flags()
+
+    post_pwa_debug({
+      event: 'pwa_update_reload_started',
+      phase: 'pwa_update_modal',
+      visitor_uuid: visitor,
+      provider: 'line',
+      status: 'updating',
+      ...build_pwa_diagnostic_payload(),
+    })
 
     post_pwa_debug({
       event: 'pwa_session_refresh_started',
@@ -239,6 +261,15 @@ export default function ConnectModal({
       router.refresh()
 
       post_pwa_debug({
+        event: 'pwa_update_reload_completed',
+        phase: 'pwa_update_modal',
+        visitor_uuid: visitor,
+        provider: 'line',
+        status: 'updating',
+        ...build_pwa_diagnostic_payload(),
+      })
+
+      post_pwa_debug({
         event: 'pwa_reload_triggered',
         phase: 'link_session_reload',
         visitor_uuid: visitor,
@@ -251,6 +282,16 @@ export default function ConnectModal({
     } catch (error) {
       set_pwa_line_link_failed_flags()
       set_line_status('failed')
+      post_pwa_debug({
+        event: 'pwa_update_reload_failed',
+        phase: 'pwa_update_modal',
+        visitor_uuid: visitor,
+        provider: 'line',
+        status: 'updating',
+        error_code: 'session_refresh_failed',
+        error_message: error instanceof Error ? error.message : String(error),
+        ...build_pwa_diagnostic_payload(),
+      })
       post_pwa_debug({
         event: 'pwa_session_refresh_failed',
         phase: 'link_session_refresh',
@@ -310,7 +351,7 @@ export default function ConnectModal({
       if (status === 'completed') {
         clear_poll_timer()
         clear_pwa_line_link_error_flags()
-        set_line_status('completed')
+        set_line_status('updating')
         post_pwa_debug({
           event: 'pwa_line_link_poll_completed',
           phase: 'link_session_poll',
@@ -321,7 +362,14 @@ export default function ConnectModal({
           return_path: payload?.return_path ?? null,
           ...build_pwa_diagnostic_payload(),
         })
-        await refresh_session_and_reload(visitor)
+        post_pwa_debug({
+          event: 'pwa_update_modal_started',
+          phase: 'pwa_update_modal',
+          visitor_uuid: visitor,
+          provider: 'line',
+          status: 'updating',
+          ...build_pwa_diagnostic_payload(),
+        })
 
         return
       }
@@ -618,6 +666,23 @@ export default function ConnectModal({
   }
 
   useEffect(() => {
+    on_dismiss_lock_change?.(line_status === 'updating')
+  }, [line_status, on_dismiss_lock_change])
+
+  useEffect(() => {
+    if (line_status !== 'updating' || !line_poll_visitor_uuid) {
+      return
+    }
+
+    if (reload_started_ref.current) {
+      return
+    }
+
+    reload_started_ref.current = true
+    void refresh_session_and_reload(line_poll_visitor_uuid)
+  }, [line_status, line_poll_visitor_uuid])
+
+  useEffect(() => {
     function handle_visibility_change() {
       if (
         document.visibilityState === 'visible' &&
@@ -717,31 +782,44 @@ export default function ConnectModal({
           </form>
         </div>
       ) : line_status !== 'idle' ? (
-        <div className="animate-[modal_in_220ms_ease-out_both]">
+        <div
+          className={[
+            'animate-[modal_in_220ms_ease-out_both]',
+            line_status === 'updating' ? 'pointer-events-none select-none' : '',
+          ].join(' ')}
+          aria-busy={line_status === 'updating'}
+        >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 pr-1">
               <h2 className="text-[21px] font-semibold leading-[1.45] text-[#2a1d18]">
-                {line_status === 'completed'
-                  ? content.completed_line[locale]
+                {line_status === 'updating'
+                  ? content.updating_title[locale]
                   : line_status === 'timeout'
                     ? content.timeout_line[locale]
                     : line_status === 'failed'
                       ? content.line_link_failed_hint[locale]
                       : content.checking_line[locale]}
               </h2>
+              {line_status === 'updating' ? (
+                <p className="mt-3 text-[14px] font-normal leading-[1.75] text-[#6d5c52]">
+                  {content.updating_description[locale]}
+                </p>
+              ) : null}
             </div>
 
-            <button
-              type="button"
-              onClick={on_close}
-              aria-label="close"
-              className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.94]"
-            >
-              <X className="h-[24px] w-[24px] stroke-[2.1] text-[#2a1d18]" />
-            </button>
+            {line_status !== 'updating' ? (
+              <button
+                type="button"
+                onClick={on_close}
+                aria-label="close"
+                className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.94]"
+              >
+                <X className="h-[24px] w-[24px] stroke-[2.1] text-[#2a1d18]" />
+              </button>
+            ) : null}
           </div>
 
-          {line_status === 'checking' ? (
+          {line_status === 'checking' || line_status === 'updating' ? (
             <div className="mt-6 h-2 overflow-hidden rounded-full bg-[#e8dfd6]">
               <div className="h-full w-1/2 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[#06c755]" />
             </div>

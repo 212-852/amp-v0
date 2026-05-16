@@ -131,6 +131,7 @@ export default function AdminHeader({
           role={role ?? null}
           tier={tier ?? null}
           source_channel="admin"
+          settings_only
           on_close={() => set_notification_open(false)}
         />
       </OverlayRoot>
