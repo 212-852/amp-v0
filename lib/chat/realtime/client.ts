@@ -54,6 +54,10 @@ export type chat_realtime_listener_scope =
   | 'admin_active'
   | 'user_active'
 
+export type chat_room_realtime_subscription_mode =
+  | 'full'
+  | 'typing_broadcast_only'
+
 /** Postgres listener channel per surface (avoids Supabase channel name collisions). */
 export function chat_realtime_postgres_channel_name(
   room_uuid: string,
@@ -507,8 +511,17 @@ export function subscribe_chat_room_realtime(input: {
     status: string
     error_message: string | null
   }) => void
+  subscription_mode?: chat_room_realtime_subscription_mode
+  /** When false, typing broadcast is omitted (typing-only hook owns it). */
+  include_typing_broadcast?: boolean
 }): RealtimeChannel {
   const listener_scope = input.listener_scope ?? 'default'
+  const subscription_mode = input.subscription_mode ?? 'full'
+  const include_message_postgres = subscription_mode === 'full'
+  const include_participants_postgres = subscription_mode === 'full'
+  const include_typing_broadcast =
+    input.include_typing_broadcast !== false &&
+    (subscription_mode === 'full' || subscription_mode === 'typing_broadcast_only')
   const channel_name = chat_realtime_postgres_channel_name(
     input.room_uuid,
     listener_scope,
@@ -603,10 +616,12 @@ export function subscribe_chat_room_realtime(input: {
     channel_name,
     room_uuid: input.room_uuid,
     filter: postgres_filter,
+    subscription_mode: input.subscription_mode ?? 'full',
   })
 
-  channel
-    .on(
+  if (include_message_postgres) {
+    channel
+      .on(
       'postgres_changes',
       {
         event: 'INSERT',
@@ -1069,7 +1084,10 @@ export function subscribe_chat_room_realtime(input: {
         input.on_message(message)
       },
     )
-    .on(
+  }
+
+  if (include_participants_postgres) {
+    channel.on(
       'postgres_changes',
       {
         event: 'UPDATE',
@@ -1206,8 +1224,9 @@ export function subscribe_chat_room_realtime(input: {
         input.on_presence?.(presence)
       },
     )
+  }
 
-  if (listener_scope !== 'admin_list') {
+  if (include_typing_broadcast && listener_scope !== 'admin_list') {
     channel.on('broadcast', { event: 'typing' }, (payload) => {
       const active_identity =
         input.active_typing_identity_ref?.current ?? {
@@ -1508,6 +1527,21 @@ export function subscribe_chat_room_realtime(input: {
   })
 
   return channel
+}
+
+export function subscribe_chat_room_typing_realtime(
+  input: Omit<
+    Parameters<typeof subscribe_chat_room_realtime>[0],
+    'subscription_mode' | 'on_message'
+  > & {
+    on_message?: Parameters<typeof subscribe_chat_room_realtime>[0]['on_message']
+  },
+): RealtimeChannel {
+  return subscribe_chat_room_realtime({
+    ...input,
+    subscription_mode: 'typing_broadcast_only',
+    on_message: input.on_message ?? (() => {}),
+  })
 }
 
 export function cleanup_chat_room_realtime(input: {

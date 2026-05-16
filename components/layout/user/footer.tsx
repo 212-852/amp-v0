@@ -25,10 +25,7 @@ import type { locale_key } from '@/lib/locale/action'
 import type { archived_message } from '@/lib/chat/archive'
 import type { room_mode } from '@/lib/chat/room'
 import { can_switch_to_concierge } from '@/lib/chat/rules'
-import {
-  publish_chat_typing,
-  sync_chat_typing_presence,
-} from '@/lib/chat/realtime/client'
+import { send_room_typing_status } from '@/lib/chat/realtime/typing_client'
 import {
   get_locale,
   subscribe_locale,
@@ -248,7 +245,6 @@ export default function UserFooter() {
         return
       }
 
-      const channel = chat.room_realtime_channel_ref.current
       const is_heartbeat = action === 'typing_start' && typing_active_ref.current
 
       if (action === 'typing_start') {
@@ -257,11 +253,17 @@ export default function UserFooter() {
         typing_active_ref.current = false
       }
 
-      sync_chat_typing_presence({
+      send_room_typing_status({
         room_uuid: chat.room_uuid,
+        active_room_uuid: chat.room_uuid,
         participant_uuid: chat.participant_uuid,
+        user_uuid: session?.user_uuid ?? null,
+        role: 'user',
+        tier: session?.tier ?? null,
+        display_name: 'user',
         is_typing: action === 'typing_start',
         source_channel: session?.source_channel ?? 'web',
+        channel: chat.room_realtime_channel_ref.current,
         typing_phase:
           action === 'typing_start'
             ? is_heartbeat
@@ -269,24 +271,6 @@ export default function UserFooter() {
               : 'start'
             : undefined,
       })
-
-      if (
-        channel &&
-        (action === 'typing_stop' || (action === 'typing_start' && !is_heartbeat))
-      ) {
-        publish_chat_typing({
-          channel,
-          room_uuid: chat.room_uuid,
-          active_room_uuid: chat.room_uuid,
-          participant_uuid: chat.participant_uuid,
-          user_uuid: session?.user_uuid ?? null,
-          role: 'user',
-          tier: session?.tier ?? null,
-          display_name: 'user',
-          is_typing: action === 'typing_start',
-          source_channel: session?.source_channel ?? 'web',
-        })
-      }
     },
     [
       chat.participant_uuid,
@@ -1299,6 +1283,9 @@ export default function UserFooter() {
                   placeholder={content.message[render_locale]}
                   disabled={is_sending_text}
                   onChange={handle_message_input_change}
+                  onBlur={() => {
+                    post_typing_presence('typing_stop')
+                  }}
                   className="
                     h-[48px] min-w-0 flex-1
                     rounded-full

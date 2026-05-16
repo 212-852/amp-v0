@@ -14,10 +14,7 @@ import {
   type timeline_item_duplicate_skip,
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
-import {
-  publish_chat_typing,
-  sync_chat_typing_presence,
-} from '@/lib/chat/realtime/client'
+import { send_room_typing_status } from '@/lib/chat/realtime/typing_client'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
 import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
@@ -263,11 +260,7 @@ export default function AdminChatTimeline({
   const bubble_realtime_enabled =
     Boolean(room_uuid.trim()) && !disable_message_realtime
 
-  const {
-    handle_typing: handle_realtime_typing,
-    handle_presence: handle_realtime_presence,
-    emit_typing_status_sent,
-  } = use_typing_realtime({
+  const { handle_presence: handle_realtime_presence } = use_typing_realtime({
     owner: 'admin',
     room_uuid,
     active_room_uuid: room_uuid,
@@ -277,7 +270,6 @@ export default function AdminChatTimeline({
     role: 'admin',
     tier: staff_tier,
     source_channel: 'admin',
-    shared_messages_channel_ref: messages_channel_ref,
     on_label_change: set_local_peer_typing_label,
   })
 
@@ -291,9 +283,9 @@ export default function AdminChatTimeline({
     role: 'admin',
     tier: staff_tier,
     source_channel: 'admin',
+    include_typing_broadcast: false,
     export_messages_channel_ref: messages_channel_ref,
     on_message: handle_realtime_message,
-    on_typing: handle_realtime_typing,
     on_presence: handle_realtime_presence,
   })
 
@@ -334,7 +326,6 @@ export default function AdminChatTimeline({
         return
       }
 
-      const channel = messages_channel_ref.current
       const is_heartbeat = action === 'typing_start' && typing_active_ref.current
 
       if (action === 'typing_start') {
@@ -343,11 +334,17 @@ export default function AdminChatTimeline({
         typing_active_ref.current = false
       }
 
-      sync_chat_typing_presence({
+      send_room_typing_status({
         room_uuid,
+        active_room_uuid: room_uuid,
         participant_uuid: staff_participant_uuid,
+        user_uuid: staff_user_uuid,
+        role: 'admin',
+        tier: staff_tier,
+        display_name: staff_display_name,
         is_typing: action === 'typing_start',
         source_channel: 'admin',
+        channel: messages_channel_ref.current,
         typing_phase:
           action === 'typing_start'
             ? is_heartbeat
@@ -355,33 +352,8 @@ export default function AdminChatTimeline({
               : 'start'
             : undefined,
       })
-
-      if (
-        channel &&
-        (action === 'typing_stop' || (action === 'typing_start' && !is_heartbeat))
-      ) {
-        publish_chat_typing({
-          channel,
-          room_uuid,
-          active_room_uuid: room_uuid,
-          participant_uuid: staff_participant_uuid,
-          user_uuid: staff_user_uuid,
-          role: 'admin',
-          tier: staff_tier,
-          display_name: staff_display_name,
-          is_typing: action === 'typing_start',
-          source_channel: 'admin',
-        })
-
-        emit_typing_status_sent({
-          participant_uuid: staff_participant_uuid,
-          is_typing: action === 'typing_start',
-          source_channel: 'admin',
-        })
-      }
     },
     [
-      emit_typing_status_sent,
       room_uuid,
       staff_display_name,
       staff_participant_uuid,
@@ -588,6 +560,9 @@ export default function AdminChatTimeline({
               } else {
                 post_typing_presence('typing_stop')
               }
+            }}
+            onBlur={() => {
+              post_typing_presence('typing_stop')
             }}
             autoComplete="off"
             enterKeyHint="send"

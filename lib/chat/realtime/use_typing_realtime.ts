@@ -13,7 +13,7 @@ import { create_browser_supabase } from '@/lib/db/browser'
 import {
   cleanup_chat_room_realtime,
   send_chat_realtime_debug,
-  subscribe_chat_room_realtime,
+  subscribe_chat_room_typing_realtime,
   type chat_presence_payload,
   type chat_typing_payload,
 } from './client'
@@ -36,6 +36,7 @@ type typing_realtime_debug_event =
   | 'typing_realtime_subscribe_status'
   | 'typing_status_sent'
   | 'typing_realtime_payload_received'
+  | 'typing_realtime_payload_accepted'
   | 'typing_realtime_rendered'
   | 'typing_realtime_expired'
   | 'typing_realtime_payload_ignored'
@@ -97,8 +98,7 @@ export type use_typing_realtime_input = {
   role?: string | null
   tier?: string | null
   source_channel?: string | null
-  /** Message hook owns postgres+broadcast; typing hook only tracks UI + debug. */
-  shared_messages_channel_ref?: MutableRefObject<RealtimeChannel | null>
+  export_typing_channel_ref?: MutableRefObject<RealtimeChannel | null>
   on_label_change: (label: string | null) => void
   active_typing_identity_ref?: MutableRefObject<{
     user_uuid: string | null
@@ -110,12 +110,9 @@ export type use_typing_realtime_input = {
 export function use_typing_realtime(input: use_typing_realtime_input) {
   const peer_map_ref = useRef(new Map<string, peer_typing_row>())
   const on_label_ref = useRef(input.on_label_change)
-  const mount_key_ref = useRef<string | null>(null)
-  const on_label_change_ref = useRef(input.on_label_change)
 
   useEffect(() => {
     on_label_ref.current = input.on_label_change
-    on_label_change_ref.current = input.on_label_change
   }, [input.on_label_change])
 
   const room_uuid = input.room_uuid.trim()
@@ -137,28 +134,28 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     on_label_ref.current(resolve_label(peer_map_ref.current, self_participant_uuid))
   }, [resolve_label, self_participant_uuid])
 
-  useEffect(() => {
-    if (!enabled) {
-      return
-    }
+  const accept_peer_typing_payload = useCallback(
+    (payload: {
+      payload_room_uuid: string | null
+      participant_uuid: string
+      role?: string | null
+      source_channel?: string | null
+      is_typing?: boolean | null
+    }): { accept: boolean; ignored_reason: string | null } => {
+      const pr = payload.payload_room_uuid?.trim() ?? ''
 
-    const mount_key = `${owner}:${room_uuid}`
+      if (pr && pr !== active_room_uuid) {
+        return { accept: false, ignored_reason: 'payload_room_uuid_mismatch' }
+      }
 
-    if (mount_key_ref.current === mount_key) {
-      return
-    }
+      if (payload.participant_uuid.trim() === self_participant_uuid) {
+        return { accept: false, ignored_reason: 'self_participant' }
+      }
 
-    mount_key_ref.current = mount_key
-
-    emit_typing_realtime_debug('typing_realtime_mounted', {
-      owner,
-      room_uuid,
-      active_room_uuid,
-      subscribe_status: input.shared_messages_channel_ref
-        ? 'SHARED_MESSAGE_CHANNEL'
-        : 'HOOK_MOUNTED',
-    })
-  }, [active_room_uuid, enabled, input.shared_messages_channel_ref, owner, room_uuid])
+      return { accept: true, ignored_reason: null }
+    },
+    [active_room_uuid, self_participant_uuid],
+  )
 
   const handle_typing = useCallback(
     (typing: chat_typing_payload) => {
@@ -171,11 +168,18 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
         payload_room_uuid,
         participant_uuid: typing.participant_uuid,
         role: typing.role,
-        source_channel: null,
+        source_channel: input.source_channel ?? null,
         is_typing: typing.is_typing,
       })
 
-      if (payload_room_uuid && payload_room_uuid !== active_room_uuid) {
+      const acceptance = accept_peer_typing_payload({
+        payload_room_uuid,
+        participant_uuid: typing.participant_uuid,
+        role: typing.role,
+        is_typing: typing.is_typing,
+      })
+
+      if (!acceptance.accept) {
         emit_typing_realtime_debug('typing_realtime_payload_ignored', {
           owner,
           room_uuid,
@@ -183,12 +187,22 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
           payload_room_uuid,
           participant_uuid: typing.participant_uuid,
           role: typing.role,
-          ignored_reason: 'payload_room_uuid_mismatch',
+          ignored_reason: acceptance.ignored_reason,
           is_typing: typing.is_typing,
         })
 
         return
       }
+
+      emit_typing_realtime_debug('typing_realtime_payload_accepted', {
+        owner,
+        room_uuid,
+        active_room_uuid,
+        payload_room_uuid,
+        participant_uuid: typing.participant_uuid,
+        role: typing.role,
+        is_typing: typing.is_typing,
+      })
 
       handle_typing_broadcast_for_ui({
         owner,
@@ -214,7 +228,15 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
         next_count: peer_map_ref.current.size,
       })
     },
-    [active_room_uuid, owner, resolve_label, room_uuid, self_participant_uuid],
+    [
+      accept_peer_typing_payload,
+      active_room_uuid,
+      input.source_channel,
+      owner,
+      resolve_label,
+      room_uuid,
+      self_participant_uuid,
+    ],
   )
 
   const handle_presence = useCallback(
@@ -232,7 +254,15 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
         is_typing: presence.is_typing,
       })
 
-      if (payload_room_uuid && payload_room_uuid !== active_room_uuid) {
+      const acceptance = accept_peer_typing_payload({
+        payload_room_uuid,
+        participant_uuid: presence.participant_uuid,
+        role: presence.role,
+        source_channel: presence.source_channel,
+        is_typing: presence.is_typing,
+      })
+
+      if (!acceptance.accept) {
         emit_typing_realtime_debug('typing_realtime_payload_ignored', {
           owner,
           room_uuid,
@@ -240,12 +270,22 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
           payload_room_uuid,
           participant_uuid: presence.participant_uuid,
           role: presence.role,
-          ignored_reason: 'payload_room_uuid_mismatch',
+          ignored_reason: acceptance.ignored_reason,
           is_typing: presence.is_typing,
         })
 
         return
       }
+
+      emit_typing_realtime_debug('typing_realtime_payload_accepted', {
+        owner,
+        room_uuid,
+        active_room_uuid,
+        payload_room_uuid,
+        participant_uuid: presence.participant_uuid,
+        role: presence.role,
+        is_typing: presence.is_typing,
+      })
 
       handle_presence_typing_for_ui({
         owner,
@@ -271,13 +311,27 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
         next_count: peer_map_ref.current.size,
       })
     },
-    [active_room_uuid, owner, resolve_label, room_uuid, self_participant_uuid],
+    [
+      accept_peer_typing_payload,
+      active_room_uuid,
+      owner,
+      resolve_label,
+      room_uuid,
+      self_participant_uuid,
+    ],
   )
 
   useEffect(() => {
-    if (!enabled || input.shared_messages_channel_ref) {
+    if (!enabled) {
       return
     }
+
+    emit_typing_realtime_debug('typing_realtime_mounted', {
+      owner,
+      room_uuid,
+      active_room_uuid,
+      subscribe_status: 'HOOK_MOUNTED',
+    })
 
     emit_typing_realtime_debug('typing_realtime_subscribe_started', {
       owner,
@@ -302,7 +356,7 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
       return
     }
 
-    const channel = subscribe_chat_room_realtime({
+    const channel = subscribe_chat_room_typing_realtime({
       supabase,
       room_uuid,
       active_room_uuid,
@@ -323,14 +377,13 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
           error_message,
         })
       },
-      on_message: () => ({
-        prev_count: 0,
-        next_count: 0,
-        dedupe_hit: true,
-      }),
       on_typing: handle_typing,
       on_presence: handle_presence,
     })
+
+    if (input.export_typing_channel_ref) {
+      input.export_typing_channel_ref.current = channel
+    }
 
     return () => {
       cleanup_chat_room_realtime({
@@ -347,8 +400,8 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
         cleanup_reason: 'use_typing_realtime_cleanup',
       })
 
-      if (input.shared_messages_channel_ref?.current === channel) {
-        input.shared_messages_channel_ref.current = null
+      if (input.export_typing_channel_ref?.current === channel) {
+        input.export_typing_channel_ref.current = null
       }
     }
   }, [
@@ -357,9 +410,9 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     handle_presence,
     handle_typing,
     input.active_typing_identity_ref,
+    input.export_typing_channel_ref,
     input.participant_uuid,
     input.role,
-    input.shared_messages_channel_ref,
     input.source_channel,
     input.tier,
     input.user_uuid,
@@ -373,6 +426,8 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     }
 
     const interval_id = window.setInterval(() => {
+      const prev_count = peer_map_ref.current.size
+
       schedule_peer_typing_sweep({
         owner,
         room_uuid,
@@ -386,17 +441,13 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
 
       const label = resolve_label(peer_map_ref.current, self_participant_uuid)
 
-      if (!label && peer_map_ref.current.size === 0) {
-        return
-      }
-
-      if (!label) {
+      if (!label && prev_count > 0) {
         emit_typing_realtime_debug('typing_realtime_expired', {
           owner,
           room_uuid,
           active_room_uuid,
-          prev_count: peer_map_ref.current.size,
-          next_count: 0,
+          prev_count,
+          next_count: peer_map_ref.current.size,
         })
       }
     }, 1_000)
@@ -425,19 +476,6 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     handle_presence,
     refresh_label,
     clear_peer_participant,
-    emit_typing_status_sent: (payload: {
-      participant_uuid: string
-      is_typing: boolean
-      source_channel?: string | null
-    }) => {
-      emit_typing_realtime_debug('typing_status_sent', {
-        owner,
-        room_uuid,
-        active_room_uuid,
-        participant_uuid: payload.participant_uuid,
-        is_typing: payload.is_typing,
-        source_channel: payload.source_channel ?? null,
-      })
-    },
+    typing_channel_ref: input.export_typing_channel_ref,
   }
 }

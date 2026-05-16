@@ -717,6 +717,7 @@ export function resolve_debug_rule(input: {
     'typing_realtime_subscribe_status',
     'typing_status_sent',
     'typing_realtime_payload_received',
+    'typing_realtime_payload_accepted',
     'typing_realtime_rendered',
     'typing_realtime_expired',
     'typing_realtime_payload_ignored',

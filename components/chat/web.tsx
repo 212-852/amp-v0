@@ -409,11 +409,7 @@ type web_chat_message_timeline_props = {
 function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
   const [typing_banner, set_typing_banner] = useState<string | null>(null)
 
-  const {
-    handle_typing,
-    handle_presence,
-    clear_peer_participant,
-  } = use_typing_realtime({
+  const { handle_presence, clear_peer_participant } = use_typing_realtime({
     owner: 'user',
     room_uuid: props.room_uuid,
     active_room_uuid: props.active_room_uuid,
@@ -423,7 +419,6 @@ function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
     role: 'user',
     tier: props.tier,
     source_channel: props.source_channel,
-    shared_messages_channel_ref: props.export_messages_channel_ref,
     active_typing_identity_ref: props.active_typing_identity_ref,
     on_label_change: set_typing_banner,
   })
@@ -449,10 +444,10 @@ function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
     role: 'user',
     tier: props.tier,
     source_channel: props.source_channel,
+    include_typing_broadcast: false,
     active_typing_identity_ref: props.active_typing_identity_ref,
     export_messages_channel_ref: props.export_messages_channel_ref,
     on_message: handle_message,
-    on_typing: handle_typing,
     on_presence: handle_presence,
   })
 

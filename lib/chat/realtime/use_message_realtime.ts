@@ -50,6 +50,8 @@ export type use_message_realtime_input = {
   ) => message_realtime_append_result | void
   on_typing?: (payload: chat_typing_payload) => void
   on_presence?: (payload: chat_presence_payload) => void
+  /** Set false when a dedicated typing realtime hook owns broadcast. */
+  include_typing_broadcast?: boolean
 }
 
 type message_realtime_debug_event =
@@ -193,6 +195,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
       tier: input.tier ?? null,
       source_channel,
       listener_scope,
+      include_typing_broadcast: input.include_typing_broadcast,
       active_typing_identity_ref: input.active_typing_identity_ref,
       on_subscribe_status: ({ status, error_message }) => {
         emit_message_realtime_debug('message_realtime_subscribe_status', {
@@ -303,6 +306,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
     input.active_typing_identity_ref,
     input.export_messages_channel_ref,
     input.on_messages_channel,
+    input.include_typing_broadcast,
     input.participant_uuid,
     input.role,
     input.tier,
