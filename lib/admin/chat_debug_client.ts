@@ -11,6 +11,7 @@ export function send_admin_chat_debug(input: {
   admin_user_uuid?: string | null
   admin_participant_uuid?: string | null
   component_file?: string | null
+  support_lifecycle_owner?: string | null
   pathname?: string | null
   ignored_reason?: string | null
   error_code?: string | null
@@ -50,6 +51,7 @@ export function send_admin_chat_debug(input: {
       admin_user_uuid: input.admin_user_uuid ?? null,
       admin_participant_uuid: input.admin_participant_uuid ?? null,
       component_file: input.component_file ?? null,
+      support_lifecycle_owner: input.support_lifecycle_owner ?? null,
       pathname,
       ignored_reason: input.ignored_reason ?? null,
       error_code: input.error_code ?? null,

@@ -2441,6 +2441,67 @@ export type admin_reception_room_open_request_body = {
   admin_participant_uuid?: string | null
 }
 
+async function latest_admin_support_action(input: {
+  room_uuid: string
+  admin_participant_uuid: string
+}): Promise<{
+  action_uuid: string | null
+  action_type: string | null
+  body: string | null
+  created_at: string | null
+  actor_display_name: string | null
+  actor_user_uuid: string | null
+  source_channel: string | null
+} | null> {
+  const picked = await supabase
+    .from(public_actions_table_name())
+    .select(
+      'action_uuid, action_type, body, created_at, actor_display_name, actor_user_uuid, source_channel',
+    )
+    .eq('room_uuid', input.room_uuid)
+    .eq('actor_participant_uuid', input.admin_participant_uuid)
+    .in('action_type', ['support_started', 'support_left'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (picked.error) {
+    return null
+  }
+
+  const row = picked.data as {
+    action_uuid?: unknown
+    action_type?: unknown
+    body?: unknown
+    created_at?: unknown
+    actor_display_name?: unknown
+    actor_user_uuid?: unknown
+    source_channel?: unknown
+  } | null
+
+  if (!row) {
+    return null
+  }
+
+  return {
+    action_uuid:
+      typeof row.action_uuid === 'string' ? row.action_uuid : null,
+    action_type:
+      typeof row.action_type === 'string' ? row.action_type : null,
+    body: typeof row.body === 'string' ? row.body : null,
+    created_at:
+      typeof row.created_at === 'string' ? row.created_at : null,
+    actor_display_name:
+      typeof row.actor_display_name === 'string'
+        ? row.actor_display_name
+        : null,
+    actor_user_uuid:
+      typeof row.actor_user_uuid === 'string' ? row.actor_user_uuid : null,
+    source_channel:
+      typeof row.source_channel === 'string' ? row.source_channel : null,
+  }
+}
+
 export async function handle_admin_reception_room_opened(
   body: admin_reception_room_open_request_body | null,
 ): Promise<{ status: number; body: admin_reception_room_open_result }> {
@@ -2479,65 +2540,6 @@ export async function handle_admin_reception_room_opened(
     return {
       status: 403,
       body: { ok: false, error: 'admin_user_mismatch' },
-    }
-  }
-
-  const recent = await supabase
-    .from('messages')
-    .select('message_uuid, body, created_at')
-    .eq('room_uuid', room_uuid)
-    .order('created_at', { ascending: false })
-    .limit(20)
-
-  if (recent.error) {
-    throw recent.error
-  }
-
-  const now_ms = Date.now()
-
-  for (const row of (recent.data ?? []) as {
-    body: string | null
-    created_at: string
-  }[]) {
-    try {
-      const parsed = JSON.parse(row.body ?? '{}') as {
-        bundle?: {
-          content_key?: string
-          metadata?: { action?: string; admin_user_uuid?: string }
-          payload?: { text?: string }
-        }
-      }
-      const key = parsed?.bundle?.content_key
-      const action = parsed?.bundle?.metadata?.action
-      const text =
-        typeof parsed?.bundle?.payload?.text === 'string'
-          ? parsed.bundle.payload.text
-          : ''
-      const row_admin = clean_uuid(
-        parsed?.bundle?.metadata?.admin_user_uuid ?? null,
-      )
-      const is_support_started_action =
-        action === 'support_started' ||
-        action === 'admin_reception_open' ||
-        (!action && text.includes('対応を開始'))
-
-      if (
-        key === 'room.reception.admin_opened' &&
-        is_support_started_action &&
-        row_admin &&
-        row_admin === admin_uuid
-      ) {
-        const created = new Date(row.created_at).getTime()
-
-        if (!Number.isNaN(created) && now_ms - created < 25_000) {
-          return {
-            status: 200,
-            body: { ok: true, skipped: true },
-          }
-        }
-      }
-    } catch {
-      continue
     }
   }
 
@@ -2642,6 +2644,61 @@ export async function handle_admin_reception_room_opened(
     return {
       status: 400,
       body: { ok: false, error: 'invalid_room' },
+    }
+  }
+
+  if (admin_participant_uuid) {
+    const latest_support = await latest_admin_support_action({
+      room_uuid,
+      admin_participant_uuid,
+    })
+
+    if (latest_support?.action_type === 'support_started') {
+      const room_mode_row = await supabase
+        .from('rooms')
+        .select('mode')
+        .eq('room_uuid', room_uuid)
+        .maybeSingle()
+      const support_mode_dup =
+        typeof room_mode_row.data?.mode === 'string'
+          ? room_mode_row.data.mode
+          : null
+
+      await debug_event({
+        category: 'admin_chat',
+        event: 'support_started_duplicate_skipped',
+        payload: {
+          room_uuid,
+          admin_user_uuid: admin_uuid,
+          admin_participant_uuid,
+          support_mode: support_mode_dup,
+          action_uuid: latest_support.action_uuid,
+          created_at: latest_support.created_at,
+          skipped_reason: 'latest_support_started_without_later_left',
+          reason: 'latest_support_started_without_later_left',
+        },
+      })
+
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          skipped: true,
+          action: latest_support.action_uuid
+            ? build_support_room_action_api_payload({
+                room_uuid,
+                action_uuid: latest_support.action_uuid,
+                action_type: 'support_started',
+                body: latest_support.body ?? '',
+                created_at:
+                  latest_support.created_at ?? new Date().toISOString(),
+                actor_display_name: latest_support.actor_display_name ?? '',
+                actor_user_uuid: latest_support.actor_user_uuid ?? admin_uuid,
+                source_channel: latest_support.source_channel ?? 'web',
+              })
+            : undefined,
+        },
+      }
     }
   }
 
@@ -3227,6 +3284,29 @@ export async function record_admin_support_left_session(input: {
 
   if (!admin_uuid || !user_participant_uuid) {
     await decision_skip('missing_admin_or_customer_participant', false)
+
+    return { ok: true, skipped: true }
+  }
+
+  const latest_support = await latest_admin_support_action({
+    room_uuid,
+    admin_participant_uuid: staff_participant_uuid,
+  })
+
+  if (latest_support?.action_type === 'support_left') {
+    await decision_skip('latest_support_left_exists', true)
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'support_left_duplicate_skipped',
+      payload: {
+        ...skip_payload_base,
+        action_uuid: latest_support.action_uuid,
+        created_at: latest_support.created_at,
+        skipped_reason: 'latest_support_left_after_started',
+        reason: 'latest_support_left_after_started',
+      },
+    })
 
     return { ok: true, skipped: true }
   }

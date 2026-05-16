@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 
 import AdminChatTimeline from '@/components/admin/c'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
+import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
 import type { chat_room_timeline_message } from '@/lib/chat/timeline_display'
 
 type AdminChatProps = {
@@ -17,6 +18,7 @@ type AdminChatProps = {
   room_display_title: string
   admin_user_uuid: string
   admin_participant_uuid: string
+  external_support_action?: chat_action_realtime_payload | null
 }
 
 const component_file = 'components/admin/chat.tsx'
