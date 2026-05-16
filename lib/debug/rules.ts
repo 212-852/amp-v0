@@ -398,6 +398,9 @@ export function resolve_debug_rule(input: {
   const admin_support_presence_lifecycle = new Set([
     'admin_presence_entered',
     'admin_presence_heartbeat',
+    'admin_presence_timeout_checker_started',
+    'admin_presence_timeout_checker_disabled',
+    'admin_presence_timeout_checker_stopped',
     'admin_leave_heartbeat_timeout_detected',
     'admin_auto_leave_decision_started',
     'admin_auto_leave_decision_succeeded',
@@ -750,6 +753,11 @@ export function resolve_debug_rule(input: {
     'admin_leave_visibility_hidden_detected',
     'admin_leave_pagehide_detected',
     'admin_leave_beforeunload_detected',
+    'admin_top_chat_action_received',
+    'admin_top_chat_action_accepted',
+    'admin_top_chat_action_ignored',
+    'admin_top_room_card_updated_from_action',
+    'admin_top_room_cards_sorted',
   ])
 
   const chat_realtime_success_gated = new Set([

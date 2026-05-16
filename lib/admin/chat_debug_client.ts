@@ -23,6 +23,10 @@ export function send_admin_chat_debug(input: {
   level?: 'info' | 'warn' | 'error'
   subscribe_status?: string | null
   message_uuid?: string | null
+  action_uuid?: string | null
+  support_session_key?: string | null
+  existing_left_action_uuid?: string | null
+  leave_reason?: string | null
   filter?: string | null
   phase?: string | null
 }) {
@@ -60,6 +64,10 @@ export function send_admin_chat_debug(input: {
           : null,
       subscribe_status: input.subscribe_status ?? null,
       message_uuid: input.message_uuid ?? null,
+      action_uuid: input.action_uuid ?? null,
+      support_session_key: input.support_session_key ?? null,
+      existing_left_action_uuid: input.existing_left_action_uuid ?? null,
+      leave_reason: input.leave_reason ?? null,
       filter: input.filter ?? null,
       phase: input.phase ?? null,
     }),

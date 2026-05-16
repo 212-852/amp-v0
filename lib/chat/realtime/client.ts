@@ -266,6 +266,8 @@ export type chat_realtime_debug_payload = {
   typing_exists?: boolean | null
   unread_count?: number | null
   action_uuid?: string | null
+  support_session_key?: string | null
+  existing_left_action_uuid?: string | null
   event_type?: string | null
   actor_name?: string | null
   inserted_index?: number | null

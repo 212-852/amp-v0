@@ -6,6 +6,7 @@ import { ArrowDown } from 'lucide-react'
 import PawIcon from '@/components/icons/paw'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import { use_admin_reception_support_presence } from '@/components/admin/reception/admin_support_presence'
+import type { admin_support_session_ref_value } from '@/components/admin/reception/admin_support_presence'
 import {
   archived_message_to_timeline_message,
   chat_timeline_time_bounds,
@@ -198,6 +199,8 @@ export default function AdminChatTimeline({
   const subscribed_room_uuid_ref = useRef<string | null>(null)
   const subscribed_chat_actions_room_ref = useRef<string | null>(null)
   const support_enter_session_ref = useRef<string | null>(null)
+  const current_support_session_ref =
+    useRef<admin_support_session_ref_value | null>(null)
   const show_jump_button_ref = useRef(false)
   const room_display_title_ref = useRef(room_display_title)
   const admin_browser_supabase_ref = useRef<SupabaseClient | null>(null)
@@ -337,6 +340,14 @@ export default function AdminChatTimeline({
           support_room_api_action_to_realtime(result.action),
           'enter_api',
         )
+        current_support_session_ref.current = {
+          room_uuid: locked_room,
+          admin_participant_uuid: admin_participant,
+          enter_action_uuid: result.action.action_uuid,
+          support_session_key: `${locked_room}|${admin_participant}|${result.action.action_uuid}`,
+          left_sent: false,
+          existing_left_action_uuid: null,
+        }
       }
 
       if (result.ok) {
@@ -359,15 +370,62 @@ export default function AdminChatTimeline({
     void run_enter_support_room()
 
     return () => {
+      const current = current_support_session_ref.current
+
+      if (current?.left_sent === true) {
+        send_admin_chat_debug({
+          event: 'support_left_duplicate_skipped',
+          room_uuid,
+          active_room_uuid: room_uuid,
+          admin_participant_uuid: admin_participant_uuid.trim(),
+          component_file,
+          leave_reason: 'component_cleanup',
+          support_session_key: current.support_session_key,
+          existing_left_action_uuid: current.existing_left_action_uuid,
+          ignored_reason: 'client_support_session_already_left',
+          phase: 'support_leave',
+        })
+
+        return
+      }
+
+      if (
+        !current ||
+        current.room_uuid !== room_uuid ||
+        current.admin_participant_uuid !== admin_participant_uuid.trim()
+      ) {
+        send_admin_chat_debug({
+          event: 'support_left_duplicate_skipped',
+          room_uuid,
+          active_room_uuid: room_uuid,
+          admin_participant_uuid: admin_participant_uuid.trim(),
+          component_file,
+          leave_reason: 'component_cleanup',
+          support_session_key: current?.support_session_key ?? null,
+          existing_left_action_uuid: current?.existing_left_action_uuid ?? null,
+          ignored_reason: 'missing_current_support_session',
+          phase: 'support_leave',
+        })
+
+        return
+      }
+
+      if (current) {
+        current.left_sent = true
+      }
+
       void call_leave_support_room({
         room_uuid,
         participant_uuid: admin_participant_uuid.trim(),
         leave_reason: 'component_cleanup',
-        support_session_key: `${room_uuid}|${admin_participant_uuid.trim()}`,
+        support_session_key: current.support_session_key,
         keepalive: true,
       })
         .then((result) => {
           if (result.ok && result.action) {
+            if (current) {
+              current.existing_left_action_uuid = result.action.action_uuid
+            }
             apply_support_action_to_timeline(
               support_room_api_action_to_realtime(result.action),
               'leave_api',
@@ -392,7 +450,8 @@ export default function AdminChatTimeline({
     staff_participant_uuid,
     staff_user_uuid,
     staff_tier,
-    enabled: Boolean(staff_participant_uuid.trim()),
+    enabled: true,
+    support_session_ref: current_support_session_ref,
     on_support_action: (action) => {
       apply_support_action_to_timeline(action, 'leave_api')
     },

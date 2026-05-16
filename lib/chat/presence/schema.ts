@@ -1,0 +1,1 @@
+export const participant_presence_columns_available = false

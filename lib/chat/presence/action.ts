@@ -647,15 +647,6 @@ export async function mark_admin_support_recovered_notice(input: {
 export async function expire_admin_support_presence(input: {
   room_uuid?: string | null
 }): Promise<Array<{ room_uuid: string; participant_uuid: string }>> {
-  await debug_event({
-    category: 'admin_chat',
-    event: 'admin_presence_timeout_expired',
-    payload: {
-      room_uuid: input.room_uuid ?? null,
-      skipped_reason: 'participant_presence_columns_unavailable',
-    },
-  })
-
   return []
 }
 

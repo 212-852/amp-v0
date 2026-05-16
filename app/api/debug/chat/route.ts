@@ -94,6 +94,8 @@ type chat_debug_body = {
   typing_exists?: unknown
   unread_count?: unknown
   action_uuid?: unknown
+  support_session_key?: unknown
+  existing_left_action_uuid?: unknown
   event_type?: unknown
   actor_name?: unknown
   inserted_index?: unknown
@@ -255,6 +257,8 @@ export async function POST(request: Request) {
       unread_count: number_or_null(body?.unread_count),
       latest_activity_at: string_or_null(body?.latest_activity_at),
       action_uuid: string_or_null(body?.action_uuid),
+      support_session_key: string_or_null(body?.support_session_key),
+      existing_left_action_uuid: string_or_null(body?.existing_left_action_uuid),
       event_type: string_or_null(body?.event_type),
       actor_name: string_or_null(body?.actor_name),
       inserted_index: number_or_null(body?.inserted_index),

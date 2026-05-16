@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { use_session_profile } from '@/components/session/profile'
+import { participant_presence_columns_available } from '@/lib/chat/presence/schema'
 import {
   build_room_card_summary,
   format_admin_room_unread_label,
@@ -279,20 +280,36 @@ export default function AdminReceptionRoomListLive({
     const channels: RealtimeChannel[] = []
     const chat_actions_channels: RealtimeChannel[] = []
     const typing_channels: RealtimeChannel[] = []
-    const timeout_sweep = window.setInterval(() => {
-      for (const room_uuid of room_uuids) {
-        void fetch('/api/chat/presence', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            room_uuid,
-            action: 'admin_support_timeout_check',
-            last_channel: 'admin',
-          }),
-        }).catch(() => {})
-      }
-    }, 10_000)
+    const timeout_sweep = participant_presence_columns_available
+      ? window.setInterval(() => {
+          for (const room_uuid of room_uuids) {
+            void fetch('/api/chat/presence', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                room_uuid,
+                action: 'admin_support_timeout_check',
+                last_channel: 'admin',
+              }),
+            }).catch(() => {})
+          }
+        }, 10_000)
+      : null
+
+    send_chat_realtime_debug({
+      event: participant_presence_columns_available
+        ? 'admin_presence_timeout_checker_started'
+        : 'admin_presence_timeout_checker_disabled',
+      room_uuid: null,
+      source_channel: 'admin',
+      prev_count: room_uuids.length,
+      next_count: room_uuids.length,
+      reason: participant_presence_columns_available
+        ? null
+        : 'participant_presence_columns_unavailable',
+      phase: 'admin_room_list_presence_timeout_checker',
+    })
 
     send_chat_realtime_debug({
       event: 'admin_top_realtime_subscribe_started',
@@ -1019,6 +1036,35 @@ export default function AdminReceptionRoomListLive({
         scope: 'admin_list',
         source_channel: 'admin',
         on_action: (action, inserted_index) => {
+          send_chat_realtime_debug({
+            event: 'admin_top_chat_action_received',
+            room_uuid: action.room_uuid,
+            active_room_uuid: null,
+            action_uuid: action.action_uuid,
+            event_type: action.action_type,
+            source_channel: action.source_channel ?? 'admin',
+            ignored_reason: null,
+            phase: 'admin_room_list_support_action',
+          })
+
+          if (
+            action.action_type !== 'support_started' &&
+            action.action_type !== 'support_left'
+          ) {
+            send_chat_realtime_debug({
+              event: 'admin_top_chat_action_ignored',
+              room_uuid: action.room_uuid,
+              active_room_uuid: null,
+              action_uuid: action.action_uuid,
+              event_type: action.action_type,
+              source_channel: action.source_channel ?? 'admin',
+              ignored_reason: 'unsupported_action_type',
+              phase: 'admin_room_list_support_action',
+            })
+
+            return
+          }
+
           const activity_at = action.created_at ?? new Date().toISOString()
           const body_text = chat_action_timeline_text(action)
 
@@ -1035,10 +1081,15 @@ export default function AdminReceptionRoomListLive({
                 preview: body_text || row.preview,
                 updated_at: activity_at,
                 latest_activity_at: activity_at,
+                user_is_typing: false,
+                user_typing_at: null,
+                admin_support_staff: [],
+                admin_support_card_line: '',
+                admin_support_active_header_line: '',
               }
 
               send_chat_realtime_debug({
-                event: 'admin_room_card_state_updated',
+                event: 'admin_top_chat_action_accepted',
                 room_uuid: action.room_uuid,
                 active_room_uuid: null,
                 action_uuid: action.action_uuid,
@@ -1047,6 +1098,19 @@ export default function AdminReceptionRoomListLive({
                 prev_count: previous.length,
                 next_count: previous.length,
                 ignored_reason: null,
+                phase: 'admin_room_list_support_action',
+              })
+
+              send_chat_realtime_debug({
+                event: 'admin_top_room_card_updated_from_action',
+                room_uuid: action.room_uuid,
+                active_room_uuid: null,
+                action_uuid: action.action_uuid,
+                event_type: action.action_type,
+                source_channel: action.source_channel ?? 'admin',
+                prev_count: previous.length,
+                next_count: previous.length,
+                latest_activity_at: activity_at,
                 phase: 'admin_room_list_support_action',
               })
 
@@ -1063,13 +1127,24 @@ export default function AdminReceptionRoomListLive({
             })
 
             if (!matched) {
+              send_chat_realtime_debug({
+                event: 'admin_top_chat_action_ignored',
+                room_uuid: action.room_uuid,
+                active_room_uuid: null,
+                action_uuid: action.action_uuid,
+                event_type: action.action_type,
+                source_channel: action.source_channel ?? 'admin',
+                ignored_reason: 'room_card_not_found',
+                phase: 'admin_room_list_support_action',
+              })
+
               return previous
             }
 
             const sorted = sort_room_cards(next)
 
             send_chat_realtime_debug({
-              event: 'admin_room_card_resorted',
+              event: 'admin_top_room_cards_sorted',
               room_uuid: action.room_uuid,
               action_uuid: action.action_uuid,
               event_type: action.action_type,
@@ -1367,7 +1442,18 @@ export default function AdminReceptionRoomListLive({
       typing_channels.forEach((ch) => {
         void supabase.removeChannel(ch)
       })
-      window.clearInterval(timeout_sweep)
+      if (timeout_sweep !== null) {
+        window.clearInterval(timeout_sweep)
+        send_chat_realtime_debug({
+          event: 'admin_presence_timeout_checker_stopped',
+          room_uuid: null,
+          source_channel: 'admin',
+          prev_count: room_uuids.length,
+          next_count: room_uuids.length,
+          reason: 'component_cleanup',
+          phase: 'admin_room_list_presence_timeout_checker',
+        })
+      }
       void supabase.removeChannel(global_messages_channel)
       if (rooms_unread_channel) {
         void supabase.removeChannel(rooms_unread_channel)
