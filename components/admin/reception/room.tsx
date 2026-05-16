@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import AdminChat from '@/components/admin/chat'
 import AdminHandoffMemo from '@/components/admin/memo'
@@ -12,7 +12,7 @@ import type { handoff_memo } from '@/lib/chat/action'
 import type {
   reception_room,
   reception_room_message,
-} from '@/lib/admin/reception/room'
+} from '@/lib/admin/reception/types'
 import {
   append_chat_action_to_admin_timeline,
   type chat_action_realtime_payload,
@@ -51,20 +51,26 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   const room_rendered_debug_ref = useRef<string | null>(null)
   const live_room_uuid = props.room?.room_uuid ?? props.room_uuid
 
-  if (room_rendered_debug_ref.current !== props.room_uuid) {
-    room_rendered_debug_ref.current = props.room_uuid
+  useLayoutEffect(() => {
+    const focus_room = props.room_uuid.trim()
+
+    if (!focus_room || room_rendered_debug_ref.current === focus_room) {
+      return
+    }
+
+    room_rendered_debug_ref.current = focus_room
 
     send_admin_chat_debug({
       event: 'admin_reception_room_rendered',
-      room_uuid: props.room_uuid,
-      active_room_uuid: props.room_uuid,
+      room_uuid: focus_room,
+      active_room_uuid: focus_room,
       admin_user_uuid: props.admin_user_uuid.trim() || null,
       admin_participant_uuid: props.admin_participant_uuid.trim() || null,
       component_file: 'components/admin/reception/room.tsx',
-      pathname: `/admin/reception/${props.room_uuid}`,
+      pathname: `/admin/reception/${focus_room}`,
       phase: 'admin_reception_room',
     })
-  }
+  }, [props.admin_participant_uuid, props.admin_user_uuid, props.room_uuid])
 
   useEffect(() => {
     room_display_title_ref.current = props.customer_display_name
@@ -218,6 +224,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
       </header>
 
       <AdminReceptionLive
+        key={`live:${live_room_uuid}:${props.admin_participant_uuid}`}
         room_uuid={live_room_uuid}
         admin_user_uuid={props.admin_user_uuid}
         admin_participant_uuid={props.admin_participant_uuid}

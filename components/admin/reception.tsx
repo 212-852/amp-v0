@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 
 import AdminReceptionRoomListLive from '@/components/admin/reception/room_list_live'
-import type { reception_room } from '@/lib/admin/reception/room'
+import type { reception_room } from '@/lib/admin/reception/types'
 
 type AdminReceptionProps = {
   rooms: reception_room[]

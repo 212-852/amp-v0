@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, type MutableRefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, type MutableRefObject } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { create_browser_supabase } from '@/lib/db/browser'
@@ -157,19 +157,26 @@ export function use_chat_realtime(input: use_chat_realtime_input) {
   const listener_scope = listener_scope_for_owner(owner)
   const source_channel = input.source_channel ?? (owner === 'admin' ? 'admin' : 'web')
 
-  if (enabled) {
+  useLayoutEffect(() => {
+    if (!enabled) {
+      return
+    }
+
     const mount_key = `${owner}:${room_uuid}`
 
-    if (mount_debug_key_ref.current !== mount_key) {
-      mount_debug_key_ref.current = mount_key
-      emit_chat_realtime_hook_debug('chat_realtime_hook_mounted', {
-        owner,
-        room_uuid,
-        active_room_uuid,
-        subscription_status: 'HOOK_MOUNTED',
-      })
+    if (mount_debug_key_ref.current === mount_key) {
+      return
     }
-  }
+
+    mount_debug_key_ref.current = mount_key
+
+    emit_chat_realtime_hook_debug('chat_realtime_hook_mounted', {
+      owner,
+      room_uuid,
+      active_room_uuid,
+      subscription_status: 'HOOK_MOUNTED',
+    })
+  }, [active_room_uuid, enabled, owner, room_uuid])
 
   useEffect(() => {
     if (!enabled) {

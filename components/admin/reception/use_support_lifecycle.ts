@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
@@ -12,7 +12,7 @@ import {
 
 import type { admin_support_session_ref_value } from './admin_support_presence'
 
-const component_file = 'components/admin/reception/room.tsx'
+const component_file = 'components/admin/reception/use_support_lifecycle.ts'
 const support_lifecycle_owner = component_file
 
 type global_lifecycle_owner = {
@@ -60,10 +60,15 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
     admin_participant_uuid_ref.current = input.admin_participant_uuid
   }, [input.admin_participant_uuid, input.admin_user_uuid, input.room_uuid])
 
-  const lifecycle_room = input.room_uuid.trim()
+  useLayoutEffect(() => {
+    const lifecycle_room = input.room_uuid.trim()
 
-  if (lifecycle_room && lifecycle_mounted_room_ref.current !== lifecycle_room) {
+    if (!lifecycle_room || lifecycle_mounted_room_ref.current === lifecycle_room) {
+      return
+    }
+
     lifecycle_mounted_room_ref.current = lifecycle_room
+
     send_admin_chat_debug({
       event: 'support_lifecycle_mounted',
       room_uuid: lifecycle_room,
@@ -72,10 +77,10 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
       admin_participant_uuid: input.admin_participant_uuid.trim() || null,
       component_file,
       support_lifecycle_owner,
-      pathname,
+      pathname: `/admin/reception/${lifecycle_room}`,
       phase: 'support_lifecycle',
     })
-  }
+  }, [input.admin_participant_uuid, input.admin_user_uuid, input.room_uuid])
 
   useEffect(() => {
     const admin_participant_uuid = input.admin_participant_uuid.trim()
