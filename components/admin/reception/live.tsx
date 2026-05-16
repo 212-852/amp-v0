@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from 'react'
@@ -48,11 +47,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
   const realtime_messages_channel_ref = useRef<RealtimeChannel | null>(null)
   const room_display_title_ref = useRef(props.customer_display_name)
 
-  useLayoutEffect(() => {
-    if (!room_uuid || live_mounted_room_ref.current === room_uuid) {
-      return
-    }
-
+  if (room_uuid && live_mounted_room_ref.current !== room_uuid) {
     live_mounted_room_ref.current = room_uuid
 
     send_admin_chat_debug({
@@ -64,7 +59,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
       component_file,
       phase: 'admin_reception_live',
     })
-  }, [props.admin_participant_uuid, props.admin_user_uuid, room_uuid])
+  }
 
   useEffect(() => {
     room_display_title_ref.current = props.customer_display_name
