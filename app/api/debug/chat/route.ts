@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { debug_event } from '@/lib/debug'
 
 type chat_debug_body = {
+  category?: unknown
+  level?: unknown
   event?: unknown
   room_uuid?: unknown
   active_room_uuid?: unknown
@@ -116,6 +118,13 @@ function number_or_null(value: unknown): number | null {
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as chat_debug_body | null
   const event = string_or_null(body?.event)
+  const category_raw = string_or_null(body?.category)
+  const category =
+    category_raw?.toLowerCase() === 'admin_chat'
+      ? 'admin_chat'
+      : category_raw?.toLowerCase() === 'chat_realtime'
+        ? 'chat_realtime'
+        : 'chat_realtime'
 
   if (!event) {
     return NextResponse.json(
@@ -125,9 +134,10 @@ export async function POST(request: Request) {
   }
 
   await debug_event({
-    category: 'chat_realtime',
+    category,
     event,
     payload: {
+      level: string_or_null(body?.level),
       room_uuid: string_or_null(body?.room_uuid),
       active_room_uuid: string_or_null(body?.active_room_uuid),
       participant_uuid: string_or_null(body?.participant_uuid),

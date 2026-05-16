@@ -680,6 +680,7 @@ export function resolve_debug_rule(input: {
     'support_started_realtime_rendered',
     'admin_chat_room_rendered',
     'admin_chat_room_mounted',
+    'admin_chat_mounted',
     'admin_chat_room_ready',
     'admin_chat_room_enter_started',
     'admin_chat_room_enter_succeeded',
