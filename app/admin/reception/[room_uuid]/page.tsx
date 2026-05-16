@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import AdminReceptionActiveSummary from '@/components/admin/reception/active_summary'
 import AdminChatTimeline from '@/components/admin/c'
+import { AdminRenderProbe } from '@/components/admin/render_probe'
 import AdminHandoffMemo from '@/components/admin/memo'
 import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import {
@@ -117,7 +118,11 @@ export default async function AdminReceptionRoomPage({
     room?.display_name?.trim() || customer_display_name_fallback
 
   return (
-    <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+    <div
+      className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white"
+      data-debug-component="app/admin/reception/[room_uuid]/page.tsx"
+    >
+      <AdminRenderProbe file_path="app/admin/reception/[room_uuid]/page.tsx" />
       <header className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
         <nav
           aria-label="Breadcrumb"
@@ -158,6 +163,10 @@ export default async function AdminReceptionRoomPage({
           </div>
         </div>
 
+        {/*
+          Reception room chat timeline (client): components/admin/c.tsx -> AdminChatTimeline.
+          Realtime for this UI must live in that module, not components/chat/web.tsx.
+        */}
         <AdminChatTimeline
           key={room_uuid}
           messages={message_result.messages}

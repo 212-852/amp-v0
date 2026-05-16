@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { Bell, UserRound } from 'lucide-react'
 
 import AdminHeaderMenu from '@/components/admin/menu'
+import { AdminRenderProbe } from '@/components/admin/render_probe'
 import { AdminReceptionButton } from '@/components/admin/reception_button'
 import NotificationSettings from '@/components/notification/settings'
 import OverlayRoot from '@/components/overlay/root'
@@ -68,7 +69,11 @@ export default function AdminHeader({
 
   return (
     <>
-      <header className="border-b border-black/[0.06] bg-white px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] shadow-[0_1px_0_rgba(0,0,0,0.03)]">
+      <AdminRenderProbe file_path="components/admin/header.tsx" />
+      <header
+        className="border-b border-black/[0.06] bg-white px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] shadow-[0_1px_0_rgba(0,0,0,0.03)]"
+        data-debug-component="components/admin/header.tsx"
+      >
         <div className="flex min-h-[64px] items-center justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]">

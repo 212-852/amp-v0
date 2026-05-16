@@ -390,6 +390,10 @@ export function WebChat({
   locale: chat_locale
   mode: room_mode
 }) {
+  if (typeof console !== 'undefined') {
+    console.log('ADMIN_REAL_COMPONENT_RENDERED', 'components/chat/web.tsx')
+  }
+
   const chat = useUserChat()
   const { session } = use_session_profile()
   const {
@@ -872,7 +876,10 @@ export function WebChat({
   }, [scroll_to_bottom, typing_banner])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-debug-component="components/chat/web.tsx"
+    >
       <div
         ref={set_scroll_container}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4"

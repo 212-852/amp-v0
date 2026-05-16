@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 
 import AdminReceptionRoomListLive from '@/components/admin/reception/room_list_live'
+import { AdminRenderProbe } from '@/components/admin/render_probe'
 import type { reception_room } from '@/lib/admin/reception/room'
 
 type AdminReceptionProps = {
@@ -36,7 +37,9 @@ export default function AdminReception({ rooms, state }: AdminReceptionProps) {
     <section
       aria-label="Admin reception inbox"
       className="flex flex-col gap-2"
+      data-debug-component="components/admin/reception.tsx"
     >
+      <AdminRenderProbe file_path="components/admin/reception.tsx" />
       <AdminReceptionRoomListLive initial_rooms={rooms} limit={3} />
       <div className="flex justify-end pr-1">
         <Link

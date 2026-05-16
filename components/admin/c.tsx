@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowDown } from 'lucide-react'
 
 import PawIcon from '@/components/icons/paw'
+import { AdminRenderProbe } from '@/components/admin/render_probe'
 import { use_admin_reception_support_presence } from '@/components/admin/reception/admin_support_presence'
 import {
   archived_message_to_timeline_message,
@@ -1685,7 +1686,11 @@ export default function AdminChatTimeline({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div
+      className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      data-debug-component="components/admin/c.tsx"
+    >
+      <AdminRenderProbe file_path="components/admin/c.tsx" />
       <div className="relative min-h-0 w-full flex-1">
         <div
           ref={message_list_scroll_ref}

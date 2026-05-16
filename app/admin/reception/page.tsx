@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { Search } from 'lucide-react'
 
 import AdminReceptionRoomListLive from '@/components/admin/reception/room_list_live'
+import { AdminRenderProbe } from '@/components/admin/render_probe'
 import {
   load_reception_channel_stats,
   list_reception_rooms,
@@ -95,7 +96,8 @@ export default async function AdminReceptionPage({
   const rooms = result.rooms
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-debug-component="app/admin/reception/page.tsx">
+      <AdminRenderProbe file_path="app/admin/reception/page.tsx" />
       <header>
         <nav
           aria-label="Breadcrumb"
