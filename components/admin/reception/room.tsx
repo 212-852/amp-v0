@@ -6,6 +6,7 @@ import AdminChat from '@/components/admin/chat'
 import AdminHandoffMemo from '@/components/admin/memo'
 import AdminReceptionActiveSummary from '@/components/admin/reception/active_summary'
 import AdminReceptionLive from '@/components/admin/reception/live'
+import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import type { handoff_memo } from '@/lib/chat/action'
 import type {
   reception_room,
@@ -46,6 +47,27 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   )
   const realtime_messages_channel_ref = useRef<RealtimeChannel | null>(null)
   const room_display_title_ref = useRef(props.customer_display_name)
+  const room_rendered_debug_ref = useRef<string | null>(null)
+  const live_room_uuid = props.room?.room_uuid ?? props.room_uuid
+
+  useEffect(() => {
+    if (room_rendered_debug_ref.current === props.room_uuid) {
+      return
+    }
+
+    room_rendered_debug_ref.current = props.room_uuid
+
+    send_admin_chat_debug({
+      event: 'admin_reception_room_rendered',
+      room_uuid: props.room_uuid,
+      active_room_uuid: props.room_uuid,
+      admin_user_uuid: props.admin_user_uuid.trim() || null,
+      admin_participant_uuid: props.admin_participant_uuid.trim() || null,
+      component_file: 'components/admin/reception/room.tsx',
+      pathname: `/admin/reception/${props.room_uuid}`,
+      phase: 'admin_reception_room',
+    })
+  }, [props.admin_participant_uuid, props.admin_user_uuid, props.room_uuid])
 
   useEffect(() => {
     room_display_title_ref.current = props.customer_display_name
@@ -177,7 +199,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <AdminReceptionLive
-        room_uuid={props.room_uuid}
+        room_uuid={live_room_uuid}
         admin_user_uuid={props.admin_user_uuid}
         admin_participant_uuid={props.admin_participant_uuid}
         staff_user_uuid={props.staff_user_uuid}

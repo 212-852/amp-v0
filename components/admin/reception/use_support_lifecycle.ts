@@ -12,7 +12,7 @@ import {
 
 import type { admin_support_session_ref_value } from './admin_support_presence'
 
-const component_file = 'components/admin/reception/use_support_lifecycle.ts'
+const component_file = 'components/admin/reception/room.tsx'
 const support_lifecycle_owner = component_file
 
 type global_lifecycle_owner = {
