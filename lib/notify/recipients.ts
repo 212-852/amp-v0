@@ -244,7 +244,7 @@ export async function load_admin_notify_recipients(input: {
 
   const presence_result = await supabase
     .from('participants')
-    .select('participant_uuid, user_uuid, last_seen_at, is_typing, typing_at')
+    .select('participant_uuid, user_uuid')
     .eq('room_uuid', room_uuid)
     .in('role', ['admin', 'concierge'])
 
@@ -256,7 +256,6 @@ export async function load_admin_notify_recipients(input: {
     }
   }
 
-  const admin_page_open_within_ms = 5 * 60 * 1000
   const active_admin_count = (presence_result.data ?? []).filter((row) => {
     const user_uuid =
       typeof row.user_uuid === 'string' && row.user_uuid.length > 0
@@ -267,20 +266,7 @@ export async function load_admin_notify_recipients(input: {
       return false
     }
 
-    const raw = row.last_seen_at
-    const last_seen_at =
-      typeof raw === 'string' && raw.length > 0 ? raw : null
-    const typing_at =
-      typeof row.typing_at === 'string' && row.typing_at.length > 0
-        ? row.typing_at
-        : null
-
-    return derive_presence_recent_within_ms({
-      last_seen_at,
-      is_typing: row.is_typing === true,
-      typing_at,
-      active_within_ms: admin_page_open_within_ms,
-    })
+    return false
   }).length
 
   return {

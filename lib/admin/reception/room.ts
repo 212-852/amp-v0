@@ -3,9 +3,7 @@ import 'server-only'
 import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import {
   build_admin_support_ui_strings,
-  derive_presence_recent_from_timestamps,
   is_participant_role,
-  typing_timestamp_is_fresh,
   type admin_support_staff_row,
   type participant_role,
 } from '@/lib/chat/presence/rules'
@@ -542,37 +540,7 @@ function end_user_typing_snapshot(
   room_ps: participant_row[],
   now: Date,
 ): { is_typing: boolean; typing_at: string | null } {
-  let best_at: string | null = null
-  let best_ms = 0
-  let any = false
-
-  for (const p of room_ps) {
-    const role = p.role?.trim().toLowerCase() ?? ''
-
-    if (role !== 'user' && role !== 'driver') {
-      continue
-    }
-
-    if (
-      !typing_timestamp_is_fresh(
-        p.typing_at ?? null,
-        p.is_typing ?? null,
-        now,
-      )
-    ) {
-      continue
-    }
-
-    any = true
-    const t = new Date(p.typing_at ?? 0).getTime()
-
-    if (!Number.isNaN(t) && t >= best_ms) {
-      best_ms = t
-      best_at = typeof p.typing_at === 'string' ? p.typing_at : null
-    }
-  }
-
-  return { is_typing: any, typing_at: best_at }
+  return { is_typing: false, typing_at: null }
 }
 
 let admin_chat_schema_columns_debug_emitted = false
@@ -866,15 +834,10 @@ async function enrich_room_cards(
         user_uuid: uid,
         role: pr_role,
         display_name,
-        last_seen_at: string_value(p.last_seen_at ?? null),
-        typing_at: string_value(p.typing_at ?? null),
-        is_typing: p.is_typing === true,
-        is_active: derive_presence_recent_from_timestamps({
-          last_seen_at: string_value(p.last_seen_at ?? null),
-          is_typing: p.is_typing === true,
-          typing_at: string_value(p.typing_at ?? null),
-          now: now_support,
-        }),
+        last_seen_at: null,
+        typing_at: null,
+        is_typing: false,
+        is_active: false,
       })
     }
 
@@ -900,13 +863,8 @@ async function enrich_room_cards(
       preview: preview_resolved,
       user_participant_uuid: string_value(customer?.participant_uuid ?? null),
       user_is_typing: typing_snapshot.is_typing,
-      user_is_online: derive_presence_recent_from_timestamps({
-        last_seen_at: string_value(customer?.last_seen_at ?? null),
-        is_typing: typing_snapshot.is_typing,
-        typing_at: string_value(customer?.typing_at ?? null),
-        now: now_support,
-      }),
-      user_last_seen_at: string_value(customer?.last_seen_at ?? null),
+      user_is_online: false,
+      user_last_seen_at: null,
       presence_source_channel: normalize_reception_channel(customer?.last_channel),
       user_typing_at: typing_snapshot.typing_at,
       admin_support_staff,

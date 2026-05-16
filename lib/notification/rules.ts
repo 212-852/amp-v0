@@ -370,37 +370,7 @@ const foreground_presence_within_ms = 5 * 60 * 1000
 async function resolve_foreground_app_open(
   participant_uuid: string | null,
 ): Promise<boolean> {
-  if (!participant_uuid) {
-    return false
-  }
-
-  const result = await supabase
-    .from('participants')
-    .select('last_seen_at, is_typing, typing_at')
-    .eq('participant_uuid', participant_uuid)
-    .maybeSingle()
-
-  if (result.error || !result.data) {
-    return false
-  }
-
-  const row = result.data as {
-    last_seen_at?: string | null
-    is_typing?: boolean | null
-    typing_at?: string | null
-  }
-
-  const last_seen_at =
-    typeof row.last_seen_at === 'string' ? row.last_seen_at : null
-  const typing_at =
-    typeof row.typing_at === 'string' ? row.typing_at : null
-
-  return derive_presence_recent_within_ms({
-    last_seen_at,
-    is_typing: row.is_typing === true,
-    typing_at,
-    active_within_ms: foreground_presence_within_ms,
-  })
+  return false
 }
 
 export async function user_allows_notification(input: {

@@ -149,9 +149,23 @@ async function update_participant_presence(input: {
   participant_uuid: string
   patch: Record<string, unknown>
 }) {
+  const safe_patch = { ...input.patch }
+
+  delete safe_patch.is_active
+  delete safe_patch.is_typing
+  delete safe_patch.last_seen_at
+  delete safe_patch.typing_at
+  delete safe_patch.online_at
+  delete safe_patch.active_at
+  delete safe_patch.heartbeat_at
+
+  if (Object.keys(safe_patch).length === 0) {
+    return
+  }
+
   const result = await supabase
     .from('participants')
-    .update(input.patch)
+    .update(safe_patch)
     .eq('room_uuid', input.room_uuid)
     .eq('participant_uuid', input.participant_uuid)
 
@@ -185,9 +199,7 @@ export async function mark_room_entered(input: {
   participant_uuid: string
   last_channel?: participant_surface_channel | null
 }) {
-  const patch: Record<string, unknown> = {
-    last_seen_at: new Date().toISOString(),
-  }
+  const patch: Record<string, unknown> = {}
 
   if (input.last_channel) {
     patch.last_channel = input.last_channel
@@ -222,8 +234,6 @@ export async function mark_room_left(input: {
   debug_event_name?: string | null
   trace_admin_presence_leave_update?: boolean
 }) {
-  const now = new Date().toISOString()
-
   if (input.trace_admin_presence_leave_update) {
     await debug_event({
       category: 'admin_chat',
@@ -242,9 +252,6 @@ export async function mark_room_left(input: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
       patch: {
-        is_typing: false,
-        typing_at: null,
-        last_seen_at: now,
       },
     })
 
@@ -256,7 +263,7 @@ export async function mark_room_left(input: {
           room_uuid: input.room_uuid,
           admin_participant_uuid: input.participant_uuid,
           presence_recent: false,
-          last_seen_at: now,
+          last_seen_at: null,
           error_code: null,
           error_message: null,
         },
@@ -411,10 +418,7 @@ export async function mark_typing_stopped(input: {
 type admin_support_event_row = {
   user_uuid: string | null
   role: string | null
-  is_typing: boolean | null
-  last_seen_at: string | null
   last_channel: string | null
-  typing_at: string | null
 }
 
 async function load_participant_admin_support_event_payload(input: {
@@ -433,9 +437,7 @@ async function load_participant_admin_support_event_payload(input: {
 } | null> {
   const snap = await supabase
     .from('participants')
-    .select(
-      'user_uuid, role, is_typing, last_seen_at, last_channel, typing_at',
-    )
+    .select('user_uuid, role, last_channel')
     .eq('room_uuid', input.room_uuid)
     .eq('participant_uuid', input.participant_uuid)
     .maybeSingle()
@@ -452,24 +454,16 @@ async function load_participant_admin_support_event_payload(input: {
   const role = typeof row.role === 'string' ? row.role : null
   const last_channel =
     typeof row.last_channel === 'string' ? row.last_channel : null
-  const typing_at =
-    typeof row.typing_at === 'string' ? row.typing_at : null
 
   return {
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
     user_uuid,
     role,
-    is_active: derive_presence_recent_from_timestamps({
-      last_seen_at:
-        typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
-      is_typing: row.is_typing === true,
-      typing_at,
-    }),
-    is_typing: row.is_typing === true,
-    last_seen_at:
-      typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
-    typing_at,
+    is_active: false,
+    is_typing: false,
+    last_seen_at: null,
+    typing_at: null,
     source_channel: last_channel,
   }
 }
@@ -653,114 +647,16 @@ export async function mark_admin_support_recovered_notice(input: {
 export async function expire_admin_support_presence(input: {
   room_uuid?: string | null
 }): Promise<Array<{ room_uuid: string; participant_uuid: string }>> {
-  const cutoff_ms = Date.now() - admin_support_active_within_ms
-  const cutoff_iso = new Date(cutoff_ms).toISOString()
-  let query = supabase
-    .from('participants')
-    .select(
-      'participant_uuid, room_uuid, user_uuid, role, is_typing, last_seen_at, typing_at, last_channel',
-    )
-    .in('role', ['admin', 'concierge'])
-    .or(`last_seen_at.is.null,last_seen_at.lt.${cutoff_iso}`)
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_presence_timeout_expired',
+    payload: {
+      room_uuid: input.room_uuid ?? null,
+      skipped_reason: 'participant_presence_columns_unavailable',
+    },
+  })
 
-  if (input.room_uuid) {
-    query = query.eq('room_uuid', input.room_uuid)
-  }
-
-  const result = await query
-
-  if (result.error) {
-    throw result.error
-  }
-
-  const rows = (result.data ?? []) as Array<{
-    participant_uuid: string
-    room_uuid: string | null
-    user_uuid: string | null
-    role: string | null
-    is_typing: boolean | null
-    last_seen_at: string | null
-    typing_at: string | null
-    last_channel: string | null
-  }>
-  const expired: Array<{ room_uuid: string; participant_uuid: string }> = []
-
-  for (const row of rows) {
-    if (!row.room_uuid) {
-      continue
-    }
-
-    const last_seen_ms = row.last_seen_at
-      ? new Date(row.last_seen_at).getTime()
-      : NaN
-
-    if (!Number.isNaN(last_seen_ms) && last_seen_ms >= cutoff_ms) {
-      continue
-    }
-
-    if (
-      derive_presence_recent_from_timestamps({
-        last_seen_at: row.last_seen_at,
-        is_typing: row.is_typing === true,
-        typing_at: row.typing_at,
-      })
-    ) {
-      continue
-    }
-
-    await debug_event({
-      category: 'admin_chat',
-      event: 'admin_leave_heartbeat_timeout_detected',
-      payload: {
-        room_uuid: row.room_uuid,
-        previous_room_uuid: row.room_uuid,
-        next_room_uuid: null,
-        admin_user_uuid: row.user_uuid,
-        admin_participant_uuid: row.participant_uuid,
-        visibility_state: null,
-        pathname: null,
-        leave_reason: 'heartbeat_timeout',
-      },
-    })
-
-    await update_participant_presence({
-      room_uuid: row.room_uuid,
-      participant_uuid: row.participant_uuid,
-      patch: {
-        is_typing: false,
-        typing_at: null,
-      },
-    })
-
-    const age_seconds = Number.isNaN(last_seen_ms)
-      ? null
-      : Math.floor((Date.now() - last_seen_ms) / 1000)
-
-    await debug_event({
-      category: 'admin_chat',
-      event: 'admin_presence_timeout_expired',
-      payload: {
-        room_uuid: row.room_uuid,
-        participant_uuid: row.participant_uuid,
-        admin_user_uuid: row.user_uuid,
-        user_uuid: row.user_uuid,
-        role: row.role,
-        presence_recent: false,
-        is_typing: false,
-        visibility_state: null,
-        last_seen_at: row.last_seen_at,
-        source_channel: row.last_channel,
-        timeout_seconds: age_seconds,
-      },
-    })
-
-    expired.push({
-      room_uuid: row.room_uuid,
-      participant_uuid: row.participant_uuid,
-    })
-  }
-
-  return expired
+  return []
 }
 
 async function load_profiles(participants: participant_row[]) {
@@ -827,16 +723,21 @@ export async function list_room_presence(input: {
 }> {
   const participants_result = await supabase
     .from('participants')
-    .select(
-      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, is_typing, last_seen_at, typing_at',
-    )
+    .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role')
     .eq('room_uuid', input.room_uuid)
 
   if (participants_result.error) {
     throw participants_result.error
   }
 
-  const rows = (participants_result.data ?? []) as participant_row[]
+  const rows = ((participants_result.data ?? []) as Array<
+    Omit<participant_row, 'is_typing' | 'last_seen_at' | 'typing_at'>
+  >).map((row) => ({
+    ...row,
+    is_typing: false,
+    last_seen_at: null,
+    typing_at: null,
+  }))
   const profiles = await load_profiles(rows)
   const participants = rows.map((row) =>
     to_presence_participant({
@@ -866,7 +767,7 @@ export async function resolve_admin_room_typing_banner_lines(input: {
 
   const result = await supabase
     .from('participants')
-    .select('participant_uuid, user_uuid, role, is_typing, typing_at')
+    .select('participant_uuid, user_uuid, role')
     .eq('room_uuid', room_uuid)
     .neq('participant_uuid', viewer)
 
@@ -878,59 +779,9 @@ export async function resolve_admin_room_typing_banner_lines(input: {
     participant_uuid: string
     user_uuid: string | null
     role: string | null
-    is_typing: boolean | null
-    typing_at: string | null
   }>
 
-  const now = new Date()
-  const staff_user_set = new Set<string>()
-  let user_typing = false
-  let bot_typing = false
-
-  for (const row of rows) {
-    const role = row.role?.trim().toLowerCase() ?? ''
-
-    if (!typing_timestamp_is_fresh(row.typing_at, row.is_typing, now)) {
-      continue
-    }
-
-    if (role === 'user') {
-      user_typing = true
-    }
-
-    if (role === 'bot') {
-      bot_typing = true
-    }
-
-    if ((role === 'admin' || role === 'concierge') && row.user_uuid) {
-      const u = clean_uuid(row.user_uuid)
-
-      if (u) {
-        staff_user_set.add(u)
-      }
-    }
-  }
-
-  const label_map = await batch_resolve_admin_operator_display(
-    [...staff_user_set],
-    'memo_list',
-  )
-  const lines: string[] = []
-
-  if (user_typing) {
-    lines.push('入力中...')
-  }
-
-  for (const uuid of staff_user_set) {
-    const label = label_map.get(uuid) ?? 'Staff'
-    lines.push(`${label} が入力中...`)
-  }
-
-  if (bot_typing) {
-    lines.push('Bot が入力中...')
-  }
-
-  return lines
+  return []
 }
 
 export async function list_reception_room_cards(
@@ -967,16 +818,21 @@ export async function list_reception_room_cards(
   const room_uuids = rooms.map((row) => row.room_uuid)
   const participants_result = await supabase
     .from('participants')
-    .select(
-      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, last_channel, status, is_typing, last_seen_at, typing_at',
-    )
+    .select('participant_uuid, room_uuid, user_uuid, visitor_uuid, role, last_channel, status')
     .in('room_uuid', room_uuids)
 
   if (participants_result.error) {
     throw participants_result.error
   }
 
-  const participants = (participants_result.data ?? []) as participant_row[]
+  const participants = ((participants_result.data ?? []) as Array<
+    Omit<participant_row, 'is_typing' | 'last_seen_at' | 'typing_at'>
+  >).map((row) => ({
+    ...row,
+    is_typing: false,
+    last_seen_at: null,
+    typing_at: null,
+  }))
   const profiles = await load_profiles(participants)
   const messages_result = await supabase
     .from('messages')
