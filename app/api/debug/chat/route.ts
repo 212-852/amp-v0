@@ -70,6 +70,7 @@ type chat_debug_body = {
   skipped_reason?: unknown
   dependency_values?: unknown
   mounted_at?: unknown
+  component_file?: unknown
   payload_channel?: unknown
   payload_source_channel?: unknown
   payload_direction?: unknown
@@ -207,6 +208,7 @@ export async function POST(request: Request) {
       skipped_reason: string_or_null(body?.skipped_reason),
       dependency_values: string_or_null(body?.dependency_values),
       mounted_at: string_or_null(body?.mounted_at),
+      component_file: string_or_null(body?.component_file),
       payload_channel: string_or_null(body?.payload_channel),
       payload_source_channel: string_or_null(body?.payload_source_channel),
       payload_direction: string_or_null(body?.payload_direction),

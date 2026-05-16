@@ -43,6 +43,8 @@ import {
 } from '@/lib/chat/realtime/toast_decision'
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 
+const component_file = 'components/admin/c.tsx'
+
 type AdminChatTimelineProps = {
   messages: chat_room_timeline_message[]
   load_failed: boolean
@@ -165,7 +167,8 @@ export default function AdminChatTimeline({
   })
 
   if (typeof console !== 'undefined') {
-    console.debug('[admin_chat_component_rendered]', {
+    console.log('ADMIN_CHAT_ROOM_RENDERED', component_file)
+    console.debug('[admin_chat_room_rendered]', {
       room_uuid,
       selected_room_uuid: room_uuid,
       active_room_uuid: room_uuid,
@@ -175,12 +178,13 @@ export default function AdminChatTimeline({
       support_mode: null,
       mounted_at: render_mounted_at,
       dependency_values: render_dependency_values,
+      component_file,
     })
   }
 
   if (typeof window !== 'undefined') {
     send_chat_realtime_debug({
-      event: 'admin_chat_component_rendered',
+      event: 'admin_chat_room_rendered',
       room_uuid,
       selected_room_uuid: room_uuid,
       active_room_uuid: room_uuid,
@@ -195,6 +199,7 @@ export default function AdminChatTimeline({
       support_mode: null,
       mounted_at: render_mounted_at,
       dependency_values: render_dependency_values,
+      component_file,
       phase: 'admin_chat_render',
     })
   }
@@ -274,7 +279,7 @@ export default function AdminChatTimeline({
       typeof window !== 'undefined' ? window.location.pathname : null
 
     send_chat_realtime_debug({
-      event: 'admin_chat_detail_mounted',
+      event: 'admin_chat_room_mounted',
       room_uuid,
       selected_room_uuid: room_uuid,
       active_room_uuid: room_uuid,
@@ -289,6 +294,7 @@ export default function AdminChatTimeline({
       pathname,
       support_mode: null,
       mounted_at: mounted_at_ref.current,
+      component_file,
       dependency_values: JSON.stringify({
         room_uuid,
         staff_participant_uuid,
@@ -335,7 +341,7 @@ export default function AdminChatTimeline({
     }
 
     send_chat_realtime_debug({
-      event: 'admin_active_room_ready',
+      event: 'admin_chat_room_ready',
       room_uuid,
       selected_room_uuid: room_uuid,
       active_room_uuid: room_uuid,
@@ -351,6 +357,7 @@ export default function AdminChatTimeline({
         typeof window !== 'undefined' ? window.location.pathname : null,
       support_mode: null,
       mounted_at: mounted_at_ref.current,
+      component_file,
       dependency_values: JSON.stringify({
         room_uuid,
         staff_participant_uuid,
@@ -546,7 +553,7 @@ export default function AdminChatTimeline({
     }
 
     send_chat_realtime_debug({
-      event: 'admin_support_enter_invocation_started',
+      event: 'admin_chat_room_enter_started',
       room_uuid: locked_room,
       selected_room_uuid: locked_room,
       active_room_uuid: locked_room,
@@ -561,6 +568,7 @@ export default function AdminChatTimeline({
       support_mode: null,
       dependency_values,
       mounted_at: mounted_at_ref.current,
+      component_file,
       phase: 'admin_chat_detail_support_enter',
     })
 
@@ -576,8 +584,8 @@ export default function AdminChatTimeline({
 
       send_chat_realtime_debug({
         event: result.ok
-          ? 'admin_support_enter_invocation_succeeded'
-          : 'admin_support_enter_invocation_failed',
+          ? 'admin_chat_room_enter_succeeded'
+          : 'admin_chat_room_enter_failed',
         room_uuid: locked_room,
         selected_room_uuid: locked_room,
         active_room_uuid: locked_room,
@@ -596,6 +604,7 @@ export default function AdminChatTimeline({
         error_message: result.ok ? null : result.error,
         dependency_values,
         mounted_at: mounted_at_ref.current,
+        component_file,
         phase: 'admin_chat_detail_support_enter',
       })
 
@@ -604,7 +613,7 @@ export default function AdminChatTimeline({
       }
     } catch (error) {
       send_chat_realtime_debug({
-        event: 'admin_support_enter_invocation_failed',
+        event: 'admin_chat_room_enter_failed',
         room_uuid: locked_room,
         selected_room_uuid: locked_room,
         active_room_uuid: locked_room,
@@ -621,6 +630,7 @@ export default function AdminChatTimeline({
         error_message: error instanceof Error ? error.message : String(error),
         dependency_values,
         mounted_at: mounted_at_ref.current,
+        component_file,
         phase: 'admin_chat_detail_support_enter',
       })
     }
