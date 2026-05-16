@@ -5,7 +5,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import AdminChat from '@/components/admin/chat'
 import AdminHandoffMemo from '@/components/admin/memo'
 import AdminReceptionActiveSummary from '@/components/admin/reception/active_summary'
-import AdminReceptionLive from '@/components/admin/reception/live'
+import {
+  register_admin_reception_live_action,
+  register_admin_reception_live_message,
+  register_admin_reception_live_support_action,
+} from '@/components/admin/reception/live'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import type { handoff_memo } from '@/lib/chat/handoff'
 import type {
@@ -17,7 +21,9 @@ import {
   emit_chat_action_realtime_rendered,
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
+import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import {
+  archived_message_to_timeline_message,
   merge_timeline_message_rows,
   type chat_room_timeline_message,
 } from '@/lib/chat/timeline_display'
@@ -95,6 +101,43 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     [room_uuid],
   )
 
+  const handle_realtime_message = useCallback(
+    (archived: realtime_archived_message) => {
+      const mapped = archived_message_to_timeline_message({
+        archive_uuid: archived.archive_uuid,
+        room_uuid: archived.room_uuid,
+        sequence: archived.sequence,
+        created_at: archived.created_at,
+        bundle: archived.bundle,
+      })
+
+      let update_result = {
+        prev_count: 0,
+        next_count: 0,
+        dedupe_hit: false,
+      }
+
+      set_live_messages((previous) => {
+        const merged = merge_timeline_message_rows(
+          previous,
+          [mapped],
+          'realtime',
+        )
+
+        update_result = {
+          prev_count: previous.length,
+          next_count: merged.rows.length,
+          dedupe_hit: merged.duplicates_skipped.length > 0,
+        }
+
+        return merged.rows
+      })
+
+      return update_result
+    },
+    [room_uuid],
+  )
+
   const handle_realtime_action = useCallback(
     (action: chat_action_realtime_payload, inserted_index: number) => {
       let update_result = {
@@ -141,17 +184,30 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     [],
   )
 
+  useEffect(() => {
+    const unregister_support = register_admin_reception_live_support_action(
+      handle_support_action,
+    )
+    const unregister_message = register_admin_reception_live_message(
+      handle_realtime_message,
+    )
+    const unregister_action = register_admin_reception_live_action(
+      handle_realtime_action,
+    )
+
+    return () => {
+      unregister_support()
+      unregister_message()
+      unregister_action()
+    }
+  }, [
+    handle_realtime_action,
+    handle_realtime_message,
+    handle_support_action,
+  ])
+
   return (
     <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-      <AdminReceptionLive
-        room_uuid={room_uuid}
-        admin_user_uuid={props.admin_user_uuid}
-        admin_participant_uuid={props.admin_participant_uuid}
-        enabled={Boolean(room_uuid)}
-        on_action={handle_realtime_action}
-        on_support_action={handle_support_action}
-      />
-
       <header className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
         <nav
           aria-label="Breadcrumb"

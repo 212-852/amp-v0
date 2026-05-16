@@ -1,3 +1,4 @@
+import AdminReceptionLive from '@/components/admin/reception/live'
 import AdminReceptionRoom from '@/components/admin/reception/room'
 import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import { debug_event } from '@/lib/debug'
@@ -139,20 +140,32 @@ export default async function AdminReceptionRoomPage({
   const customer_display_name =
     room?.display_name?.trim() || customer_display_name_fallback
 
+  const live_room_uuid = room?.room_uuid ?? room_uuid
+
   return (
-    <AdminReceptionRoom
-      room={room}
-      room_uuid={room_uuid}
-      admin_user_uuid={admin_user_uuid}
-      admin_participant_uuid={admin_participant_uuid}
-      customer_display_name={customer_display_name}
-      staff_user_uuid={admin_user_uuid}
-      staff_tier={access.tier}
-      staff_participant_uuid={staff_participant_uuid}
-      staff_display_name={staff_display_name}
-      memos={to_client_json(memos)}
-      messages={to_client_json(message_result.messages)}
-      load_failed={!message_result.ok}
-    />
+    <>
+      <AdminReceptionLive
+        room_uuid={live_room_uuid}
+        admin_user_uuid={admin_user_uuid}
+        admin_participant_uuid={admin_participant_uuid}
+        staff_user_uuid={admin_user_uuid}
+        staff_tier={access.tier}
+        staff_participant_uuid={staff_participant_uuid}
+      />
+      <AdminReceptionRoom
+        room={room}
+        room_uuid={room_uuid}
+        admin_user_uuid={admin_user_uuid}
+        admin_participant_uuid={admin_participant_uuid}
+        customer_display_name={customer_display_name}
+        staff_user_uuid={admin_user_uuid}
+        staff_tier={access.tier}
+        staff_participant_uuid={staff_participant_uuid}
+        staff_display_name={staff_display_name}
+        memos={to_client_json(memos)}
+        messages={to_client_json(message_result.messages)}
+        load_failed={!message_result.ok}
+      />
+    </>
   )
 }
