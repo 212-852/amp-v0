@@ -1,8 +1,8 @@
 import Link from 'next/link'
 
 import AdminReceptionRoom from '@/components/admin/reception/room'
-import { AdminRenderProbe } from '@/components/admin/render_probe'
 import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
+import { debug_event } from '@/lib/debug'
 import {
   list_reception_room_messages,
   read_reception_room,
@@ -105,6 +105,23 @@ export default async function AdminReceptionRoomPage({
   const staff_participant_uuid = send_context.ok
     ? send_context.data.staff_participant_uuid
     : ''
+  const pathname = `/admin/reception/${room_uuid}`
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_reception_page_rendered',
+    payload: {
+      room_uuid,
+      active_room_uuid: room_uuid,
+      admin_user_uuid: access.user_uuid,
+      admin_participant_uuid: staff_participant_uuid.trim() || null,
+      component_file: 'app/admin/reception/[room_uuid]/page.tsx',
+      pathname,
+      ignored_reason: null,
+      error_code: null,
+      error_message: null,
+    },
+  })
   const staff_display_name = await resolve_handoff_memo_saved_by_name(
     access.user_uuid,
   )
@@ -116,14 +133,7 @@ export default async function AdminReceptionRoomPage({
     room?.display_name?.trim() || customer_display_name_fallback
 
   return (
-    <div
-      className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white"
-      data-debug-component="app/admin/reception/[room_uuid]/page.tsx"
-    >
-      <AdminRenderProbe file_path="app/admin/reception/[room_uuid]/page.tsx" />
-      <div data-debug-component="app/admin/reception/[room_uuid]/page.tsx">
-        DEBUG_ADMIN_CHAT_COMPONENT_app/admin/reception/[room_uuid]/page.tsx
-      </div>
+    <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <header className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
         <nav
           aria-label="Breadcrumb"

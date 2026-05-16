@@ -876,13 +876,7 @@ export function WebChat({
   }, [scroll_to_bottom, typing_banner])
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col"
-      data-debug-component="components/chat/web.tsx"
-    >
-      <div data-debug-component="components/chat/web.tsx">
-        DEBUG_ADMIN_CHAT_COMPONENT_components/chat/web.tsx
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={set_scroll_container}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-4"

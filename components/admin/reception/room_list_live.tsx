@@ -5,7 +5,6 @@ import { MessageCircle } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-import { AdminRenderProbe } from '@/components/admin/render_probe'
 import { use_session_profile } from '@/components/session/profile'
 import {
   build_room_card_summary,
@@ -1378,14 +1377,7 @@ export default function AdminReceptionRoomListLive({
 
   return (
     <>
-      <AdminRenderProbe file_path="components/admin/reception/room_list_live.tsx" />
-      <div data-debug-component="components/admin/reception/room_list_live.tsx">
-        DEBUG_ADMIN_CHAT_COMPONENT_components/admin/reception/room_list_live.tsx
-      </div>
-      <ul
-        className="flex flex-col gap-2"
-        data-debug-component="components/admin/reception/room_list_live.tsx"
-      >
+      <ul className="flex flex-col gap-2">
       {visible_rooms.map((room) => (
         <li key={room.room_uuid}>
           <Link

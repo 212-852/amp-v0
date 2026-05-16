@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
 import AdminChatTimeline from '@/components/admin/c'
-import { render_debug } from '@/lib/debug/render'
+import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import type { chat_room_timeline_message } from '@/lib/chat/timeline_display'
 
 type AdminChatProps = {
@@ -20,38 +20,38 @@ type AdminChatProps = {
 const component_file = 'components/admin/chat.tsx'
 
 export default function AdminChat(props: AdminChatProps) {
-  const [debug_tick, set_debug_tick] = useState(0)
+  useEffect(() => {
+    send_admin_chat_debug({
+      event: 'admin_chat_component_mounted',
+      room_uuid: props.room_uuid,
+      active_room_uuid: props.room_uuid,
+      admin_user_uuid: props.staff_user_uuid,
+      admin_participant_uuid: props.staff_participant_uuid,
+      component_file,
+      phase: 'admin_chat_shell',
+    })
+  }, [props.room_uuid, props.staff_participant_uuid, props.staff_user_uuid])
 
   useEffect(() => {
-    console.log('ADMIN_CHAT_MOUNTED')
-    render_debug({
-      category: 'ADMIN_CHAT',
-      event: 'admin_chat_mounted',
-      level: 'info',
-      payload: {
+    const frame = window.requestAnimationFrame(() => {
+      send_admin_chat_debug({
+        event: 'admin_chat_component_ready',
         room_uuid: props.room_uuid,
         active_room_uuid: props.room_uuid,
         admin_user_uuid: props.staff_user_uuid,
         admin_participant_uuid: props.staff_participant_uuid,
         component_file,
-      },
+        phase: 'admin_chat_shell',
+      })
     })
-  }, [props.room_uuid, props.staff_participant_uuid, props.staff_user_uuid])
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      set_debug_tick((value) => value + 1)
-    }, 1_000)
 
     return () => {
-      window.clearInterval(id)
+      window.cancelAnimationFrame(frame)
     }
-  }, [])
+  }, [props.room_uuid, props.staff_participant_uuid, props.staff_user_uuid])
 
   return (
-    <div data-debug-component={component_file}>
-      <div>DEBUG_ADMIN_CHAT_COMPONENT_components/admin/chat.tsx</div>
-      <div>DEBUG_TICK_{debug_tick}</div>
+    <div className="flex min-h-0 flex-1 flex-col">
       <AdminChatTimeline {...props} />
     </div>
   )

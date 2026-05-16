@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 
-import { AdminRenderProbe } from '@/components/admin/render_probe'
 import AdminAssistantNekoSvg from './neko'
 
 type AdminAssistantProps = {
@@ -25,7 +24,6 @@ export default function AdminAssistant({
 
   return (
     <>
-      <AdminRenderProbe file_path="components/layout/admin/assistant.tsx" />
       <style>
         {`
           .admin_assistant_card_entry {

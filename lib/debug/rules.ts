@@ -188,6 +188,35 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const admin_chat_reception_lifecycle_events = new Set([
+    'admin_reception_page_rendered',
+    'admin_reception_room_rendered',
+    'admin_chat_component_mounted',
+    'admin_chat_component_ready',
+    'admin_chat_realtime_subscribe_started',
+    'admin_chat_realtime_subscribe_succeeded',
+    'admin_chat_realtime_payload_received',
+    'admin_chat_realtime_payload_accepted',
+    'admin_chat_realtime_payload_ignored',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    admin_chat_reception_lifecycle_events.has(input.event)
+  ) {
+    const payload = input.payload as Record<string, unknown> | undefined
+    const has_error =
+      Boolean(payload?.error_code) || Boolean(payload?.error_message)
+
+    return {
+      category: 'admin_chat',
+      level: has_error ? 'warn' : 'info',
+      channels: debug_control.admin_chat_lifecycle_discord_enabled
+        ? ['discord']
+        : [],
+    }
+  }
+
   const admin_chat_list_lifecycle_events = new Set([
     'admin_chat_list_load_started',
     'admin_chat_list_query_succeeded',

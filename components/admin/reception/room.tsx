@@ -1,6 +1,7 @@
 import AdminChat from '@/components/admin/chat'
 import AdminHandoffMemo from '@/components/admin/memo'
 import AdminReceptionActiveSummary from '@/components/admin/reception/active_summary'
+import { debug_event } from '@/lib/debug'
 import type { handoff_memo } from '@/lib/chat/action'
 import type {
   reception_room,
@@ -22,13 +23,27 @@ type AdminReceptionRoomProps = {
 
 const component_file = 'components/admin/reception/room.tsx'
 
-export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
+export default async function AdminReceptionRoom(props: AdminReceptionRoomProps) {
+  const pathname = `/admin/reception/${props.room_uuid}`
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_reception_room_rendered',
+    payload: {
+      room_uuid: props.room_uuid,
+      active_room_uuid: props.room_uuid,
+      admin_user_uuid: props.staff_user_uuid,
+      admin_participant_uuid: props.staff_participant_uuid.trim() || null,
+      component_file,
+      pathname,
+      ignored_reason: null,
+      error_code: null,
+      error_message: null,
+    },
+  })
+
   return (
-    <section
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white"
-      data-debug-component={component_file}
-    >
-      <div>DEBUG_ADMIN_CHAT_COMPONENT_components/admin/reception/room.tsx</div>
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <div className="shrink-0 border-b border-neutral-200 px-6 py-4">
         <div className="flex flex-col gap-3">
           <AdminReceptionActiveSummary

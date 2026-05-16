@@ -1,5 +1,4 @@
 import AdminHeader from '@/components/admin/header'
-import { AdminRenderProbe } from '@/components/admin/render_probe'
 import AdminShell from '@/components/layout/admin/shell'
 import { read_admin_display_name } from '@/lib/admin/management/action'
 import { require_admin_route_access } from '@/lib/auth/route'
@@ -20,7 +19,6 @@ export default async function AdminLayout({
       role={access.role}
       tier={access.tier}
     >
-      <AdminRenderProbe file_path="app/admin/layout.tsx" />
       <div className="fixed left-0 right-0 top-0 z-[120] w-screen bg-white">
         <div className="mx-auto w-full max-w-[480px]">
           <AdminHeader

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-import { AdminRenderProbe } from '@/components/admin/render_probe'
 import {
   format_admin_room_unread_label,
   normalize_reception_channel,
@@ -271,15 +270,7 @@ export default function AdminReceptionActiveSummary({
   const mode_badge = reception_mode_badge_label(summary.mode)
 
   return (
-    <>
-      <AdminRenderProbe file_path="components/admin/reception/active_summary.tsx" />
-      <div data-debug-component="components/admin/reception/active_summary.tsx">
-        DEBUG_ADMIN_CHAT_COMPONENT_components/admin/reception/active_summary.tsx
-      </div>
-      <div
-        className="min-w-0 flex-1"
-        data-debug-component="components/admin/reception/active_summary.tsx"
-      >
+    <div className="min-w-0 flex-1">
       <div className="truncate text-[16px] font-semibold leading-tight text-black">
         {customer_display_name}
       </div>
@@ -313,6 +304,5 @@ export default function AdminReceptionActiveSummary({
         ) : null}
       </div>
     </div>
-    </>
   )
 }
