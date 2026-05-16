@@ -189,6 +189,7 @@ export function resolve_debug_rule(input: {
   }
 
   const admin_chat_reception_lifecycle_events = new Set([
+    'admin_reception_runtime_mounted',
     'admin_reception_live_mounted',
     'support_lifecycle_mounted',
     'admin_reception_page_rendered',
@@ -706,6 +707,13 @@ export function resolve_debug_rule(input: {
     'message_realtime_payload_accepted',
     'message_realtime_payload_ignored',
     'message_realtime_rendered',
+    'action_realtime_mounted',
+    'action_realtime_subscribe_started',
+    'action_realtime_subscribe_status',
+    'action_realtime_payload_received',
+    'action_realtime_payload_accepted',
+    'action_realtime_payload_ignored',
+    'action_realtime_rendered',
     'chat_realtime_hook_mounted',
     'chat_realtime_subscribe_started',
     'chat_realtime_subscribe_status',

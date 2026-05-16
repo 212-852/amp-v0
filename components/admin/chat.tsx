@@ -22,6 +22,8 @@ type AdminChatProps = {
   realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
   on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
   peer_typing_label?: string | null
+  /** Reception detail: runtime owns message subscribe. */
+  disable_message_realtime?: boolean
 }
 
 const component_file = 'components/admin/chat.tsx'

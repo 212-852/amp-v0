@@ -40,6 +40,7 @@ type AdminChatTimelineProps = {
   realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
   on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
   peer_typing_label?: string | null
+  disable_message_realtime?: boolean
 }
 
 function emit_timeline_duplicate_skips(skips: timeline_item_duplicate_skip[]) {
@@ -161,6 +162,7 @@ export default function AdminChatTimeline({
   realtime_messages_channel_ref: parent_messages_channel_ref,
   on_append_timeline_messages,
   peer_typing_label = null,
+  disable_message_realtime = false,
 }: AdminChatTimelineProps) {
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
@@ -269,7 +271,7 @@ export default function AdminChatTimeline({
     owner: 'admin',
     room_uuid,
     active_room_uuid: room_uuid,
-    enabled: Boolean(room_uuid.trim()),
+    enabled: Boolean(room_uuid.trim()) && !disable_message_realtime,
     participant_uuid: staff_participant_uuid,
     user_uuid: staff_user_uuid,
     role: 'admin',

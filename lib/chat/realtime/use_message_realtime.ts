@@ -44,6 +44,7 @@ export type use_message_realtime_input = {
     role: string | null
   }>
   export_messages_channel_ref?: MutableRefObject<RealtimeChannel | null>
+  on_messages_channel?: (channel: RealtimeChannel | null) => void
   on_message: (
     message: realtime_archived_message,
   ) => message_realtime_append_result | void
@@ -283,6 +284,8 @@ export function use_message_realtime(input: use_message_realtime_input) {
       input.export_messages_channel_ref.current = channel
     }
 
+    input.on_messages_channel?.(channel)
+
     return () => {
       cleanup_chat_room_realtime({
         supabase,
@@ -300,12 +303,15 @@ export function use_message_realtime(input: use_message_realtime_input) {
       if (input.export_messages_channel_ref?.current === channel) {
         input.export_messages_channel_ref.current = null
       }
+
+      input.on_messages_channel?.(null)
     }
   }, [
     active_room_uuid,
     enabled,
     input.active_typing_identity_ref,
     input.export_messages_channel_ref,
+    input.on_messages_channel,
     input.participant_uuid,
     input.role,
     input.tier,
