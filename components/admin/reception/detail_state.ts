@@ -50,6 +50,7 @@ export function append_admin_reception_timeline_messages(
   const prev_count = timeline_rows.length
   const merged = merge_timeline_message_rows(timeline_rows, addition, 'realtime')
   timeline_rows = merged.rows
+  notify_timeline_listeners()
 
   return {
     prev_count,

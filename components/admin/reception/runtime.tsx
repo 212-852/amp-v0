@@ -8,6 +8,7 @@ import {
   set_admin_reception_messages_channel,
 } from '@/components/admin/reception/detail_state'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
+import { send_chat_realtime_debug } from '@/lib/chat/realtime/client'
 import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import { use_action_realtime } from '@/lib/chat/realtime/use_action_realtime'
@@ -49,6 +50,16 @@ export default function AdminReceptionRuntime(props: admin_reception_runtime_pro
       admin_participant_uuid: props.admin_participant_uuid.trim() || null,
       component_file,
       pathname: `/admin/reception/${room_uuid}`,
+      phase: 'admin_reception_runtime',
+    })
+    send_chat_realtime_debug({
+      category: 'chat_realtime',
+      event: 'chat_realtime_hook_mounted',
+      owner: 'admin',
+      room_uuid,
+      active_room_uuid: room_uuid,
+      subscribe_status: 'HOOK_MOUNTED',
+      subscription_status: 'HOOK_MOUNTED',
       phase: 'admin_reception_runtime',
     })
   }, [props.admin_participant_uuid, props.admin_user_uuid, room_uuid])

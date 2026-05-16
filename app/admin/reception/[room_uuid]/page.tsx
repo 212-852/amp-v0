@@ -1,6 +1,5 @@
-import AdminReceptionLifecycle from '@/components/admin/reception/lifecycle'
-import AdminReceptionRealtime from '@/components/admin/reception/realtime'
-import AdminReceptionVisible from '@/components/admin/reception/visible'
+import AdminReceptionRoom from '@/components/admin/reception/room'
+import AdminReceptionRuntime from '@/components/admin/reception/runtime'
 import { get_session_user, require_admin_route_access } from '@/lib/auth/route'
 import { debug_event } from '@/lib/debug'
 import {
@@ -139,7 +138,7 @@ export default async function AdminReceptionRoomPage({
     room?.display_name?.trim() || customer_display_name_fallback
   return (
     <>
-      <AdminReceptionVisible
+      <AdminReceptionRoom
         room={room}
         room_uuid={room_uuid}
         admin_user_uuid={admin_user_uuid}
@@ -154,13 +153,14 @@ export default async function AdminReceptionRoomPage({
         load_failed={!message_result.ok}
       />
 
-      <AdminReceptionLifecycle
+      <AdminReceptionRuntime
         room_uuid={room_uuid}
         admin_user_uuid={admin_user_uuid}
         admin_participant_uuid={admin_participant_uuid}
+        staff_user_uuid={admin_user_uuid}
+        staff_tier={access.tier}
+        staff_participant_uuid={staff_participant_uuid}
       />
-
-      <AdminReceptionRealtime room_uuid={room_uuid} />
     </>
   )
 }
