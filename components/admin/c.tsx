@@ -163,6 +163,7 @@ export default function AdminChatTimeline({
   staff_user_uuid,
   staff_tier,
   room_display_title,
+  admin_participant_uuid,
   realtime_messages_channel_ref: parent_messages_channel_ref,
   on_append_timeline_messages,
   peer_typing_label = null,
@@ -186,6 +187,8 @@ export default function AdminChatTimeline({
   const typing_active_ref = useRef(false)
   const display_peer_typing_label =
     local_peer_typing_label ?? peer_typing_label
+  const typing_participant_uuid =
+    admin_participant_uuid.trim() || staff_participant_uuid.trim()
 
   const staff_participant_uuid_ref = useRef(staff_participant_uuid)
 
@@ -307,9 +310,9 @@ export default function AdminChatTimeline({
     room_uuid,
     active_room_uuid: room_uuid,
     enabled: bubble_realtime_enabled,
-    participant_uuid: staff_participant_uuid,
+    participant_uuid: typing_participant_uuid,
     user_uuid: staff_user_uuid,
-    role: 'admin',
+    role: 'concierge',
     tier: staff_tier,
     source_channel: 'web',
     channel_subscribe: 'shared',
@@ -371,7 +374,7 @@ export default function AdminChatTimeline({
 
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {
-      if (!room_uuid || !staff_participant_uuid) {
+      if (!room_uuid || !typing_participant_uuid) {
         return
       }
 
@@ -390,9 +393,9 @@ export default function AdminChatTimeline({
       send_room_typing_status({
         room_uuid,
         active_room_uuid: room_uuid,
-        participant_uuid: staff_participant_uuid,
+        participant_uuid: typing_participant_uuid,
         user_uuid: staff_user_uuid,
-        role: 'admin',
+        role: 'concierge',
         tier: staff_tier,
         display_name: staff_display_name,
         is_typing: action === 'typing_start',
@@ -408,8 +411,8 @@ export default function AdminChatTimeline({
     },
     [
       room_uuid,
+      typing_participant_uuid,
       staff_display_name,
-      staff_participant_uuid,
       staff_tier,
       staff_user_uuid,
     ],

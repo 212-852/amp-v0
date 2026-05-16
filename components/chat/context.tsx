@@ -26,8 +26,6 @@ import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_deci
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 
-import { UserChatRealtimeBridge } from '@/components/chat/user_realtime_bridge'
-
 type chat_room_client_state = {
   room_uuid: string | null
   participant_uuid: string | null
@@ -57,6 +55,7 @@ type chat_context_value = chat_room_client_state & {
   remove_message: (archive_uuid: string) => void
   set_mode: (mode: room_mode) => void
   set_chat_open: (open: boolean) => void
+  set_staff_typing_label: (label: string | null) => void
   open_chat: () => void
   close_chat: () => void
   set_scroll_container: (node: HTMLDivElement | null) => void
@@ -361,9 +360,6 @@ export function UserChatProvider({
     }
   }, [room_state.mode, scroll_to_bottom])
 
-  const active_room_uuid = (room_state.room_uuid ?? '').trim()
-  const active_participant_uuid = (room_state.participant_uuid ?? '').trim()
-
   const value = useMemo(
     () => ({
       ...room_state,
@@ -378,6 +374,7 @@ export function UserChatProvider({
       remove_message,
       set_mode,
       set_chat_open,
+      set_staff_typing_label,
       open_chat,
       close_chat,
       set_scroll_container,
@@ -408,16 +405,6 @@ export function UserChatProvider({
 
   return (
     <UserChatContext.Provider value={value}>
-      {active_room_uuid && active_participant_uuid ? (
-        <UserChatRealtimeBridge
-          room_uuid={active_room_uuid}
-          participant_uuid={active_participant_uuid}
-          locale={room_state.locale}
-          room_realtime_channel_ref={room_realtime_channel_ref}
-          append_realtime_message={append_realtime_message}
-          on_staff_typing_label_change={set_staff_typing_label}
-        />
-      ) : null}
       {children}
     </UserChatContext.Provider>
   )
