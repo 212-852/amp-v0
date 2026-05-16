@@ -45,6 +45,9 @@ type chat_debug_body = {
   error_message?: unknown
   error_details?: unknown
   error_hint?: unknown
+  error_json?: unknown
+  admin_user_uuid_exists?: unknown
+  admin_participant_uuid_exists?: unknown
   prev_message_count?: unknown
   next_message_count?: unknown
   prev_room_count?: unknown
@@ -115,6 +118,14 @@ function number_or_null(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function boolean_or_null(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
+
+function json_string_or_null(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as chat_debug_body | null
   const event = string_or_null(body?.event)
@@ -180,6 +191,11 @@ export async function POST(request: Request) {
       error_message: string_or_null(body?.error_message),
       error_details: string_or_null(body?.error_details),
       error_hint: string_or_null(body?.error_hint),
+      error_json: json_string_or_null(body?.error_json),
+      admin_user_uuid_exists: boolean_or_null(body?.admin_user_uuid_exists),
+      admin_participant_uuid_exists: boolean_or_null(
+        body?.admin_participant_uuid_exists,
+      ),
       prev_message_count: number_or_null(body?.prev_message_count),
       next_message_count: number_or_null(body?.next_message_count),
       prev_room_count: number_or_null(body?.prev_room_count),

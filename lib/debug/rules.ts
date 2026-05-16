@@ -198,6 +198,8 @@ export function resolve_debug_rule(input: {
     'admin_chat_realtime_payload_received',
     'admin_chat_realtime_payload_accepted',
     'admin_chat_realtime_payload_ignored',
+    'enter_support_room_call_payload_built',
+    'enter_support_room_skipped_missing_admin_identity',
   ])
 
   if (

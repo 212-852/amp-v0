@@ -89,14 +89,20 @@ export function support_room_api_action_to_realtime(
   }
 }
 
-export async function call_enter_support_room(
-  room_uuid: string,
-): Promise<enter_support_room_client_result> {
+export async function call_enter_support_room(input: {
+  room_uuid: string
+  admin_user_uuid: string
+  admin_participant_uuid: string
+}): Promise<enter_support_room_client_result> {
   const response = await fetch('/api/chat/reception/open', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ room_uuid }),
+    body: JSON.stringify({
+      room_uuid: input.room_uuid,
+      admin_user_uuid: input.admin_user_uuid,
+      admin_participant_uuid: input.admin_participant_uuid,
+    }),
   })
 
   const body = (await response.json().catch(() => null)) as Record<
@@ -122,7 +128,7 @@ export async function call_enter_support_room(
     }
   }
 
-  const action = parse_support_room_api_action(body.action, room_uuid)
+  const action = parse_support_room_api_action(body.action, input.room_uuid)
 
   return {
     ok: true,

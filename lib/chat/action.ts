@@ -2256,11 +2256,13 @@ type chat_message_send_debug_event =
 
 function chat_message_error_fields(error: unknown) {
   if (!error || typeof error !== 'object') {
+    const error_message = error ? String(error) : null
     return {
       error_code: null,
-      error_message: error ? String(error) : null,
+      error_message,
       error_details: null,
       error_hint: null,
+      error_json: error_message ? JSON.stringify({ value: error_message }) : null,
     }
   }
 
@@ -2271,13 +2273,40 @@ function chat_message_error_fields(error: unknown) {
     hint?: unknown
   }
 
+  const error_details_raw = source.details
+  const error_details =
+    typeof error_details_raw === 'string'
+      ? error_details_raw
+      : error_details_raw !== undefined && error_details_raw !== null
+        ? JSON.stringify(error_details_raw)
+        : null
+
+  const error_code = typeof source.code === 'string' ? source.code : null
+  const error_message =
+    typeof source.message === 'string' ? source.message : String(error)
+  const error_hint = typeof source.hint === 'string' ? source.hint : null
+
+  let error_json: string | null = null
+  try {
+    if (error instanceof Error) {
+      error_json = JSON.stringify({
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      })
+    } else {
+      error_json = JSON.stringify(error)
+    }
+  } catch {
+    error_json = JSON.stringify({ message: error_message })
+  }
+
   return {
-    error_code: typeof source.code === 'string' ? source.code : null,
-    error_message:
-      typeof source.message === 'string' ? source.message : String(error),
-    error_details:
-      typeof source.details === 'string' ? source.details : null,
-    error_hint: typeof source.hint === 'string' ? source.hint : null,
+    error_code,
+    error_message,
+    error_details,
+    error_hint,
+    error_json,
   }
 }
 
@@ -2315,6 +2344,7 @@ async function emit_chat_message_send_debug(input: {
       error_details:
         input.error_details ?? from_error?.error_details ?? null,
       error_hint: input.error_hint ?? from_error?.error_hint ?? null,
+      error_json: from_error?.error_json ?? null,
       phase: input.phase,
       ...(input.extra ?? {}),
     },
@@ -2363,6 +2393,7 @@ async function emit_chat_realtime_support_debug(input: {
       error_message: from_error?.error_message ?? null,
       error_details: from_error?.error_details ?? null,
       error_hint: from_error?.error_hint ?? null,
+      error_json: from_error?.error_json ?? null,
       phase: input.phase,
     },
   })
@@ -2405,14 +2436,16 @@ function build_support_room_action_api_payload(input: {
   }
 }
 
-export async function handle_admin_reception_room_opened(
-  request: Request,
-): Promise<{ status: number; body: admin_reception_room_open_result }> {
-  const body = (await request.json().catch(() => null)) as {
-    room_uuid?: string
-  } | null
+export type admin_reception_room_open_request_body = {
+  room_uuid?: string | null
+  admin_user_uuid?: string | null
+  admin_participant_uuid?: string | null
+}
 
-  const room_uuid = clean_uuid(body?.room_uuid)
+export async function handle_admin_reception_room_opened(
+  body: admin_reception_room_open_request_body | null,
+): Promise<{ status: number; body: admin_reception_room_open_result }> {
+  const room_uuid = clean_uuid(body?.room_uuid ?? null)
 
   if (!room_uuid) {
     return {
@@ -2436,6 +2469,17 @@ export async function handle_admin_reception_room_opened(
     return {
       status: 400,
       body: { ok: false, error: 'invalid_room' },
+    }
+  }
+
+  const client_user_declared = clean_uuid(
+    typeof body?.admin_user_uuid === 'string' ? body.admin_user_uuid : null,
+  )
+
+  if (client_user_declared && client_user_declared !== admin_uuid) {
+    return {
+      status: 403,
+      body: { ok: false, error: 'admin_user_mismatch' },
     }
   }
 
@@ -2549,13 +2593,55 @@ export async function handle_admin_reception_room_opened(
   const customer_user_uuid = clean_uuid(
     (user_result.data as { user_uuid?: string } | null)?.user_uuid ?? null,
   )
-  const admin_participant_uuid = clean_uuid(
+  let admin_participant_uuid = clean_uuid(
     (admin_participant_pick.data as { participant_uuid?: string } | null)
       ?.participant_uuid ?? null,
   )
-  const admin_already_active =
+  let admin_already_active =
     (admin_participant_pick.data as { is_active?: boolean } | null)
       ?.is_active === true
+
+  const client_participant_candidate = clean_uuid(
+    typeof body?.admin_participant_uuid === 'string'
+      ? body.admin_participant_uuid
+      : null,
+  )
+
+  if (client_participant_candidate) {
+    const verify = await supabase
+      .from('participants')
+      .select('participant_uuid, user_uuid, role, is_active')
+      .eq('room_uuid', room_uuid)
+      .eq('participant_uuid', client_participant_candidate)
+      .maybeSingle()
+
+    if (verify.error) {
+      throw verify.error
+    }
+
+    const vr = verify.data as {
+      user_uuid?: string
+      role?: string
+      is_active?: boolean
+    } | null
+
+    const role_l = (vr?.role ?? '').trim().toLowerCase()
+    const vu = clean_uuid(vr?.user_uuid ?? null)
+
+    if (
+      !vr ||
+      vu !== admin_uuid ||
+      (role_l !== 'admin' && role_l !== 'concierge')
+    ) {
+      return {
+        status: 400,
+        body: { ok: false, error: 'invalid_admin_participant' },
+      }
+    }
+
+    admin_participant_uuid = client_participant_candidate
+    admin_already_active = vr.is_active === true
+  }
 
   if (!user_participant_uuid || !bot_participant_uuid) {
     return {
@@ -2831,6 +2917,8 @@ export async function handle_admin_reception_room_opened(
       error: inserted.error,
     })
 
+    const err_fields = chat_message_error_fields(err)
+
     await debug_event({
       category: 'admin_chat',
       event: 'support_started_action_create_failed',
@@ -2838,8 +2926,11 @@ export async function handle_admin_reception_room_opened(
         room_uuid,
         action_uuid: null,
         ...support_started_debug_participants,
-        error_code: err_code.length > 0 ? err_code : null,
+        error_code: err_code.length > 0 ? err_code : err_fields.error_code,
         error_message: err_message,
+        error_details: err_fields.error_details,
+        error_hint: err_fields.error_hint,
+        error_json: err_fields.error_json,
       },
     })
   } else {

@@ -15,6 +15,11 @@ export function send_admin_chat_debug(input: {
   ignored_reason?: string | null
   error_code?: string | null
   error_message?: string | null
+  error_details?: string | null
+  error_hint?: string | null
+  error_json?: string | null
+  admin_user_uuid_exists?: boolean
+  admin_participant_uuid_exists?: boolean
   level?: 'info' | 'warn' | 'error'
   subscribe_status?: string | null
   message_uuid?: string | null
@@ -42,6 +47,17 @@ export function send_admin_chat_debug(input: {
       ignored_reason: input.ignored_reason ?? null,
       error_code: input.error_code ?? null,
       error_message: input.error_message ?? null,
+      error_details: input.error_details ?? null,
+      error_hint: input.error_hint ?? null,
+      error_json: input.error_json ?? null,
+      admin_user_uuid_exists:
+        typeof input.admin_user_uuid_exists === 'boolean'
+          ? input.admin_user_uuid_exists
+          : null,
+      admin_participant_uuid_exists:
+        typeof input.admin_participant_uuid_exists === 'boolean'
+          ? input.admin_participant_uuid_exists
+          : null,
       subscribe_status: input.subscribe_status ?? null,
       message_uuid: input.message_uuid ?? null,
       filter: input.filter ?? null,

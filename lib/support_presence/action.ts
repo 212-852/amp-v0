@@ -6,16 +6,94 @@ import {
 } from '@/lib/chat/action'
 import { mark_admin_support_leave } from '@/lib/chat/presence/action'
 import { debug_event } from '@/lib/debug'
+import { clean_uuid } from '@/lib/db/uuid/payload'
 
 function clean_text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function serialize_unknown_error(error: unknown) {
+  const fields = {
+    error_code: null as string | null,
+    error_message: null as string | null,
+    error_details: null as string | null,
+    error_hint: null as string | null,
+    error_json: null as string | null,
+  }
+
+  if (!error) {
+    return fields
+  }
+
+  if (error instanceof Error) {
+    fields.error_code = error.name
+    fields.error_message = error.message
+    try {
+      fields.error_json = JSON.stringify({
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      })
+    } catch {
+      fields.error_json = null
+    }
+
+    return fields
+  }
+
+  if (typeof error === 'object') {
+    const o = error as Record<string, unknown>
+    fields.error_code =
+      typeof o.code === 'string' ? o.code : o.code != null ? String(o.code) : null
+    fields.error_message =
+      typeof o.message === 'string'
+        ? o.message
+        : o.message != null
+          ? String(o.message)
+          : String(error)
+    const d = o.details
+    fields.error_details =
+      typeof d === 'string'
+        ? d
+        : d !== undefined && d !== null
+          ? JSON.stringify(d)
+          : null
+    fields.error_hint =
+      typeof o.hint === 'string' ? o.hint : o.hint != null ? String(o.hint) : null
+    try {
+      fields.error_json = JSON.stringify(error)
+    } catch {
+      fields.error_json = JSON.stringify({ message: fields.error_message })
+    }
+
+    return fields
+  }
+
+  fields.error_message = String(error)
+  try {
+    fields.error_json = JSON.stringify({ value: error })
+  } catch {
+    fields.error_json = null
+  }
+
+  return fields
+}
+
 export async function enter_support_room(request: Request) {
-  const body = (await request.clone().json().catch(() => null)) as {
-    room_uuid?: unknown
-  } | null
-  const room_uuid = clean_text(body?.room_uuid)
+  const raw = (await request.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null
+
+  const room_uuid = clean_text(raw?.room_uuid)
+  const request_admin_user_uuid = clean_uuid(
+    typeof raw?.admin_user_uuid === 'string' ? raw.admin_user_uuid : null,
+  )
+  const request_admin_participant_uuid = clean_uuid(
+    typeof raw?.admin_participant_uuid === 'string'
+      ? raw.admin_participant_uuid
+      : null,
+  )
 
   await debug_event({
     category: 'admin_chat',
@@ -25,8 +103,8 @@ export async function enter_support_room(request: Request) {
       active_room_uuid: room_uuid,
       previous_room_uuid: null,
       next_room_uuid: room_uuid,
-      admin_user_uuid: null,
-      admin_participant_uuid: null,
+      admin_user_uuid: request_admin_user_uuid,
+      admin_participant_uuid: request_admin_participant_uuid,
       reason: 'api_reception_open',
       error_code: null,
       error_message: null,
@@ -34,7 +112,11 @@ export async function enter_support_room(request: Request) {
   })
 
   try {
-    const result = await handle_admin_reception_room_opened(request)
+    const result = await handle_admin_reception_room_opened({
+      room_uuid: room_uuid ?? null,
+      admin_user_uuid: request_admin_user_uuid,
+      admin_participant_uuid: request_admin_participant_uuid,
+    })
     const skipped = result.body.ok === true && result.body.skipped === true
 
     await debug_event({
@@ -45,8 +127,8 @@ export async function enter_support_room(request: Request) {
         active_room_uuid: room_uuid,
         previous_room_uuid: null,
         next_room_uuid: room_uuid,
-        admin_user_uuid: null,
-        admin_participant_uuid: null,
+        admin_user_uuid: request_admin_user_uuid,
+        admin_participant_uuid: request_admin_participant_uuid,
         reason: skipped ? 'core_returned_skipped' : 'core_returned_ok',
         error_code: result.body.ok ? null : result.body.error,
         error_message: result.body.ok ? null : result.body.error,
@@ -55,6 +137,8 @@ export async function enter_support_room(request: Request) {
 
     return result
   } catch (error) {
+    const ser = serialize_unknown_error(error)
+
     await debug_event({
       category: 'admin_chat',
       event: 'enter_support_room_failed',
@@ -63,11 +147,14 @@ export async function enter_support_room(request: Request) {
         active_room_uuid: room_uuid,
         previous_room_uuid: null,
         next_room_uuid: room_uuid,
-        admin_user_uuid: null,
-        admin_participant_uuid: null,
+        admin_user_uuid: request_admin_user_uuid,
+        admin_participant_uuid: request_admin_participant_uuid,
         reason: 'core_threw',
-        error_code: 'enter_support_room_failed',
-        error_message: error instanceof Error ? error.message : String(error),
+        error_code: ser.error_code ?? 'enter_support_room_failed',
+        error_message: ser.error_message,
+        error_details: ser.error_details,
+        error_hint: ser.error_hint,
+        error_json: ser.error_json,
       },
     })
 
@@ -157,6 +244,8 @@ export async function leave_support_room(input: {
 
     return left
   } catch (error) {
+    const ser = serialize_unknown_error(error)
+
     await debug_event({
       category: 'admin_chat',
       event: 'leave_support_room_failed',
@@ -169,8 +258,11 @@ export async function leave_support_room(input: {
         admin_participant_uuid: input.staff_participant_uuid,
         leave_reason: input.leave_reason,
         reason: input.leave_reason,
-        error_code: 'leave_support_room_failed',
-        error_message: error instanceof Error ? error.message : String(error),
+        error_code: ser.error_code ?? 'leave_support_room_failed',
+        error_message: ser.error_message,
+        error_details: ser.error_details,
+        error_hint: ser.error_hint,
+        error_json: ser.error_json,
       },
     })
 

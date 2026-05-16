@@ -167,6 +167,8 @@ export default async function AdminReceptionRoomPage({
         memos={memos}
         messages={message_result.messages}
         load_failed={!message_result.ok}
+        admin_user_uuid={access.user_uuid}
+        admin_participant_uuid={staff_participant_uuid.trim()}
       />
     </div>
   )

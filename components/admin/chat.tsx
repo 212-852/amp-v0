@@ -15,6 +15,8 @@ type AdminChatProps = {
   staff_user_uuid: string | null
   staff_tier: string | null
   room_display_title: string
+  admin_user_uuid: string
+  admin_participant_uuid: string
 }
 
 const component_file = 'components/admin/chat.tsx'
@@ -25,12 +27,19 @@ export default function AdminChat(props: AdminChatProps) {
       event: 'admin_chat_component_mounted',
       room_uuid: props.room_uuid,
       active_room_uuid: props.room_uuid,
-      admin_user_uuid: props.staff_user_uuid,
-      admin_participant_uuid: props.staff_participant_uuid,
+      admin_user_uuid: props.admin_user_uuid.trim() || props.staff_user_uuid,
+      admin_participant_uuid:
+        props.admin_participant_uuid.trim() || props.staff_participant_uuid,
       component_file,
       phase: 'admin_chat_shell',
     })
-  }, [props.room_uuid, props.staff_participant_uuid, props.staff_user_uuid])
+  }, [
+    props.admin_participant_uuid,
+    props.admin_user_uuid,
+    props.room_uuid,
+    props.staff_participant_uuid,
+    props.staff_user_uuid,
+  ])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -38,8 +47,9 @@ export default function AdminChat(props: AdminChatProps) {
         event: 'admin_chat_component_ready',
         room_uuid: props.room_uuid,
         active_room_uuid: props.room_uuid,
-        admin_user_uuid: props.staff_user_uuid,
-        admin_participant_uuid: props.staff_participant_uuid,
+        admin_user_uuid: props.admin_user_uuid.trim() || props.staff_user_uuid,
+        admin_participant_uuid:
+          props.admin_participant_uuid.trim() || props.staff_participant_uuid,
         component_file,
         phase: 'admin_chat_shell',
       })
@@ -48,7 +58,18 @@ export default function AdminChat(props: AdminChatProps) {
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [props.room_uuid, props.staff_participant_uuid, props.staff_user_uuid])
+  }, [
+    props.admin_participant_uuid,
+    props.admin_user_uuid,
+    props.room_display_title,
+    props.room_uuid,
+    props.staff_display_name,
+    props.staff_participant_uuid,
+    props.staff_tier,
+    props.staff_user_uuid,
+    props.load_failed,
+    props.messages,
+  ])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

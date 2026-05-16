@@ -19,6 +19,8 @@ type AdminReceptionRoomProps = {
   memos: handoff_memo[]
   messages: reception_room_message[]
   load_failed: boolean
+  admin_user_uuid: string
+  admin_participant_uuid: string
 }
 
 const component_file = 'components/admin/reception/room.tsx'
@@ -32,8 +34,8 @@ export default async function AdminReceptionRoom(props: AdminReceptionRoomProps)
     payload: {
       room_uuid: props.room_uuid,
       active_room_uuid: props.room_uuid,
-      admin_user_uuid: props.staff_user_uuid,
-      admin_participant_uuid: props.staff_participant_uuid.trim() || null,
+      admin_user_uuid: props.admin_user_uuid.trim() || null,
+      admin_participant_uuid: props.admin_participant_uuid.trim() || null,
       component_file,
       pathname,
       ignored_reason: null,
@@ -71,6 +73,8 @@ export default async function AdminReceptionRoom(props: AdminReceptionRoomProps)
         staff_user_uuid={props.staff_user_uuid}
         staff_tier={props.staff_tier}
         room_display_title={props.customer_display_name}
+        admin_user_uuid={props.admin_user_uuid}
+        admin_participant_uuid={props.admin_participant_uuid}
       />
     </section>
   )
