@@ -76,7 +76,7 @@ export function apply_chat_typing_broadcast(
     role: typing.role,
     is_typing: true,
     sent_at: typing.sent_at,
-    source_channel: null,
+    source_channel: typing.source_channel ?? null,
   })
 
   return { changed: true, prev_count, next_count: map.size }

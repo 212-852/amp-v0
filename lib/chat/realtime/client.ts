@@ -26,6 +26,7 @@ export type chat_typing_payload = {
   role: chat_realtime_role
   display_name?: string | null
   is_typing: boolean
+  source_channel?: string | null
   sent_at: string
   typed_at?: string
 }
@@ -1624,6 +1625,7 @@ export function publish_chat_typing(input: {
     role: input.role,
     display_name: input.display_name ?? null,
     is_typing: input.is_typing,
+    source_channel: source,
     sent_at: new Date().toISOString(),
   }
 
