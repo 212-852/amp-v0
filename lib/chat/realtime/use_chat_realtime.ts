@@ -95,7 +95,8 @@ function emit_chat_realtime_hook_debug(
     | 'chat_realtime_action_received'
     | 'chat_realtime_action_accepted'
     | 'chat_realtime_action_ignored'
-    | 'chat_realtime_state_append_succeeded',
+    | 'chat_realtime_state_append_succeeded'
+    | 'chat_realtime_message_rendered',
   payload: hook_debug_payload,
 ) {
   send_chat_realtime_debug({
@@ -275,12 +276,21 @@ export function use_chat_realtime(input: use_chat_realtime_input) {
 
         const append_result = on_message_ref.current(message)
 
-        if (
-          append_result &&
-          !append_result.dedupe_hit &&
-          append_result.next_count > append_result.prev_count
-        ) {
-          emit_chat_realtime_hook_debug('chat_realtime_state_append_succeeded', {
+        if (append_result && !append_result.dedupe_hit) {
+          if (append_result.next_count > append_result.prev_count) {
+            emit_chat_realtime_hook_debug('chat_realtime_state_append_succeeded', {
+              owner,
+              room_uuid,
+              active_room_uuid,
+              message_uuid: message.archive_uuid,
+              source_channel: channels.source_channel,
+              direction: channels.direction,
+              prev_count: append_result.prev_count,
+              next_count: append_result.next_count,
+            })
+          }
+
+          emit_chat_realtime_hook_debug('chat_realtime_message_rendered', {
             owner,
             room_uuid,
             active_room_uuid,

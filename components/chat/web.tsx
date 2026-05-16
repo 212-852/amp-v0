@@ -11,10 +11,18 @@ import {
 import { useUserChat } from '@/components/chat/context'
 import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
-import {
-  chat_typing_is_fresh,
-  type chat_typing_payload,
+import type {
+  chat_presence_payload,
+  chat_typing_payload,
 } from '@/lib/chat/realtime/client'
+import {
+  clear_peer_typing_participant,
+  handle_presence_typing_for_ui,
+  handle_typing_broadcast_for_ui,
+  peer_typing_label_for_user,
+  schedule_peer_typing_sweep,
+  type peer_typing_row,
+} from '@/lib/chat/realtime/typing_ui'
 import {
   chat_action_to_archived_message,
   emit_chat_action_realtime_rendered,
@@ -431,17 +439,7 @@ export function WebChat({
   })
 
   const did_initial_scroll_ref = useRef(false)
-  const typing_rows_ref = useRef<
-    Map<
-      string,
-      {
-        participant_uuid: string
-        role: string | null
-        is_typing: boolean | null
-        sent_at: string | null
-      }
-    >
-  >(new Map())
+  const peer_typing_map_ref = useRef<Map<string, peer_typing_row>>(new Map())
   const [typing_banner, set_typing_banner] = useState<string | null>(null)
 
   useEffect(() => {
@@ -485,6 +483,19 @@ export function WebChat({
       }
 
       const dbg = web_rt_ctx_ref.current
+      if (message.sender_participant_uuid) {
+        clear_peer_typing_participant(
+          peer_typing_map_ref.current,
+          message.sender_participant_uuid,
+        )
+        set_typing_banner(
+          peer_typing_label_for_user(
+            peer_typing_map_ref.current,
+            self_participant_uuid_ref.current,
+          ),
+        )
+      }
+
       const near_bottom_before = get_message_list_near_bottom()
       const update_result = append_realtime_message_ref.current(message)
 
@@ -520,36 +531,6 @@ export function WebChat({
     },
     [get_message_list_near_bottom, scroll_to_bottom],
   )
-
-  const recompute_staff_typing_banner = useCallback(() => {
-    const now = new Date()
-    let has_other_staff = false
-    const self = self_participant_uuid_ref.current
-
-    for (const row of typing_rows_ref.current.values()) {
-      if (row.participant_uuid === self) {
-        continue
-      }
-
-      const role = row.role?.trim().toLowerCase() ?? ''
-
-      if (
-        (role === 'admin' ||
-          role === 'concierge' ||
-          role === 'bot') &&
-        chat_typing_is_fresh({
-          is_typing: row.is_typing === true,
-          sent_at: row.sent_at ?? '',
-          now,
-        })
-      ) {
-        has_other_staff = true
-        break
-      }
-    }
-
-    set_typing_banner(has_other_staff ? 'スタッフが入力中...' : null)
-  }, [])
 
   const handle_realtime_action = useCallback(
     (action: chat_action_realtime_payload, inserted_index: number) => {
@@ -592,17 +573,48 @@ export function WebChat({
 
   const handle_realtime_typing = useCallback(
     (typing: chat_typing_payload) => {
-      typing_rows_ref.current.set(typing.participant_uuid, {
-        participant_uuid: typing.participant_uuid,
-        role: typing.role,
-        is_typing: typing.is_typing,
-        sent_at: typing.sent_at,
+      handle_typing_broadcast_for_ui({
+        owner: 'user',
+        room_uuid,
+        map: peer_typing_map_ref.current,
+        typing,
+        self_participant_uuid: participant_uuid,
+        on_label_change: set_typing_banner,
+        resolve_label: peer_typing_label_for_user,
       })
-      recompute_staff_typing_banner()
-
-      window.setTimeout(recompute_staff_typing_banner, 3_100)
+      schedule_peer_typing_sweep({
+        owner: 'user',
+        room_uuid,
+        map: peer_typing_map_ref.current,
+        self_participant_uuid: participant_uuid,
+        on_label_change: set_typing_banner,
+        resolve_label: peer_typing_label_for_user,
+      })
     },
-    [recompute_staff_typing_banner],
+    [participant_uuid, room_uuid],
+  )
+
+  const handle_realtime_presence = useCallback(
+    (presence: chat_presence_payload) => {
+      handle_presence_typing_for_ui({
+        owner: 'user',
+        room_uuid,
+        map: peer_typing_map_ref.current,
+        presence,
+        self_participant_uuid: participant_uuid,
+        on_label_change: set_typing_banner,
+        resolve_label: peer_typing_label_for_user,
+      })
+      schedule_peer_typing_sweep({
+        owner: 'user',
+        room_uuid,
+        map: peer_typing_map_ref.current,
+        self_participant_uuid: participant_uuid,
+        on_label_change: set_typing_banner,
+        resolve_label: peer_typing_label_for_user,
+      })
+    },
+    [participant_uuid, room_uuid],
   )
 
   use_chat_realtime({
@@ -621,6 +633,7 @@ export function WebChat({
     on_message: handle_realtime_message,
     on_action: handle_realtime_action,
     on_typing: handle_realtime_typing,
+    on_presence: handle_realtime_presence,
   })
 
   useEffect(() => {

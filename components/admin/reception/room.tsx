@@ -17,7 +17,19 @@ import {
   append_chat_action_to_admin_timeline,
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
+import type {
+  chat_presence_payload,
+  chat_typing_payload,
+} from '@/lib/chat/realtime/client'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
+import {
+  clear_peer_typing_participant,
+  handle_presence_typing_for_ui,
+  handle_typing_broadcast_for_ui,
+  peer_typing_label_for_admin,
+  schedule_peer_typing_sweep,
+  type peer_typing_row,
+} from '@/lib/chat/realtime/typing_ui'
 import {
   archived_message_to_timeline_message,
   merge_timeline_message_rows,
@@ -47,6 +59,15 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     () => props.messages,
   )
   const realtime_messages_channel_ref = useRef<RealtimeChannel | null>(null)
+  const peer_typing_map_ref = useRef<Map<string, peer_typing_row>>(new Map())
+  const active_typing_identity_ref = useRef({
+    user_uuid: null as string | null,
+    participant_uuid: null as string | null,
+    role: null as string | null,
+  })
+  const [peer_typing_label, set_peer_typing_label] = useState<string | null>(
+    null,
+  )
   const room_display_title_ref = useRef(props.customer_display_name)
   const room_rendered_debug_ref = useRef<string | null>(null)
   const live_room_uuid = props.room?.room_uuid ?? props.room_uuid
@@ -74,7 +95,71 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
 
   useEffect(() => {
     room_display_title_ref.current = props.customer_display_name
-  }, [props.customer_display_name])
+    active_typing_identity_ref.current = {
+      user_uuid: props.staff_user_uuid,
+      participant_uuid: props.staff_participant_uuid,
+      role: 'admin',
+    }
+  }, [
+    props.customer_display_name,
+    props.staff_participant_uuid,
+    props.staff_user_uuid,
+  ])
+
+  const refresh_peer_typing_label = useCallback(() => {
+    set_peer_typing_label(
+      peer_typing_label_for_admin(
+        peer_typing_map_ref.current,
+        props.staff_participant_uuid,
+      ),
+    )
+  }, [props.staff_participant_uuid])
+
+  const handle_remote_typing = useCallback(
+    (typing: chat_typing_payload) => {
+      handle_typing_broadcast_for_ui({
+        owner: 'admin',
+        room_uuid: props.room_uuid,
+        map: peer_typing_map_ref.current,
+        typing,
+        self_participant_uuid: props.staff_participant_uuid,
+        on_label_change: set_peer_typing_label,
+        resolve_label: peer_typing_label_for_admin,
+      })
+      schedule_peer_typing_sweep({
+        owner: 'admin',
+        room_uuid: props.room_uuid,
+        map: peer_typing_map_ref.current,
+        self_participant_uuid: props.staff_participant_uuid,
+        on_label_change: set_peer_typing_label,
+        resolve_label: peer_typing_label_for_admin,
+      })
+    },
+    [props.room_uuid, props.staff_participant_uuid],
+  )
+
+  const handle_remote_presence = useCallback(
+    (presence: chat_presence_payload) => {
+      handle_presence_typing_for_ui({
+        owner: 'admin',
+        room_uuid: props.room_uuid,
+        map: peer_typing_map_ref.current,
+        presence,
+        self_participant_uuid: props.staff_participant_uuid,
+        on_label_change: set_peer_typing_label,
+        resolve_label: peer_typing_label_for_admin,
+      })
+      schedule_peer_typing_sweep({
+        owner: 'admin',
+        room_uuid: props.room_uuid,
+        map: peer_typing_map_ref.current,
+        self_participant_uuid: props.staff_participant_uuid,
+        on_label_change: set_peer_typing_label,
+        resolve_label: peer_typing_label_for_admin,
+      })
+    },
+    [props.room_uuid, props.staff_participant_uuid],
+  )
 
   useEffect(() => {
     set_live_messages(
@@ -130,6 +215,14 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         return merged.rows
       })
 
+      if (archived.sender_participant_uuid) {
+        clear_peer_typing_participant(
+          peer_typing_map_ref.current,
+          archived.sender_participant_uuid,
+        )
+        refresh_peer_typing_label()
+      }
+
       if (!update_result.dedupe_hit) {
         handle_chat_message_toast({
           room_uuid: archived.room_uuid,
@@ -162,6 +255,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
       props.staff_participant_uuid,
       props.staff_tier,
       props.staff_user_uuid,
+      refresh_peer_typing_label,
     ],
   )
 
@@ -234,6 +328,9 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         on_message={handle_realtime_message}
         on_action={handle_realtime_action}
         on_support_action={handle_support_action}
+        on_typing={handle_remote_typing}
+        on_presence={handle_remote_presence}
+        active_typing_identity_ref={active_typing_identity_ref}
         realtime_messages_channel_ref={realtime_messages_channel_ref}
       />
 
@@ -268,6 +365,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         admin_participant_uuid={props.admin_participant_uuid}
         realtime_messages_channel_ref={realtime_messages_channel_ref}
         on_append_timeline_messages={append_live_timeline_messages}
+        peer_typing_label={peer_typing_label}
       />
     </div>
   )

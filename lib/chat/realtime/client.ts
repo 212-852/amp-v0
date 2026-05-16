@@ -62,12 +62,8 @@ export function chat_realtime_postgres_channel_name(
     return `admin_room_list:${room_uuid}`
   }
 
-  if (scope === 'admin_active') {
-    return `admin_active_chat:${room_uuid}`
-  }
-
-  if (scope === 'user_active') {
-    return `user_active_chat:${room_uuid}`
+  if (scope === 'admin_active' || scope === 'user_active') {
+    return chat_room_realtime_channel_name(room_uuid)
   }
 
   return chat_room_realtime_channel_name(room_uuid)

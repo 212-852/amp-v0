@@ -21,6 +21,7 @@ type AdminChatProps = {
   admin_participant_uuid: string
   realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
   on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
+  peer_typing_label?: string | null
 }
 
 const component_file = 'components/admin/chat.tsx'

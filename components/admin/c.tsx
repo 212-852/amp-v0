@@ -15,13 +15,9 @@ import {
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
 import {
-  chat_room_realtime_channel_name,
-  chat_typing_is_fresh,
   publish_chat_typing,
   sync_chat_typing_presence,
-  type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
-import { create_browser_supabase } from '@/lib/db/browser'
 import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { RefObject } from 'react'
@@ -41,6 +37,7 @@ type AdminChatTimelineProps = {
   admin_participant_uuid: string
   realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
   on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
+  peer_typing_label?: string | null
 }
 
 function emit_timeline_duplicate_skips(skips: timeline_item_duplicate_skip[]) {
@@ -161,22 +158,19 @@ export default function AdminChatTimeline({
   room_display_title,
   realtime_messages_channel_ref: parent_messages_channel_ref,
   on_append_timeline_messages,
+  peer_typing_label = null,
 }: AdminChatTimelineProps) {
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
   const local_messages_channel_ref = useRef<RealtimeChannel | null>(null)
   const messages_channel_ref =
     parent_messages_channel_ref ?? local_messages_channel_ref
-  const typing_broadcast_channel_ref = useRef<RealtimeChannel | null>(null)
-  const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
     merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
   const [show_jump_button, set_show_jump_button] = useState(false)
-  const [typing_lines, set_typing_lines] = useState<string[]>([])
-  const typing_timer_ref = useRef<number | null>(null)
   const publish_typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
 
@@ -188,12 +182,6 @@ export default function AdminChatTimeline({
     staff_participant_uuid,
     staff_user_uuid,
     staff_tier,
-  })
-
-  const active_typing_identity_ref = useRef({
-    user_uuid: null as string | null,
-    participant_uuid: null as string | null,
-    role: null as string | null,
   })
 
   const show_jump_button_ref = useRef(false)
@@ -210,11 +198,6 @@ export default function AdminChatTimeline({
       staff_participant_uuid,
       staff_user_uuid,
       staff_tier,
-    }
-    active_typing_identity_ref.current = {
-      user_uuid: staff_user_uuid,
-      participant_uuid: staff_participant_uuid,
-      role: 'admin',
     }
   }, [
     room_uuid,
@@ -245,49 +228,7 @@ export default function AdminChatTimeline({
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [rows.length, typing_lines.length])
-
-  const refresh_typing_lines = useCallback(() => {
-    const now = new Date()
-    const lines: string[] = []
-    const staff = staff_participant_uuid_ref.current
-
-    for (const typing of typing_rows_ref.current.values()) {
-      if (typing.participant_uuid === staff) {
-        continue
-      }
-
-      if (
-        !chat_typing_is_fresh({
-          is_typing: typing.is_typing,
-          sent_at: typing.sent_at,
-          now,
-        })
-      ) {
-        continue
-      }
-
-      if (typing.role === 'user') {
-        lines.push('ユーザーが入力中...')
-      } else if (typing.role === 'admin' || typing.role === 'concierge') {
-        const name = typing.display_name?.trim() || 'Admin'
-        lines.push(`${name} が入力中...`)
-      }
-    }
-
-    set_typing_lines(Array.from(new Set(lines)))
-  }, [])
-
-  const schedule_typing_refresh = useCallback(() => {
-    if (typing_timer_ref.current !== null) {
-      window.clearTimeout(typing_timer_ref.current)
-    }
-
-    typing_timer_ref.current = window.setTimeout(() => {
-      typing_timer_ref.current = null
-      refresh_typing_lines()
-    }, 3_100)
-  }, [refresh_typing_lines])
+  }, [rows.length, peer_typing_label])
 
   const update_jump_button_visibility = useCallback((visible: boolean) => {
     if (show_jump_button_ref.current === visible) {
@@ -306,54 +247,6 @@ export default function AdminChatTimeline({
     update_jump_button_visibility(!near_bottom)
   }, [update_jump_button_visibility])
 
-  useEffect(() => {
-    if (!room_uuid.trim()) {
-      return
-    }
-
-    const supabase = create_browser_supabase()
-
-    if (!supabase) {
-      return
-    }
-
-    const active_room_focus = room_uuid.trim()
-    const typing_channel = supabase.channel(
-      chat_room_realtime_channel_name(active_room_focus),
-      { config: { broadcast: { self: true } } },
-    )
-
-    typing_channel
-      .on('broadcast', { event: 'typing' }, (payload) => {
-        const raw = payload.payload
-
-        if (!raw || typeof raw !== 'object') {
-          return
-        }
-
-        const row = raw as chat_typing_payload
-
-        if ((row.room_uuid ?? '').trim() !== active_room_focus) {
-          return
-        }
-
-        typing_rows_ref.current.set(row.participant_uuid, row)
-        refresh_typing_lines()
-        schedule_typing_refresh()
-      })
-      .subscribe()
-
-    typing_broadcast_channel_ref.current = typing_channel
-
-    return () => {
-      void supabase.removeChannel(typing_channel)
-
-      if (typing_broadcast_channel_ref.current === typing_channel) {
-        typing_broadcast_channel_ref.current = null
-      }
-    }
-  }, [refresh_typing_lines, room_uuid, schedule_typing_refresh])
-
   const post_typing_presence = useCallback(
     (action: 'typing_start' | 'typing_stop') => {
       if (!room_uuid || !staff_participant_uuid) {
@@ -364,8 +257,7 @@ export default function AdminChatTimeline({
         return
       }
 
-      const channel =
-        typing_broadcast_channel_ref.current ?? messages_channel_ref.current
+      const channel = messages_channel_ref.current
       const is_heartbeat = action === 'typing_start' && typing_active_ref.current
 
       if (action === 'typing_start') {
@@ -410,10 +302,6 @@ export default function AdminChatTimeline({
 
   useEffect(() => {
     return () => {
-      if (typing_timer_ref.current !== null) {
-        window.clearTimeout(typing_timer_ref.current)
-      }
-
       if (publish_typing_timer_ref.current !== null) {
         window.clearTimeout(publish_typing_timer_ref.current)
       }
@@ -570,9 +458,9 @@ export default function AdminChatTimeline({
             })}
           </ol>
         )}
-        {typing_lines.length > 0 ? (
+        {peer_typing_label ? (
           <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-center text-[12px] font-medium text-neutral-600">
-            {typing_lines.join(' / ')}
+            {peer_typing_label}
           </div>
         ) : null}
           <div ref={bottom_ref} className="h-1" aria-hidden="true" />
