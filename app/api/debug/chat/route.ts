@@ -117,6 +117,7 @@ type chat_debug_body = {
   reason?: unknown
   pathname?: unknown
   action_type?: unknown
+  owner?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -286,6 +287,7 @@ export async function POST(request: Request) {
       reason: string_or_null(body?.reason),
       pathname: string_or_null(body?.pathname),
       action_type: string_or_null(body?.action_type),
+      owner: string_or_null(body?.owner),
     },
   })
 

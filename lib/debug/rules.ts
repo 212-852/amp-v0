@@ -696,6 +696,16 @@ export function resolve_debug_rule(input: {
   }
 
   const chat_realtime_always_discord = new Set([
+    'chat_realtime_hook_mounted',
+    'chat_realtime_subscribe_started',
+    'chat_realtime_subscribe_status',
+    'chat_realtime_message_received',
+    'chat_realtime_message_accepted',
+    'chat_realtime_message_ignored',
+    'chat_realtime_action_received',
+    'chat_realtime_action_accepted',
+    'chat_realtime_action_ignored',
+    'chat_realtime_state_append_succeeded',
     'chat_realtime_subscribe_failed',
     'chat_realtime_message_callback_ignored',
     'chat_realtime_typing_callback_ignored',

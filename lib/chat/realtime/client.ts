@@ -191,6 +191,7 @@ function admin_realtime_message_field_payload(input: {
 export type chat_realtime_debug_payload = {
   event: string
   category?: 'admin_chat' | 'chat_realtime' | null
+  owner?: 'admin' | 'user' | string | null
   room_uuid: string | null
   active_room_uuid?: string | null
   participant_uuid?: string | null

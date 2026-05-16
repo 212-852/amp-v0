@@ -12,22 +12,16 @@ import { useUserChat } from '@/components/chat/context'
 import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
 import {
-  chat_room_realtime_channel_name,
   chat_typing_is_fresh,
-  cleanup_chat_room_realtime,
-  send_chat_realtime_debug,
-  subscribe_chat_room_realtime,
+  type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
 import {
-  emit_chat_messages_realtime_debug,
-  resolve_realtime_message_channels,
-} from '@/lib/chat/realtime/messages_client'
-import {
   chat_action_to_archived_message,
-  cleanup_chat_actions_realtime,
   emit_chat_action_realtime_rendered,
-  subscribe_chat_actions_realtime,
+  type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
+import type { realtime_archived_message } from '@/lib/chat/realtime/row'
+import { use_chat_realtime } from '@/lib/chat/realtime/use_chat_realtime'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
   faq_bundle,
@@ -40,7 +34,6 @@ import type {
 } from '@/lib/chat/message'
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
-import { create_browser_supabase } from '@/lib/db/browser'
 import { handle_chat_message_toast } from '@/lib/output/toast'
 import { resolve_realtime_message_subtitle_for_toast } from '@/lib/chat/realtime/toast_decision'
 
@@ -437,12 +430,6 @@ export function WebChat({
     role: null as string | null,
   })
 
-  const subscribed_room_uuid_ref = useRef<string | null>(null)
-  const subscribed_chat_actions_room_ref = useRef<string | null>(null)
-  const chat_actions_channel_ref = useRef<ReturnType<
-    typeof subscribe_chat_actions_realtime
-  > | null>(null)
-
   const did_initial_scroll_ref = useRef(false)
   const typing_rows_ref = useRef<
     Map<
@@ -484,6 +471,56 @@ export function WebChat({
     session?.user_uuid,
   ])
 
+  const handle_realtime_message = useCallback(
+    (message: realtime_archived_message) => {
+      if (
+        message.bundle.bundle_type === 'room_action_log' &&
+        !end_user_should_see_room_action_log_bundle(message.bundle)
+      ) {
+        return {
+          prev_count: 0,
+          next_count: 0,
+          dedupe_hit: true,
+        }
+      }
+
+      const dbg = web_rt_ctx_ref.current
+      const near_bottom_before = get_message_list_near_bottom()
+      const update_result = append_realtime_message_ref.current(message)
+
+      if (!update_result.dedupe_hit) {
+        handle_chat_message_toast({
+          room_uuid: message.room_uuid,
+          active_room_uuid: dbg.active_room_uuid,
+          message_uuid: message.archive_uuid,
+          sender_user_uuid: message.sender_user_uuid ?? null,
+          sender_participant_uuid: message.sender_participant_uuid ?? null,
+          sender_role: message.sender_role ?? message.bundle.sender ?? null,
+          active_user_uuid: dbg.user_uuid,
+          active_participant_uuid: dbg.participant_uuid,
+          active_role: 'user',
+          role: 'user',
+          tier: dbg.tier,
+          source_channel: dbg.source_channel,
+          target_path: '/user',
+          phase: 'web_chat_realtime_message',
+          is_scrolled_to_bottom: near_bottom_before,
+          subtitle: resolve_realtime_message_subtitle_for_toast(message, null),
+          scroll_to_bottom: () => {
+            scroll_to_bottom('smooth')
+          },
+        })
+      }
+
+      return {
+        prev_count: update_result.prev_message_count,
+        next_count: update_result.next_message_count,
+        dedupe_hit: update_result.dedupe_hit,
+      }
+    },
+    [get_message_list_near_bottom, scroll_to_bottom],
+  )
+
   const recompute_staff_typing_banner = useCallback(() => {
     const now = new Date()
     let has_other_staff = false
@@ -513,6 +550,78 @@ export function WebChat({
 
     set_typing_banner(has_other_staff ? 'スタッフが入力中...' : null)
   }, [])
+
+  const handle_realtime_action = useCallback(
+    (action: chat_action_realtime_payload, inserted_index: number) => {
+      const archived = chat_action_to_archived_message(action)
+
+      if (!end_user_should_see_room_action_log_bundle(archived.bundle)) {
+        return {
+          prev_count: 0,
+          next_count: 0,
+          dedupe_hit: true,
+        }
+      }
+
+      const dbg = web_rt_ctx_ref.current
+      const near_bottom_before = get_message_list_near_bottom()
+      const update_result = append_realtime_message_ref.current(archived)
+
+      if (!update_result.dedupe_hit) {
+        emit_chat_action_realtime_rendered({
+          room_uuid: action.room_uuid,
+          action,
+          inserted_index,
+          source_channel: dbg.source_channel,
+          phase: 'web_chat_support_action',
+        })
+
+        if (near_bottom_before) {
+          scroll_to_bottom('smooth')
+        }
+      }
+
+      return {
+        prev_count: update_result.prev_message_count,
+        next_count: update_result.next_message_count,
+        dedupe_hit: update_result.dedupe_hit,
+      }
+    },
+    [get_message_list_near_bottom, scroll_to_bottom],
+  )
+
+  const handle_realtime_typing = useCallback(
+    (typing: chat_typing_payload) => {
+      typing_rows_ref.current.set(typing.participant_uuid, {
+        participant_uuid: typing.participant_uuid,
+        role: typing.role,
+        is_typing: typing.is_typing,
+        sent_at: typing.sent_at,
+      })
+      recompute_staff_typing_banner()
+
+      window.setTimeout(recompute_staff_typing_banner, 3_100)
+    },
+    [recompute_staff_typing_banner],
+  )
+
+  use_chat_realtime({
+    owner: 'user',
+    room_uuid,
+    active_room_uuid: active_room_uuid ?? room_uuid,
+    enabled: Boolean(room_uuid.trim()),
+    participant_uuid,
+    user_uuid: session?.user_uuid ?? null,
+    role: 'user',
+    tier: session?.tier ?? null,
+    source_channel: session?.source_channel ?? 'web',
+    receiver_participant_uuid: participant_uuid,
+    active_typing_identity_ref,
+    export_messages_channel_ref: room_realtime_channelRef,
+    on_message: handle_realtime_message,
+    on_action: handle_realtime_action,
+    on_typing: handle_realtime_typing,
+  })
 
   useEffect(() => {
     hydrate_chat({
@@ -548,314 +657,6 @@ export function WebChat({
     }
   }, [participant_uuid, room_uuid, session?.source_channel])
 
-  useEffect(() => {
-    if (!room_uuid) {
-      return
-    }
-
-    const supabase = create_browser_supabase()
-
-    if (!supabase) {
-      return
-    }
-
-    const locked_room = room_uuid
-    const ctx = web_rt_ctx_ref.current
-    const messages_already_subscribed =
-      subscribed_room_uuid_ref.current === locked_room &&
-      room_realtime_channelRef.current
-    const actions_already_subscribed =
-      subscribed_chat_actions_room_ref.current === locked_room &&
-      chat_actions_channel_ref.current
-
-    if (!messages_already_subscribed) {
-      send_chat_realtime_debug({
-        event: 'chat_realtime_client_created',
-        room_uuid: locked_room,
-        active_room_uuid: ctx.active_room_uuid,
-        participant_uuid: ctx.participant_uuid,
-        user_uuid: ctx.user_uuid,
-        role: 'user',
-        tier: ctx.tier,
-        source_channel: ctx.source_channel,
-        channel_name: chat_room_realtime_channel_name(locked_room),
-        phase: 'web_chat_create_browser_supabase',
-      })
-    } else {
-      send_chat_realtime_debug({
-        event: 'chat_realtime_subscribe_skipped',
-        room_uuid: locked_room,
-        active_room_uuid: ctx.active_room_uuid,
-        participant_uuid: ctx.participant_uuid,
-        user_uuid: ctx.user_uuid,
-        role: 'user',
-        tier: ctx.tier,
-        source_channel: ctx.source_channel,
-        channel_name: chat_room_realtime_channel_name(locked_room),
-        cleanup_reason: 'duplicate_messages_subscribe',
-        phase: 'web_chat_realtime_guard',
-      })
-    }
-
-    let channel = room_realtime_channelRef.current
-
-    if (!messages_already_subscribed) {
-      channel = subscribe_chat_room_realtime({
-      supabase,
-      room_uuid: locked_room,
-      active_room_uuid: ctx.active_room_uuid,
-      participant_uuid: ctx.participant_uuid,
-      user_uuid: ctx.user_uuid,
-      role: 'user',
-      tier: ctx.tier,
-      source_channel: ctx.source_channel,
-      listener_scope: 'user_active',
-      active_typing_identity_ref,
-      on_message: (message) => {
-        if (!message) {
-          return
-        }
-
-        if (
-          message.bundle.bundle_type === 'room_action_log' &&
-          !end_user_should_see_room_action_log_bundle(message.bundle)
-        ) {
-          return
-        }
-
-        const dbg = web_rt_ctx_ref.current
-        const near_bottom_before = get_message_list_near_bottom()
-        const update_result = append_realtime_message_ref.current(message)
-
-        if (update_result.dedupe_hit) {
-          return
-        }
-
-        const message_channels = resolve_realtime_message_channels(message)
-
-        emit_chat_messages_realtime_debug('user', 'state_append_succeeded', {
-          room_uuid: locked_room,
-          active_room_uuid: dbg.active_room_uuid,
-          message_uuid: message.archive_uuid,
-          source_channel: message_channels.source_channel,
-          direction: message_channels.direction,
-          sender_participant_uuid: message.sender_participant_uuid ?? null,
-          receiver_participant_uuid: dbg.participant_uuid,
-          ignored_reason: null,
-          prev_count: update_result.prev_message_count,
-          next_count: update_result.next_message_count,
-        })
-
-        handle_chat_message_toast({
-          room_uuid: message.room_uuid,
-          active_room_uuid: dbg.active_room_uuid,
-          message_uuid: message.archive_uuid,
-          sender_user_uuid: message.sender_user_uuid ?? null,
-          sender_participant_uuid: message.sender_participant_uuid ?? null,
-          sender_role: message.sender_role ?? message.bundle.sender ?? null,
-          active_user_uuid: dbg.user_uuid,
-          active_participant_uuid: dbg.participant_uuid,
-          active_role: 'user',
-          role: 'user',
-          tier: dbg.tier,
-          source_channel: dbg.source_channel,
-          target_path: '/user',
-          phase: 'web_chat_realtime_message',
-          is_scrolled_to_bottom: near_bottom_before,
-          subtitle: resolve_realtime_message_subtitle_for_toast(message, null),
-          scroll_to_bottom: () => {
-            scroll_to_bottom('smooth')
-          },
-        })
-
-        send_chat_realtime_debug({
-          event: 'chat_realtime_message_state_updated',
-          room_uuid: locked_room,
-          active_room_uuid: dbg.active_room_uuid,
-          participant_uuid: dbg.participant_uuid,
-          user_uuid: dbg.user_uuid,
-          role: 'user',
-          tier: dbg.tier,
-          source_channel: dbg.source_channel,
-          channel_name: chat_room_realtime_channel_name(locked_room),
-          event_name: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `room_uuid=eq.${locked_room}`,
-          payload_room_uuid: message.room_uuid,
-          payload_message_uuid: message.archive_uuid,
-          prev_message_count: update_result.prev_message_count,
-          next_message_count: update_result.next_message_count,
-          dedupe_hit: update_result.dedupe_hit,
-          ignored_reason: update_result.dedupe_hit
-            ? 'message_uuid_dedupe'
-            : null,
-          phase: 'web_chat_realtime_state_update',
-        })
-      },
-      on_typing: (typing) => {
-        typing_rows_ref.current.set(typing.participant_uuid, {
-          participant_uuid: typing.participant_uuid,
-          role: typing.role,
-          is_typing: typing.is_typing,
-          sent_at: typing.sent_at,
-        })
-        recompute_staff_typing_banner()
-
-        window.setTimeout(recompute_staff_typing_banner, 3_100)
-
-        const dbg = web_rt_ctx_ref.current
-
-        send_chat_realtime_debug({
-          event: 'chat_typing_state_updated',
-          room_uuid: locked_room,
-          active_room_uuid: dbg.active_room_uuid,
-          participant_uuid: dbg.participant_uuid,
-          user_uuid: dbg.user_uuid,
-          role: 'user',
-          tier: dbg.tier,
-          source_channel: dbg.source_channel,
-          channel_name: chat_room_realtime_channel_name(locked_room),
-          event_name: 'typing',
-          payload_room_uuid: typing.room_uuid,
-          sender_user_uuid: typing.user_uuid ?? null,
-          sender_participant_uuid: typing.participant_uuid,
-          active_participant_uuid: dbg.participant_uuid,
-          sender_role: typing.role,
-          display_name: typing.display_name ?? null,
-          is_typing: typing.is_typing,
-          phase: 'web_chat_typing_state_update',
-        })
-      },
-    })
-
-      subscribed_room_uuid_ref.current = locked_room
-      room_realtime_channelRef.current = channel
-    }
-
-    let actions_channel = chat_actions_channel_ref.current
-
-    if (!actions_already_subscribed) {
-      actions_channel = subscribe_chat_actions_realtime({
-        supabase,
-        room_uuid: locked_room,
-        scope: 'user_active',
-        source_channel: ctx.source_channel,
-        on_action: (action, inserted_index) => {
-          const archived = chat_action_to_archived_message(action)
-
-          if (!end_user_should_see_room_action_log_bundle(archived.bundle)) {
-            send_chat_realtime_debug({
-              event: 'chat_action_realtime_ignored',
-              room_uuid: locked_room,
-              active_room_uuid: ctx.active_room_uuid,
-              participant_uuid: ctx.participant_uuid,
-              user_uuid: ctx.user_uuid,
-              role: 'user',
-              tier: ctx.tier,
-              source_channel: ctx.source_channel,
-              action_uuid: action.action_uuid,
-              event_type: action.action_type,
-              actor_name: action.actor_display_name,
-              inserted_index,
-              ignored_reason: 'not_visible_to_user',
-              phase: 'web_chat_support_action',
-            })
-
-            return
-          }
-
-          const near_bottom_before = get_message_list_near_bottom()
-          const update_result = append_realtime_message_ref.current(archived)
-
-          if (update_result.dedupe_hit) {
-            send_chat_realtime_debug({
-              event: 'chat_action_realtime_ignored',
-              room_uuid: locked_room,
-              active_room_uuid: ctx.active_room_uuid,
-              participant_uuid: ctx.participant_uuid,
-              user_uuid: ctx.user_uuid,
-              role: 'user',
-              tier: ctx.tier,
-              source_channel: ctx.source_channel,
-              action_uuid: action.action_uuid,
-              event_type: action.action_type,
-              actor_name: action.actor_display_name,
-              inserted_index,
-              ignored_reason: 'action_uuid_dedupe',
-              phase: 'web_chat_support_action',
-            })
-
-            return
-          }
-
-          emit_chat_action_realtime_rendered({
-            room_uuid: locked_room,
-            action,
-            inserted_index,
-            source_channel: ctx.source_channel,
-            phase: 'web_chat_support_action',
-          })
-
-          if (near_bottom_before) {
-            scroll_to_bottom('smooth')
-          }
-        },
-      })
-
-      subscribed_chat_actions_room_ref.current = locked_room
-      chat_actions_channel_ref.current = actions_channel
-    }
-
-    return () => {
-      const cleanup_reason =
-        latest_room_uuid_ref.current !== locked_room
-          ? 'room_uuid_changed'
-          : 'unmount'
-      const dbg = web_rt_ctx_ref.current
-
-      if (channel) {
-        cleanup_chat_room_realtime({
-          supabase,
-          channel,
-          room_uuid: locked_room,
-          active_room_uuid: dbg.active_room_uuid,
-          participant_uuid: dbg.participant_uuid,
-          user_uuid: dbg.user_uuid,
-          role: 'user',
-          tier: dbg.tier,
-          source_channel: dbg.source_channel,
-          cleanup_reason,
-        })
-      }
-
-      if (actions_channel) {
-        cleanup_chat_actions_realtime({
-          supabase,
-          channel: actions_channel,
-          room_uuid: locked_room,
-          scope: 'user_active',
-          cleanup_reason,
-        })
-      }
-
-      if (subscribed_room_uuid_ref.current === locked_room) {
-        subscribed_room_uuid_ref.current = null
-      }
-
-      if (subscribed_chat_actions_room_ref.current === locked_room) {
-        subscribed_chat_actions_room_ref.current = null
-      }
-
-      if (room_realtime_channelRef.current === channel) {
-        room_realtime_channelRef.current = null
-      }
-
-      if (chat_actions_channel_ref.current === actions_channel) {
-        chat_actions_channel_ref.current = null
-      }
-    }
-  }, [room_uuid, scroll_to_bottom, get_message_list_near_bottom])
 
   const render_messages = active_room_uuid === room_uuid
     ? active_messages
