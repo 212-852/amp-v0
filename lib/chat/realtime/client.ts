@@ -365,7 +365,7 @@ function admin_subscribe_started_event(scope: chat_realtime_listener_scope) {
   }
 
   if (scope === 'admin_active') {
-    return 'admin_active_chat_realtime_subscribe_started'
+    return 'admin_realtime_client_subscribe_started'
   }
 
   return 'chat_realtime_subscribe_started'

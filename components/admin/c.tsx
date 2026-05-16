@@ -40,7 +40,7 @@ import {
   compute_message_list_near_bottom,
   resolve_realtime_message_subtitle_for_toast,
 } from '@/lib/chat/realtime/toast_decision'
-import type { RealtimeChannel } from '@supabase/supabase-js'
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 
 type AdminChatTimelineProps = {
   messages: chat_room_timeline_message[]
@@ -236,6 +236,37 @@ export default function AdminChatTimeline({
   const support_enter_session_ref = useRef<string | null>(null)
   const show_jump_button_ref = useRef(false)
   const mounted_at_ref = useRef(render_mounted_at)
+  const room_display_title_ref = useRef(room_display_title)
+  const admin_browser_supabase_ref = useRef<SupabaseClient | null>(null)
+
+  useEffect(() => {
+    room_display_title_ref.current = room_display_title
+  }, [room_display_title])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    send_chat_realtime_debug({
+      event: 'admin_realtime_client_mounted',
+      room_uuid: null,
+      active_room_uuid: null,
+      role: 'admin',
+      source_channel: 'admin',
+      pathname: window.location.pathname,
+      phase: 'admin_realtime_client_lifecycle',
+      dependency_values: JSON.stringify({
+        is_use_client_module: true,
+        next_public_supabase_url_configured: Boolean(
+          process.env.NEXT_PUBLIC_SUPABASE_URL,
+        ),
+        next_public_supabase_anon_key_configured: Boolean(
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        ),
+      }),
+    })
+  }, [])
 
   useEffect(() => {
     const pathname =
@@ -391,7 +422,7 @@ export default function AdminChatTimeline({
         }
 
         send_chat_realtime_debug({
-          event: 'admin_active_chat_message_appended',
+          event: 'admin_realtime_client_support_action_merged',
           room_uuid: locked_room,
           active_room_uuid: locked_room,
           action_uuid: action.action_uuid,
@@ -909,9 +940,32 @@ export default function AdminChatTimeline({
       return
     }
 
-    const supabase = create_browser_supabase()
+    const supabase_reused = admin_browser_supabase_ref.current !== null
+    let supabase = admin_browser_supabase_ref.current
 
     if (!supabase) {
+      supabase = create_browser_supabase()
+      admin_browser_supabase_ref.current = supabase
+    }
+
+    if (!supabase) {
+      send_chat_realtime_debug({
+        event: 'admin_realtime_client_room_ready',
+        room_uuid: room_uuid.trim(),
+        active_room_uuid: room_uuid.trim(),
+        participant_uuid: admin_rt_ctx_ref.current.staff_participant_uuid,
+        user_uuid: admin_rt_ctx_ref.current.staff_user_uuid,
+        role: 'admin',
+        tier: admin_rt_ctx_ref.current.staff_tier,
+        source_channel: 'admin',
+        skipped_reason: 'create_browser_supabase_returned_null',
+        phase: 'admin_realtime_client_guard',
+        dependency_values: JSON.stringify({
+          supabase_client_resolved: false,
+          supabase_singleton_reused_before_attempt: supabase_reused,
+        }),
+      })
+
       return
     }
 
@@ -925,6 +979,27 @@ export default function AdminChatTimeline({
       subscribed_chat_actions_room_ref.current === active_room_focus &&
       Boolean(chat_actions_channel_ref.current)
 
+    send_chat_realtime_debug({
+      event: 'admin_realtime_client_room_ready',
+      room_uuid: active_room_focus,
+      active_room_uuid: active_room_focus,
+      participant_uuid: ctx.staff_participant_uuid,
+      user_uuid: ctx.staff_user_uuid,
+      role: 'admin',
+      tier: ctx.staff_tier,
+      source_channel: 'admin',
+      filter: `room_uuid=eq.${active_room_focus}`,
+      phase: 'admin_realtime_client_guard',
+      dependency_values: JSON.stringify({
+        supabase_client_resolved: true,
+        supabase_singleton_reused: supabase_reused,
+        messages_postgres_filter: `room_uuid=eq.${active_room_focus}`,
+        realtime_channel_topic: `admin_active_chat:${active_room_focus}`,
+        messages_already_subscribed,
+        actions_already_subscribed,
+      }),
+    })
+
     if (!messages_already_subscribed) {
       send_chat_realtime_debug({
         event: 'chat_realtime_client_created',
@@ -937,19 +1012,6 @@ export default function AdminChatTimeline({
         source_channel: 'admin',
         channel_name: chat_room_realtime_channel_name(active_room_focus),
         phase: 'admin_chat_create_browser_supabase',
-      })
-
-      send_chat_realtime_debug({
-        event: 'admin_active_chat_realtime_subscribe_started',
-        room_uuid: active_room_focus,
-        active_room_uuid: active_room_focus,
-        participant_uuid: ctx.staff_participant_uuid,
-        user_uuid: ctx.staff_user_uuid,
-        role: 'admin',
-        tier: ctx.staff_tier,
-        source_channel: 'admin',
-        channel_name: `admin_active_chat:${active_room_focus}`,
-        phase: 'admin_chat_realtime_guard',
       })
     }
 
@@ -971,7 +1033,7 @@ export default function AdminChatTimeline({
           const dbg_rt = admin_rt_ctx_ref.current
 
           send_chat_realtime_debug({
-            event: 'admin_active_chat_realtime_subscription_status',
+            event: 'admin_realtime_client_subscribe_status',
             room_uuid: active_room_focus,
             active_room_uuid: active_room_focus,
             participant_uuid: dbg_rt.staff_participant_uuid,
@@ -1038,13 +1100,13 @@ export default function AdminChatTimeline({
           }
 
           send_chat_realtime_debug({
-            event: 'admin_active_chat_realtime_payload_received',
+            event: 'admin_realtime_client_payload_received',
             ...msg_debug_base,
           })
 
           if (payload_room_uuid !== active_room_focus) {
             send_chat_realtime_debug({
-              event: 'admin_active_chat_realtime_payload_ignored',
+              event: 'admin_realtime_client_payload_ignored',
               ...msg_debug_base,
               ignored_reason: 'payload_room_uuid_mismatch',
             })
@@ -1061,7 +1123,7 @@ export default function AdminChatTimeline({
           })
 
           send_chat_realtime_debug({
-            event: 'admin_active_chat_realtime_payload_accepted',
+            event: 'admin_realtime_client_payload_accepted',
             ...msg_debug_base,
             message_uuid: mapped.message_uuid,
           })
@@ -1083,7 +1145,7 @@ export default function AdminChatTimeline({
           )
 
           send_chat_realtime_debug({
-            event: 'admin_active_chat_message_append_started',
+            event: 'admin_realtime_client_state_append_started',
             ...msg_debug_base,
             message_uuid: mapped.message_uuid,
           })
@@ -1203,7 +1265,7 @@ export default function AdminChatTimeline({
             const dbg = admin_rt_ctx_ref.current
 
             send_chat_realtime_debug({
-              event: 'admin_active_chat_message_append_failed',
+              event: 'admin_realtime_client_state_append_failed',
               room_uuid: active_room_focus,
               active_room_uuid: active_room_focus,
               participant_uuid: dbg.staff_participant_uuid,
@@ -1228,7 +1290,7 @@ export default function AdminChatTimeline({
           }
 
           send_chat_realtime_debug({
-            event: 'admin_active_chat_message_append_succeeded',
+            event: 'admin_realtime_client_state_append_succeeded',
             room_uuid: active_room_focus,
             active_room_uuid: active_room_focus,
             participant_uuid: dbg_ctx.staff_participant_uuid,
@@ -1275,7 +1337,7 @@ export default function AdminChatTimeline({
             is_scrolled_to_bottom: near_bottom_before,
             subtitle: resolve_realtime_message_subtitle_for_toast(
               archived,
-              room_display_title,
+              room_display_title_ref.current,
             ),
             scroll_to_bottom: () => {
               bottom_ref.current?.scrollIntoView({
@@ -1283,27 +1345,6 @@ export default function AdminChatTimeline({
                 behavior: 'smooth',
               })
             },
-          })
-
-          send_chat_realtime_debug({
-            event: 'admin_active_chat_message_appended',
-            room_uuid: active_room_focus,
-            active_room_uuid: active_room_focus,
-            participant_uuid: dbg.staff_participant_uuid,
-            user_uuid: dbg.staff_user_uuid,
-            role: 'admin',
-            tier: dbg.staff_tier,
-            source_channel: 'admin',
-            channel_name: ch_name,
-            message_uuid: mapped.message_uuid,
-            payload_message_uuid: archived.archive_uuid,
-            prev_message_count: update_result.prev_message_count,
-            next_message_count: update_result.next_message_count,
-            prev_count: update_result.prev_message_count,
-            next_count: update_result.next_message_count,
-            dedupe_hit: update_result.dedupe_hit,
-            ignored_reason: null,
-            phase: 'admin_chat_realtime_state_update',
           })
 
           send_chat_realtime_debug({
@@ -1494,7 +1535,6 @@ export default function AdminChatTimeline({
     }
   }, [
     apply_support_action_to_timeline,
-    room_display_title,
     room_uuid,
     run_enter_support_room,
   ])
