@@ -225,9 +225,20 @@ export default function AdminChatTimeline({
     staff_user_uuid,
   ])
 
+  const synced_room_uuid_ref = useRef<string | null>(null)
+
   useEffect(() => {
-    set_rows(
-      merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
+    if (synced_room_uuid_ref.current !== room_uuid) {
+      synced_room_uuid_ref.current = room_uuid
+      set_rows(
+        merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
+      )
+      return
+    }
+
+    set_rows((previous) =>
+      merge_timeline_message_rows(previous, initial_messages, 'initial_fetch')
+        .rows,
     )
   }, [initial_messages, room_uuid])
 
@@ -381,7 +392,7 @@ export default function AdminChatTimeline({
         active_room_uuid: room_uuid,
         participant_uuid: staff_participant_uuid,
         user_uuid: staff_user_uuid,
-        role: 'concierge',
+        role: 'admin',
         tier: staff_tier,
         display_name: staff_display_name,
         is_typing: action === 'typing_start',

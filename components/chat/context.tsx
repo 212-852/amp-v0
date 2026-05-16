@@ -26,6 +26,8 @@ import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_deci
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 
+import { UserChatRealtimeBridge } from '@/components/chat/user_realtime_bridge'
+
 type chat_room_client_state = {
   room_uuid: string | null
   participant_uuid: string | null
@@ -37,6 +39,7 @@ const user_chat_merge_debug_source_channel = 'user_chat_context'
 
 type chat_context_value = chat_room_client_state & {
   messages: archived_message[]
+  staff_typing_label: string | null
   is_chat_open: boolean
   hydrate_chat: (input: {
     room_uuid: string
@@ -85,6 +88,9 @@ export function UserChatProvider({
       mode: 'bot',
     })
   const [messages, set_messages] = useState<archived_message[]>([])
+  const [staff_typing_label, set_staff_typing_label] = useState<string | null>(
+    null,
+  )
   const [is_chat_open, set_is_chat_open] = useState(false)
 
   const scroll_to_bottom = useCallback(
@@ -126,6 +132,7 @@ export function UserChatProvider({
         mode: input.mode,
       })
       set_messages(normalize_archived_messages(input.messages))
+      set_staff_typing_label(null)
       window.setTimeout(() => scroll_to_bottom('auto'), 0)
     },
     [scroll_to_bottom],
@@ -354,10 +361,14 @@ export function UserChatProvider({
     }
   }, [room_state.mode, scroll_to_bottom])
 
+  const active_room_uuid = (room_state.room_uuid ?? '').trim()
+  const active_participant_uuid = (room_state.participant_uuid ?? '').trim()
+
   const value = useMemo(
     () => ({
       ...room_state,
       messages,
+      staff_typing_label,
       is_chat_open,
       hydrate_chat,
       append_message,
@@ -377,6 +388,7 @@ export function UserChatProvider({
     [
       room_state,
       messages,
+      staff_typing_label,
       is_chat_open,
       hydrate_chat,
       append_message,
@@ -396,6 +408,16 @@ export function UserChatProvider({
 
   return (
     <UserChatContext.Provider value={value}>
+      {active_room_uuid && active_participant_uuid ? (
+        <UserChatRealtimeBridge
+          room_uuid={active_room_uuid}
+          participant_uuid={active_participant_uuid}
+          locale={room_state.locale}
+          room_realtime_channel_ref={room_realtime_channel_ref}
+          append_realtime_message={append_realtime_message}
+          on_staff_typing_label_change={set_staff_typing_label}
+        />
+      ) : null}
       {children}
     </UserChatContext.Provider>
   )

@@ -93,5 +93,24 @@ export function send_room_typing_status(input: send_room_typing_status_input) {
       subscribe_status: channel ? 'CHANNEL_ATTACHED' : 'CHANNEL_UNAVAILABLE',
       phase: 'send_room_typing_status',
     })
+
+    return
+  }
+
+  if (staff_role && !input.is_typing) {
+    send_chat_realtime_debug({
+      category: 'chat_realtime',
+      event: 'staff_typing_status_stopped',
+      room_uuid,
+      active_room_uuid: input.active_room_uuid ?? room_uuid,
+      participant_uuid,
+      user_uuid: input.user_uuid ?? null,
+      role: input.role,
+      tier: input.tier ?? null,
+      source_channel: input.source_channel,
+      is_typing: false,
+      subscribe_status: channel ? 'CHANNEL_ATTACHED' : 'CHANNEL_UNAVAILABLE',
+      phase: 'send_room_typing_status',
+    })
   }
 }

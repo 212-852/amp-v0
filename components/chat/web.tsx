@@ -5,12 +5,8 @@ import {
   useCallback,
   useEffect,
   useRef,
-  useState,
-  type MutableRefObject,
   type ReactNode,
 } from 'react'
-import type { RealtimeChannel } from '@supabase/supabase-js'
-
 import { useUserChat } from '@/components/chat/context'
 import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
@@ -19,13 +15,10 @@ import {
   emit_chat_action_realtime_rendered,
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
-import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import {
   cleanup_chat_actions_realtime,
   subscribe_chat_actions_realtime,
 } from '@/lib/chat/realtime/chat_actions'
-import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
-import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
 import { get_locale, subscribe_locale } from '@/lib/locale/state'
 import { normalize_locale, type locale_key } from '@/lib/locale/action'
 import { create_browser_supabase } from '@/lib/db/browser'
@@ -439,8 +432,8 @@ export function WebChat({
     get_message_list_near_bottom,
     room_uuid: active_room_uuid,
     messages: active_messages,
+    staff_typing_label,
     is_chat_open,
-    room_realtime_channel_ref: room_realtime_channelRef,
   } = chat
   const append_realtime_message_ref = useRef(append_realtime_message)
 
@@ -462,27 +455,8 @@ export function WebChat({
     source_channel: session?.source_channel ?? 'web',
   })
 
-  const active_typing_identity_ref = useRef({
-    user_uuid: null as string | null,
-    participant_uuid: null as string | null,
-    role: null as string | null,
-  })
-
   const did_initial_scroll_ref = useRef(false)
-  const [typing_banner, set_typing_banner] = useState<string | null>(null)
-  const [ui_locale, set_ui_locale] = useState<locale_key>(() =>
-    normalize_locale(locale),
-  )
-
-  useEffect(() => {
-    set_ui_locale(normalize_locale(locale))
-  }, [locale])
-
-  useEffect(() => {
-    set_ui_locale(get_locale())
-
-    return subscribe_locale(set_ui_locale)
-  }, [])
+  const prev_message_count_ref = useRef(0)
 
   useEffect(() => {
     append_realtime_message_ref.current = append_realtime_message
@@ -494,11 +468,6 @@ export function WebChat({
       user_uuid: session?.user_uuid ?? null,
       tier: session?.tier ?? null,
       source_channel: session?.source_channel ?? 'web',
-    }
-    active_typing_identity_ref.current = {
-      user_uuid: session?.user_uuid ?? null,
-      participant_uuid,
-      role: 'user',
     }
   }, [
     active_room_uuid,
@@ -512,101 +481,6 @@ export function WebChat({
   ])
 
   const page_room_uuid = room_uuid.trim()
-  const message_realtime_enabled = Boolean(page_room_uuid)
-
-  const {
-    handle_typing: handle_realtime_typing,
-    handle_presence: handle_realtime_presence,
-    clear_peer_participant: clear_peer_typing_on_message,
-  } = use_typing_realtime({
-    owner: 'user',
-    room_uuid: page_room_uuid,
-    active_room_uuid: page_room_uuid,
-    enabled: message_realtime_enabled,
-    participant_uuid,
-    user_uuid: session?.user_uuid ?? null,
-    role: 'user',
-    tier: session?.tier ?? null,
-    source_channel: session?.source_channel ?? 'web',
-    channel_subscribe: 'shared',
-    locale: ui_locale,
-    active_typing_identity_ref,
-    on_label_change: set_typing_banner,
-  })
-
-  const handle_realtime_message = useCallback(
-    (message: realtime_archived_message) => {
-      if (
-        message.bundle.bundle_type === 'room_action_log' &&
-        !end_user_should_see_room_action_log_bundle(message.bundle)
-      ) {
-        return {
-          prev_count: 0,
-          next_count: 0,
-          dedupe_hit: true,
-        }
-      }
-
-      const sender_participant_uuid = message.sender_participant_uuid?.trim()
-
-      if (sender_participant_uuid) {
-        clear_peer_typing_on_message(sender_participant_uuid)
-      }
-
-      const dbg = web_rt_ctx_ref.current
-      const near_bottom_before = get_message_list_near_bottom()
-      const update_result = append_realtime_message_ref.current(message)
-
-      if (!update_result.dedupe_hit) {
-        handle_chat_message_toast({
-          room_uuid: message.room_uuid,
-          active_room_uuid: dbg.active_room_uuid,
-          message_uuid: message.archive_uuid,
-          sender_user_uuid: message.sender_user_uuid ?? null,
-          sender_participant_uuid: message.sender_participant_uuid ?? null,
-          sender_role: message.sender_role ?? message.bundle.sender ?? null,
-          active_user_uuid: dbg.user_uuid,
-          active_participant_uuid: dbg.participant_uuid,
-          active_role: 'user',
-          role: 'user',
-          tier: dbg.tier,
-          source_channel: dbg.source_channel,
-          target_path: '/user',
-          phase: 'web_chat_realtime_message',
-          is_scrolled_to_bottom: near_bottom_before,
-          subtitle: resolve_realtime_message_subtitle_for_toast(message, null),
-          scroll_to_bottom: () => {
-            scroll_to_bottom('smooth')
-          },
-        })
-      }
-
-      return {
-        prev_count: update_result.prev_message_count,
-        next_count: update_result.next_message_count,
-        dedupe_hit: update_result.dedupe_hit,
-      }
-    },
-    [clear_peer_typing_on_message, get_message_list_near_bottom, scroll_to_bottom],
-  )
-
-  use_message_realtime({
-    owner: 'user',
-    room_uuid: page_room_uuid,
-    active_room_uuid: page_room_uuid,
-    enabled: message_realtime_enabled,
-    participant_uuid,
-    user_uuid: session?.user_uuid ?? null,
-    role: 'user',
-    tier: session?.tier ?? null,
-    source_channel: session?.source_channel ?? 'web',
-    include_typing_broadcast: true,
-    active_typing_identity_ref,
-    export_messages_channel_ref: room_realtime_channelRef,
-    on_message: handle_realtime_message,
-    on_typing: handle_realtime_typing,
-    on_presence: handle_realtime_presence,
-  })
 
   const handle_realtime_action = useCallback(
     (action: chat_action_realtime_payload, inserted_index: number) => {
@@ -648,12 +522,68 @@ export function WebChat({
   )
 
   useEffect(() => {
-    if (!typing_banner) {
+    if (!staff_typing_label) {
       return
     }
 
     scroll_to_bottom('smooth')
-  }, [scroll_to_bottom, typing_banner])
+  }, [scroll_to_bottom, staff_typing_label])
+
+  useEffect(() => {
+    const page_room = page_room_uuid
+    const context_room = (active_room_uuid ?? '').trim()
+
+    if (!page_room || context_room !== page_room) {
+      prev_message_count_ref.current = active_messages.length
+      return
+    }
+
+    if (active_messages.length <= prev_message_count_ref.current) {
+      prev_message_count_ref.current = active_messages.length
+      return
+    }
+
+    const message = active_messages[active_messages.length - 1]
+
+    if (!message) {
+      prev_message_count_ref.current = active_messages.length
+      return
+    }
+
+    const dbg = web_rt_ctx_ref.current
+    const near_bottom_before = get_message_list_near_bottom()
+
+    handle_chat_message_toast({
+      room_uuid: message.room_uuid,
+      active_room_uuid: dbg.active_room_uuid,
+      message_uuid: message.archive_uuid,
+      sender_user_uuid: null,
+      sender_participant_uuid: null,
+      sender_role:
+        typeof message.bundle.sender === 'string' ? message.bundle.sender : null,
+      active_user_uuid: dbg.user_uuid,
+      active_participant_uuid: dbg.participant_uuid,
+      active_role: 'user',
+      role: 'user',
+      tier: dbg.tier,
+      source_channel: dbg.source_channel,
+      target_path: '/user',
+      phase: 'web_chat_realtime_message',
+      is_scrolled_to_bottom: near_bottom_before,
+      subtitle: resolve_realtime_message_subtitle_for_toast(message, null),
+      scroll_to_bottom: () => {
+        scroll_to_bottom('smooth')
+      },
+    })
+
+    prev_message_count_ref.current = active_messages.length
+  }, [
+    active_messages,
+    active_room_uuid,
+    get_message_list_near_bottom,
+    page_room_uuid,
+    scroll_to_bottom,
+  ])
 
   useEffect(() => {
     if (!room_uuid.trim()) {
@@ -724,7 +654,9 @@ export function WebChat({
 
   const hydrated_room_uuid = (active_room_uuid ?? '').trim()
   const render_messages =
-    hydrated_room_uuid === page_room_uuid ? active_messages : messages
+    hydrated_room_uuid === page_room_uuid && hydrated_room_uuid
+      ? active_messages
+      : messages
 
   const visible_messages = render_messages.filter((message) => {
     if (message.bundle.bundle_type === 'room_action_log') {
@@ -757,7 +689,7 @@ export function WebChat({
       <WebChatMessageTimeline
         visible_messages={visible_messages}
         set_scroll_container={set_scroll_container}
-        typing_banner={typing_banner}
+        typing_banner={staff_typing_label}
       />
     </div>
   )

@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   type MutableRefObject,
 } from 'react'
@@ -182,6 +183,7 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     (
       event:
         | 'staff_typing_realtime_payload_received'
+        | 'staff_typing_realtime_payload_accepted'
         | 'staff_typing_realtime_rendered'
         | 'staff_typing_realtime_ignored',
       payload: {
@@ -293,6 +295,18 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
         role: typing.role,
         is_typing: typing.is_typing,
       })
+
+      if (owner === 'user' && is_staff_typing_role(typing.role)) {
+        emit_staff_typing_realtime_debug(
+          'staff_typing_realtime_payload_accepted',
+          {
+            payload_room_uuid,
+            participant_uuid: typing.participant_uuid,
+            role: typing.role,
+            is_typing: typing.is_typing,
+          },
+        )
+      }
 
       handle_typing_broadcast_for_ui({
         owner,
@@ -423,8 +437,8 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
 
   const channel_subscribe = input.channel_subscribe ?? 'standalone'
 
-  useEffect(() => {
-    if (!enabled || channel_subscribe === 'shared') {
+  useLayoutEffect(() => {
+    if (!enabled) {
       return
     }
 
@@ -432,8 +446,15 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
       owner,
       room_uuid,
       active_room_uuid,
-      subscribe_status: 'HOOK_MOUNTED',
+      subscribe_status:
+        channel_subscribe === 'shared' ? 'SHARED_HOOK_MOUNTED' : 'HOOK_MOUNTED',
     })
+  }, [active_room_uuid, channel_subscribe, enabled, owner, room_uuid])
+
+  useEffect(() => {
+    if (!enabled || channel_subscribe === 'shared') {
+      return
+    }
 
     emit_typing_realtime_debug('typing_realtime_subscribe_started', {
       owner,
@@ -552,6 +573,19 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
           prev_count,
           next_count: peer_map_ref.current.size,
         })
+
+        if (owner === 'user') {
+          send_chat_realtime_debug({
+            category: 'chat_realtime',
+            event: 'staff_typing_realtime_expired',
+            owner,
+            room_uuid,
+            active_room_uuid,
+            prev_count,
+            next_count: peer_map_ref.current.size,
+            phase: 'use_typing_realtime_staff',
+          })
+        }
       }
     }, 1_000)
 
