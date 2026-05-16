@@ -19,6 +19,10 @@ import {
   subscribe_chat_room_realtime,
 } from '@/lib/chat/realtime/client'
 import {
+  emit_chat_messages_realtime_debug,
+  resolve_realtime_message_channels,
+} from '@/lib/chat/realtime/messages_client'
+import {
   chat_action_to_archived_message,
   cleanup_chat_actions_realtime,
   emit_chat_action_realtime_rendered,
@@ -605,6 +609,7 @@ export function WebChat({
       role: 'user',
       tier: ctx.tier,
       source_channel: ctx.source_channel,
+      listener_scope: 'user_active',
       active_typing_identity_ref,
       on_message: (message) => {
         if (!message) {
@@ -625,6 +630,21 @@ export function WebChat({
         if (update_result.dedupe_hit) {
           return
         }
+
+        const message_channels = resolve_realtime_message_channels(message)
+
+        emit_chat_messages_realtime_debug('user', 'state_append_succeeded', {
+          room_uuid: locked_room,
+          active_room_uuid: dbg.active_room_uuid,
+          message_uuid: message.archive_uuid,
+          source_channel: message_channels.source_channel,
+          direction: message_channels.direction,
+          sender_participant_uuid: message.sender_participant_uuid ?? null,
+          receiver_participant_uuid: dbg.participant_uuid,
+          ignored_reason: null,
+          prev_count: update_result.prev_message_count,
+          next_count: update_result.next_message_count,
+        })
 
         handle_chat_message_toast({
           room_uuid: message.room_uuid,

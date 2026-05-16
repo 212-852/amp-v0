@@ -6,6 +6,10 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import { get_browser_supabase_client_instance_id } from '@/lib/db/browser'
 
 import {
+  evaluate_realtime_message_acceptance,
+  resolve_realtime_message_channels,
+} from './messages_client'
+import {
   archived_message_from_message_row,
   type message_insert_row,
   type realtime_archived_message,
@@ -43,7 +47,11 @@ export function chat_room_realtime_channel_name(room_uuid: string) {
   return `room:${room_uuid}`
 }
 
-export type chat_realtime_listener_scope = 'default' | 'admin_list' | 'admin_active'
+export type chat_realtime_listener_scope =
+  | 'default'
+  | 'admin_list'
+  | 'admin_active'
+  | 'user_active'
 
 /** Postgres listener channel per surface (avoids Supabase channel name collisions). */
 export function chat_realtime_postgres_channel_name(
@@ -56,6 +64,10 @@ export function chat_realtime_postgres_channel_name(
 
   if (scope === 'admin_active') {
     return `admin_active_chat:${room_uuid}`
+  }
+
+  if (scope === 'user_active') {
+    return `user_active_chat:${room_uuid}`
   }
 
   return chat_room_realtime_channel_name(room_uuid)
@@ -203,6 +215,7 @@ export type chat_realtime_debug_payload = {
   payload_room_uuid?: string | null
   sender_user_uuid?: string | null
   sender_participant_uuid?: string | null
+  receiver_participant_uuid?: string | null
   active_participant_uuid?: string | null
   active_user_uuid?: string | null
   active_role?: string | null
@@ -392,7 +405,7 @@ function admin_message_received_event(scope: chat_realtime_listener_scope) {
   }
 
   if (scope === 'admin_active') {
-    return 'admin_active_chat_realtime_payload_received'
+    return 'admin_realtime_client_payload_received'
   }
 
   return 'admin_realtime_payload_received'
@@ -404,7 +417,7 @@ function admin_message_accepted_event(scope: chat_realtime_listener_scope) {
   }
 
   if (scope === 'admin_active') {
-    return 'admin_active_chat_realtime_payload_accepted'
+    return 'admin_realtime_client_payload_accepted'
   }
 
   return 'admin_realtime_payload_accepted'
@@ -416,10 +429,56 @@ function admin_message_ignored_event(scope: chat_realtime_listener_scope) {
   }
 
   if (scope === 'admin_active') {
-    return 'admin_active_chat_realtime_payload_ignored'
+    return 'admin_realtime_client_payload_ignored'
   }
 
   return 'admin_realtime_payload_ignored'
+}
+
+function user_subscribe_started_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'user_active') {
+    return 'user_realtime_client_subscribe_started'
+  }
+
+  return 'chat_realtime_subscribe_started'
+}
+
+function user_message_received_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'user_active') {
+    return 'user_realtime_client_payload_received'
+  }
+
+  return 'chat_realtime_message_callback_received'
+}
+
+function user_message_accepted_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'user_active') {
+    return 'user_realtime_client_payload_accepted'
+  }
+
+  return 'chat_realtime_message_callback_received'
+}
+
+function user_message_ignored_event(scope: chat_realtime_listener_scope) {
+  if (scope === 'user_active') {
+    return 'user_realtime_client_payload_ignored'
+  }
+
+  return 'chat_realtime_message_callback_ignored'
+}
+
+function realtime_client_subscribe_status_event(
+  scope: chat_realtime_listener_scope,
+) {
+  if (scope === 'admin_active') {
+    return 'admin_realtime_client_subscribe_status'
+  }
+
+  if (scope === 'user_active') {
+    return 'user_realtime_client_subscribe_status'
+  }
+
+  return null
 }
 
 export function subscribe_chat_room_realtime(input: {
@@ -469,13 +528,25 @@ export function subscribe_chat_room_realtime(input: {
   }
   const focus_room_uuid = (input.active_room_uuid ?? input.room_uuid).trim()
 
-  send_chat_realtime_debug({
-    event: admin_subscribe_started_event(listener_scope),
-    ...base_debug,
-    subscribe_status: 'SUBSCRIBE_REQUESTED',
-    postgres_event: 'INSERT',
-    phase: 'subscribe_chat_room_realtime',
-  })
+  if (listener_scope === 'admin_list' || listener_scope === 'admin_active') {
+    send_chat_realtime_debug({
+      event: admin_subscribe_started_event(listener_scope),
+      ...base_debug,
+      subscribe_status: 'SUBSCRIBE_REQUESTED',
+      postgres_event: 'INSERT',
+      phase: 'subscribe_chat_room_realtime',
+    })
+  }
+
+  if (listener_scope === 'user_active') {
+    send_chat_realtime_debug({
+      event: user_subscribe_started_event(listener_scope),
+      ...base_debug,
+      subscribe_status: 'SUBSCRIBE_REQUESTED',
+      postgres_event: 'INSERT',
+      phase: 'subscribe_chat_room_realtime',
+    })
+  }
 
   send_chat_realtime_debug({
     event: 'chat_realtime_subscribe_started',
@@ -543,8 +614,13 @@ export function subscribe_chat_room_realtime(input: {
       (payload) => {
         const raw_new = payload.new as Record<string, unknown> | undefined
         const is_admin_listener = input.source_channel === 'admin'
+        const is_user_active_listener = listener_scope === 'user_active'
         const admin_insert =
           is_admin_listener && raw_new
+            ? extract_admin_realtime_insert_fields(raw_new)
+            : null
+        const user_insert =
+          is_user_active_listener && raw_new
             ? extract_admin_realtime_insert_fields(raw_new)
             : null
 
@@ -563,6 +639,21 @@ export function subscribe_chat_room_realtime(input: {
             prev_message_count: null,
             next_message_count: null,
             phase: 'postgres_changes_insert_admin',
+          })
+        }
+
+        if (user_insert) {
+          send_chat_realtime_debug({
+            event: user_message_received_event(listener_scope),
+            ...base_debug,
+            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+            payload_room_uuid: user_insert.payload_room_uuid,
+            message_uuid: user_insert.message_uuid,
+            payload_message_uuid: user_insert.message_uuid,
+            ...admin_realtime_message_field_payload(user_insert),
+            prev_message_count: null,
+            next_message_count: null,
+            phase: 'postgres_changes_insert_user',
           })
         }
 
@@ -614,10 +705,29 @@ export function subscribe_chat_room_realtime(input: {
               payload_message_uuid: message_uuid,
               ...admin_realtime_message_field_payload(admin_insert),
               sender_participant_uuid: null,
+              receiver_participant_uuid: input.participant_uuid ?? null,
               ignored_reason: 'payload_room_uuid_mismatch',
               prev_message_count: null,
               next_message_count: null,
               phase: 'postgres_changes_insert_admin',
+            })
+          }
+
+          if (user_insert) {
+            send_chat_realtime_debug({
+              event: user_message_ignored_event(listener_scope),
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+              payload_room_uuid,
+              message_uuid,
+              payload_message_uuid: message_uuid,
+              ...admin_realtime_message_field_payload(user_insert),
+              sender_participant_uuid: null,
+              receiver_participant_uuid: input.participant_uuid ?? null,
+              ignored_reason: 'payload_room_uuid_mismatch',
+              prev_message_count: null,
+              next_message_count: null,
+              phase: 'postgres_changes_insert_user',
             })
           }
 
@@ -656,10 +766,29 @@ export function subscribe_chat_room_realtime(input: {
               payload_message_uuid: message_uuid,
               ...admin_realtime_message_field_payload(admin_insert),
               sender_participant_uuid: null,
+              receiver_participant_uuid: input.participant_uuid ?? null,
               ignored_reason: 'unparseable_message_row',
               prev_message_count: null,
               next_message_count: null,
               phase: 'postgres_changes_insert_admin',
+            })
+          }
+
+          if (user_insert) {
+            send_chat_realtime_debug({
+              event: user_message_ignored_event(listener_scope),
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+              payload_room_uuid,
+              message_uuid,
+              payload_message_uuid: message_uuid,
+              ...admin_realtime_message_field_payload(user_insert),
+              sender_participant_uuid: null,
+              receiver_participant_uuid: input.participant_uuid ?? null,
+              ignored_reason: 'unparseable_message_row',
+              prev_message_count: null,
+              next_message_count: null,
+              phase: 'postgres_changes_insert_user',
             })
           }
 
@@ -676,6 +805,77 @@ export function subscribe_chat_room_realtime(input: {
             message_uuid,
             payload_room_uuid,
             ignored_reason: 'unparseable_message_row',
+          })
+
+          return
+        }
+
+        const message_channels = resolve_realtime_message_channels(message)
+        const message_acceptance = evaluate_realtime_message_acceptance({
+          payload_room_uuid: pr || payload_room_uuid,
+          active_room_uuid: focus_room_uuid,
+          message,
+        })
+        const receiver_participant_uuid =
+          typeof row?.participant_uuid === 'string'
+            ? row.participant_uuid
+            : input.participant_uuid ?? null
+
+        if (!message_acceptance.accept) {
+          if (admin_insert) {
+            send_chat_realtime_debug({
+              event:
+                listener_scope === 'default'
+                  ? 'admin_realtime_payload_ignored'
+                  : admin_message_ignored_event(listener_scope),
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+              payload_room_uuid,
+              message_uuid: message.archive_uuid,
+              payload_message_uuid: message.archive_uuid,
+              ...admin_realtime_message_field_payload(admin_insert),
+              source_channel: message_channels.source_channel,
+              direction: message_channels.direction,
+              payload_source_channel: message_channels.source_channel,
+              payload_direction: message_channels.direction,
+              sender_participant_uuid: message.sender_participant_uuid ?? null,
+              receiver_participant_uuid,
+              ignored_reason: message_acceptance.ignored_reason,
+              prev_message_count: null,
+              next_message_count: null,
+              phase: 'postgres_changes_insert_admin',
+            })
+          }
+
+          if (user_insert) {
+            send_chat_realtime_debug({
+              event: user_message_ignored_event(listener_scope),
+              ...base_debug,
+              active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+              payload_room_uuid,
+              message_uuid: message.archive_uuid,
+              payload_message_uuid: message.archive_uuid,
+              ...admin_realtime_message_field_payload(user_insert),
+              source_channel: message_channels.source_channel,
+              direction: message_channels.direction,
+              payload_source_channel: message_channels.source_channel,
+              payload_direction: message_channels.direction,
+              sender_participant_uuid: message.sender_participant_uuid ?? null,
+              receiver_participant_uuid,
+              ignored_reason: message_acceptance.ignored_reason,
+              prev_message_count: null,
+              next_message_count: null,
+              phase: 'postgres_changes_insert_user',
+            })
+          }
+
+          send_chat_realtime_debug({
+            event: 'chat_realtime_message_callback_ignored',
+            ...base_debug,
+            payload_message_uuid: message.archive_uuid,
+            payload_room_uuid,
+            ignored_reason: message_acceptance.ignored_reason,
+            phase: 'postgres_changes_insert',
           })
 
           return
@@ -707,11 +907,38 @@ export function subscribe_chat_room_realtime(input: {
             message_uuid: message.archive_uuid,
             payload_message_uuid: message.archive_uuid,
             ...admin_realtime_message_field_payload(admin_insert),
+            source_channel: message_channels.source_channel,
+            direction: message_channels.direction,
+            payload_source_channel: message_channels.source_channel,
+            payload_direction: message_channels.direction,
             sender_participant_uuid: message.sender_participant_uuid ?? null,
+            receiver_participant_uuid,
             ignored_reason: null,
             prev_message_count: null,
             next_message_count: null,
             phase: 'postgres_changes_insert_admin',
+          })
+        }
+
+        if (user_insert) {
+          send_chat_realtime_debug({
+            event: user_message_accepted_event(listener_scope),
+            ...base_debug,
+            active_room_uuid: input.active_room_uuid ?? input.room_uuid,
+            payload_room_uuid,
+            message_uuid: message.archive_uuid,
+            payload_message_uuid: message.archive_uuid,
+            ...admin_realtime_message_field_payload(user_insert),
+            source_channel: message_channels.source_channel,
+            direction: message_channels.direction,
+            payload_source_channel: message_channels.source_channel,
+            payload_direction: message_channels.direction,
+            sender_participant_uuid: message.sender_participant_uuid ?? null,
+            receiver_participant_uuid,
+            ignored_reason: null,
+            prev_message_count: null,
+            next_message_count: null,
+            phase: 'postgres_changes_insert_user',
           })
         }
 
@@ -1227,6 +1454,20 @@ export function subscribe_chat_room_realtime(input: {
       error_message: err ? String(err) : null,
       phase: 'subscribe_callback',
     })
+
+    const client_subscribe_status_event =
+      realtime_client_subscribe_status_event(listener_scope)
+
+    if (client_subscribe_status_event) {
+      send_chat_realtime_debug({
+        event: client_subscribe_status_event,
+        ...base_debug,
+        subscribe_status: status,
+        postgres_event: 'INSERT',
+        error_message: err ? String(err) : null,
+        phase: 'subscribe_callback',
+      })
+    }
 
     input.on_subscribe_status?.({
       status,

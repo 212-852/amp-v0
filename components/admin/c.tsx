@@ -24,6 +24,10 @@ import {
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
 import {
+  emit_chat_messages_realtime_debug,
+  resolve_realtime_message_channels,
+} from '@/lib/chat/realtime/messages_client'
+import {
   append_chat_action_to_admin_timeline,
   cleanup_chat_actions_realtime,
   emit_chat_action_realtime_rendered,
@@ -427,21 +431,20 @@ export default function AdminChatTimeline({
         active_typing_identity_ref,
         on_subscribe_status: ({ status, error_message }) => {
           const dbg_rt = admin_rt_ctx_ref.current
-          const ok = status === 'SUBSCRIBED'
 
-          send_admin_chat_debug({
-            event: 'admin_chat_realtime_subscribe_succeeded',
+          emit_chat_messages_realtime_debug('admin', 'subscribe_status', {
             room_uuid: active_room_focus,
             active_room_uuid: active_room_focus,
-            admin_user_uuid: dbg_rt.staff_user_uuid,
-            admin_participant_uuid: dbg_rt.staff_participant_uuid,
-            component_file,
+            message_uuid: null,
+            source_channel: 'admin',
+            direction: null,
+            sender_participant_uuid: dbg_rt.staff_participant_uuid,
+            receiver_participant_uuid: dbg_rt.staff_participant_uuid,
+            ignored_reason: null,
+            prev_count: null,
+            next_count: null,
             subscribe_status: status,
-            error_code: ok ? null : status,
-            error_message: ok
-              ? null
-              : (error_message?.trim() ? error_message : status),
-            phase: 'admin_chat_messages',
+            error_message: error_message?.trim() ? error_message : null,
           })
         },
         on_message: (archived) => {
@@ -556,15 +559,19 @@ export default function AdminChatTimeline({
             return
           }
 
-          send_admin_chat_debug({
-            event: 'admin_chat_realtime_payload_accepted',
+          const message_channels = resolve_realtime_message_channels(archived)
+
+          emit_chat_messages_realtime_debug('admin', 'state_append_succeeded', {
             room_uuid: active_room_focus,
             active_room_uuid: active_room_focus,
-            admin_user_uuid: dbg_ctx.staff_user_uuid,
-            admin_participant_uuid: dbg_ctx.staff_participant_uuid,
-            component_file,
             message_uuid: mapped.message_uuid,
-            phase: 'admin_chat_messages',
+            source_channel: message_channels.source_channel,
+            direction: message_channels.direction,
+            sender_participant_uuid: archived.sender_participant_uuid ?? null,
+            receiver_participant_uuid: dbg_ctx.staff_participant_uuid,
+            ignored_reason: null,
+            prev_count: update_result.prev_message_count,
+            next_count: update_result.next_message_count,
           })
 
           const dbg = admin_rt_ctx_ref.current
