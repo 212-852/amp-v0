@@ -59,14 +59,14 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     room_rendered_debug_ref.current = room_uuid
 
     send_admin_chat_debug({
-      event: 'admin_reception_room_rendered',
+      event: 'admin_reception_visible_room_rendered',
       room_uuid,
       active_room_uuid: room_uuid,
       admin_user_uuid: props.admin_user_uuid.trim() || null,
       admin_participant_uuid: props.admin_participant_uuid.trim() || null,
       component_file,
       pathname: `/admin/reception/${room_uuid}`,
-      phase: 'admin_reception_room',
+      phase: 'admin_reception_visible_room',
     })
   }, [props.admin_participant_uuid, props.admin_user_uuid, room_uuid])
 
