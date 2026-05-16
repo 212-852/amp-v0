@@ -1701,6 +1701,9 @@ export default function AdminChatTimeline({
       data-debug-component="components/admin/c.tsx"
     >
       <AdminRenderProbe file_path="components/admin/c.tsx" />
+      <div data-debug-component="components/admin/c.tsx">
+        DEBUG_ADMIN_CHAT_COMPONENT_components/admin/c.tsx
+      </div>
       <div className="relative min-h-0 w-full flex-1">
         <div
           ref={message_list_scroll_ref}

@@ -1379,6 +1379,9 @@ export default function AdminReceptionRoomListLive({
   return (
     <>
       <AdminRenderProbe file_path="components/admin/reception/room_list_live.tsx" />
+      <div data-debug-component="components/admin/reception/room_list_live.tsx">
+        DEBUG_ADMIN_CHAT_COMPONENT_components/admin/reception/room_list_live.tsx
+      </div>
       <ul
         className="flex flex-col gap-2"
         data-debug-component="components/admin/reception/room_list_live.tsx"

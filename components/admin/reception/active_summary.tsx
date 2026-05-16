@@ -273,6 +273,9 @@ export default function AdminReceptionActiveSummary({
   return (
     <>
       <AdminRenderProbe file_path="components/admin/reception/active_summary.tsx" />
+      <div data-debug-component="components/admin/reception/active_summary.tsx">
+        DEBUG_ADMIN_CHAT_COMPONENT_components/admin/reception/active_summary.tsx
+      </div>
       <div
         className="min-w-0 flex-1"
         data-debug-component="components/admin/reception/active_summary.tsx"

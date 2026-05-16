@@ -54,6 +54,9 @@ export default async function AdminPage() {
       data-debug-component="app/admin/page.tsx"
     >
       <AdminRenderProbe file_path="app/admin/page.tsx" />
+      <div data-debug-component="app/admin/page.tsx">
+        DEBUG_ADMIN_CHAT_COMPONENT_app/admin/page.tsx
+      </div>
       <AdminReception rooms={rooms} state={state} />
       <AdminAssistant display_name={access.display_name} />
     </div>

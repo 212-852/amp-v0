@@ -98,6 +98,9 @@ export default async function AdminReceptionPage({
   return (
     <div className="flex flex-col gap-4" data-debug-component="app/admin/reception/page.tsx">
       <AdminRenderProbe file_path="app/admin/reception/page.tsx" />
+      <div data-debug-component="app/admin/reception/page.tsx">
+        DEBUG_ADMIN_CHAT_COMPONENT_app/admin/reception/page.tsx
+      </div>
       <header>
         <nav
           aria-label="Breadcrumb"

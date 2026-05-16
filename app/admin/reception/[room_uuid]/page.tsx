@@ -123,6 +123,9 @@ export default async function AdminReceptionRoomPage({
       data-debug-component="app/admin/reception/[room_uuid]/page.tsx"
     >
       <AdminRenderProbe file_path="app/admin/reception/[room_uuid]/page.tsx" />
+      <div data-debug-component="app/admin/reception/[room_uuid]/page.tsx">
+        DEBUG_ADMIN_CHAT_COMPONENT_app/admin/reception/[room_uuid]/page.tsx
+      </div>
       <header className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
         <nav
           aria-label="Breadcrumb"
