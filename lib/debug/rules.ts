@@ -698,6 +698,13 @@ export function resolve_debug_rule(input: {
   }
 
   const chat_realtime_always_discord = new Set([
+    'message_realtime_mounted',
+    'message_realtime_subscribe_started',
+    'message_realtime_subscribe_status',
+    'message_realtime_payload_received',
+    'message_realtime_payload_accepted',
+    'message_realtime_payload_ignored',
+    'message_realtime_rendered',
     'chat_realtime_hook_mounted',
     'chat_realtime_subscribe_started',
     'chat_realtime_subscribe_status',

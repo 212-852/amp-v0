@@ -29,7 +29,12 @@ import {
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
-import { use_chat_realtime } from '@/lib/chat/realtime/use_chat_realtime'
+import {
+  cleanup_chat_actions_realtime,
+  subscribe_chat_actions_realtime,
+} from '@/lib/chat/realtime/chat_actions'
+import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
+import { create_browser_supabase } from '@/lib/db/browser'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
   faq_bundle,
@@ -617,7 +622,7 @@ export function WebChat({
     [participant_uuid, room_uuid],
   )
 
-  use_chat_realtime({
+  use_message_realtime({
     owner: 'user',
     room_uuid,
     active_room_uuid: active_room_uuid ?? room_uuid,
@@ -627,14 +632,44 @@ export function WebChat({
     role: 'user',
     tier: session?.tier ?? null,
     source_channel: session?.source_channel ?? 'web',
-    receiver_participant_uuid: participant_uuid,
     active_typing_identity_ref,
     export_messages_channel_ref: room_realtime_channelRef,
     on_message: handle_realtime_message,
-    on_action: handle_realtime_action,
     on_typing: handle_realtime_typing,
     on_presence: handle_realtime_presence,
   })
+
+  useEffect(() => {
+    if (!room_uuid.trim()) {
+      return
+    }
+
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      return
+    }
+
+    const channel = subscribe_chat_actions_realtime({
+      supabase,
+      room_uuid,
+      scope: 'user_active',
+      source_channel: session?.source_channel ?? 'web',
+      on_action: (action, inserted_index) => {
+        handle_realtime_action(action, inserted_index)
+      },
+    })
+
+    return () => {
+      cleanup_chat_actions_realtime({
+        supabase,
+        channel,
+        room_uuid,
+        scope: 'user_active',
+        cleanup_reason: 'web_chat_actions_cleanup',
+      })
+    }
+  }, [handle_realtime_action, room_uuid, session?.source_channel])
 
   useEffect(() => {
     hydrate_chat({

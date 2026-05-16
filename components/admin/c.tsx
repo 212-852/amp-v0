@@ -18,6 +18,8 @@ import {
   publish_chat_typing,
   sync_chat_typing_presence,
 } from '@/lib/chat/realtime/client'
+import type { realtime_archived_message } from '@/lib/chat/realtime/row'
+import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
 import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { RefObject } from 'react'
@@ -219,6 +221,63 @@ export default function AdminChatTimeline({
       window.cancelAnimationFrame(frame)
     }
   }, [initial_messages, room_uuid])
+
+  const handle_realtime_message = useCallback(
+    (archived: realtime_archived_message) => {
+      const mapped = archived_payload_to_reception_message({
+        archive_uuid: archived.archive_uuid,
+        room_uuid: archived.room_uuid,
+        sequence: archived.sequence,
+        created_at: archived.created_at,
+        bundle: archived.bundle as message_bundle_payload,
+      })
+
+      let update_result = {
+        prev_count: 0,
+        next_count: 0,
+        dedupe_hit: false,
+      }
+
+      if (on_append_timeline_messages) {
+        on_append_timeline_messages([mapped])
+
+        return {
+          prev_count: 0,
+          next_count: 1,
+          dedupe_hit: false,
+        }
+      }
+
+      set_rows((previous) => {
+        const merged = merge_timeline_rows(previous, [mapped], 'realtime')
+
+        update_result = {
+          prev_count: merged.prev_message_count,
+          next_count: merged.next_message_count,
+          dedupe_hit: merged.dedupe_hit,
+        }
+
+        return merged.rows
+      })
+
+      return update_result
+    },
+    [on_append_timeline_messages],
+  )
+
+  use_message_realtime({
+    owner: 'admin',
+    room_uuid,
+    active_room_uuid: room_uuid,
+    enabled: Boolean(room_uuid.trim()),
+    participant_uuid: staff_participant_uuid,
+    user_uuid: staff_user_uuid,
+    role: 'admin',
+    tier: staff_tier,
+    source_channel: 'admin',
+    export_messages_channel_ref: messages_channel_ref,
+    on_message: handle_realtime_message,
+  })
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
