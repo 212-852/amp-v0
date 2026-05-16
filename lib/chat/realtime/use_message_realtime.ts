@@ -150,7 +150,7 @@ export function use_message_realtime(input: use_message_realtime_input) {
   const source_channel =
     input.source_channel ?? (owner === 'admin' ? 'admin' : 'web')
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enabled) {
       return
     }
@@ -161,6 +161,12 @@ export function use_message_realtime(input: use_message_realtime_input) {
       active_room_uuid,
       subscribe_status: 'HOOK_MOUNTED',
     })
+  }, [active_room_uuid, enabled, owner, room_uuid, source_channel])
+
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
 
     emit_message_realtime_debug('message_realtime_subscribe_started', {
       owner,

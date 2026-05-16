@@ -9,6 +9,7 @@ import {
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { create_browser_supabase } from '@/lib/db/browser'
+import type { locale_key } from '@/lib/locale/action'
 
 import {
   cleanup_chat_room_realtime,
@@ -98,6 +99,7 @@ export type use_typing_realtime_input = {
   role?: string | null
   tier?: string | null
   source_channel?: string | null
+  locale?: locale_key | string | null
   export_typing_channel_ref?: MutableRefObject<RealtimeChannel | null>
   on_label_change: (label: string | null) => void
   active_typing_identity_ref?: MutableRefObject<{
@@ -120,14 +122,15 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
   const enabled = input.enabled !== false && Boolean(room_uuid)
   const owner = input.owner
   const self_participant_uuid = input.participant_uuid.trim()
+  const locale = input.locale ?? 'ja'
 
   const resolve_label = useCallback(
     (map: Map<string, peer_typing_row>, self_uuid: string) => {
       return owner === 'admin'
-        ? peer_typing_label_for_admin(map, self_uuid)
-        : peer_typing_label_for_user(map, self_uuid)
+        ? peer_typing_label_for_admin(map, self_uuid, locale)
+        : peer_typing_label_for_user(map, self_uuid, locale)
     },
-    [owner],
+    [locale, owner],
   )
 
   const refresh_label = useCallback(() => {

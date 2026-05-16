@@ -26,6 +26,8 @@ import {
 } from '@/lib/chat/realtime/chat_actions'
 import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
 import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
+import { get_locale, subscribe_locale } from '@/lib/locale/state'
+import { normalize_locale, type locale_key } from '@/lib/locale/action'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
@@ -392,49 +394,30 @@ type web_chat_message_timeline_props = {
     participant_uuid: string | null
     role: string | null
   }>
-  export_messages_channel_ref: MutableRefObject<RealtimeChannel | null>
-  on_message: (
-    message: realtime_archived_message,
-  ) => {
-    prev_count: number
-    next_count: number
-    dedupe_hit: boolean
-  }
   visible_messages: archived_message[]
   set_scroll_container: (node: HTMLDivElement | null) => void
   on_typing_banner_change?: (label: string | null) => void
   scroll_spacer?: ReactNode
+  locale: chat_locale
 }
 
 function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
   const [typing_banner, set_typing_banner] = useState<string | null>(null)
-
-  const { handle_presence, clear_peer_participant } = use_typing_realtime({
-    owner: 'user',
-    room_uuid: props.room_uuid,
-    active_room_uuid: props.active_room_uuid,
-    enabled: props.enabled,
-    participant_uuid: props.participant_uuid,
-    user_uuid: props.user_uuid,
-    role: 'user',
-    tier: props.tier,
-    source_channel: props.source_channel,
-    active_typing_identity_ref: props.active_typing_identity_ref,
-    on_label_change: set_typing_banner,
-  })
-
-  const handle_message = useCallback(
-    (message: realtime_archived_message) => {
-      if (message.sender_participant_uuid) {
-        clear_peer_participant(message.sender_participant_uuid)
-      }
-
-      return props.on_message(message)
-    },
-    [clear_peer_participant, props.on_message],
+  const [ui_locale, set_ui_locale] = useState<locale_key>(() =>
+    normalize_locale(props.locale),
   )
 
-  use_message_realtime({
+  useEffect(() => {
+    set_ui_locale(normalize_locale(props.locale))
+  }, [props.locale])
+
+  useEffect(() => {
+    set_ui_locale(get_locale())
+
+    return subscribe_locale(set_ui_locale)
+  }, [])
+
+  const { handle_presence } = use_typing_realtime({
     owner: 'user',
     room_uuid: props.room_uuid,
     active_room_uuid: props.active_room_uuid,
@@ -444,11 +427,9 @@ function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
     role: 'user',
     tier: props.tier,
     source_channel: props.source_channel,
-    include_typing_broadcast: false,
+    locale: ui_locale,
     active_typing_identity_ref: props.active_typing_identity_ref,
-    export_messages_channel_ref: props.export_messages_channel_ref,
-    on_message: handle_message,
-    on_presence: handle_presence,
+    on_label_change: set_typing_banner,
   })
 
   useEffect(() => {
@@ -613,6 +594,26 @@ export function WebChat({
     [get_message_list_near_bottom, scroll_to_bottom],
   )
 
+  const page_room_uuid = room_uuid.trim()
+  const message_realtime_enabled = Boolean(page_room_uuid)
+
+  use_message_realtime({
+    owner: 'user',
+    room_uuid: page_room_uuid,
+    active_room_uuid: page_room_uuid,
+    enabled: message_realtime_enabled,
+    participant_uuid,
+    user_uuid: session?.user_uuid ?? null,
+    role: 'user',
+    tier: session?.tier ?? null,
+    source_channel: session?.source_channel ?? 'web',
+    include_typing_broadcast: false,
+    active_typing_identity_ref,
+    export_messages_channel_ref: room_realtime_channelRef,
+    on_message: handle_realtime_message,
+    on_typing: () => {},
+  })
+
   const handle_realtime_action = useCallback(
     (action: chat_action_realtime_payload, inserted_index: number) => {
       const archived = chat_action_to_archived_message(action)
@@ -733,7 +734,6 @@ export function WebChat({
 
 
   const hydrated_room_uuid = (active_room_uuid ?? '').trim()
-  const page_room_uuid = room_uuid.trim()
   const render_messages =
     hydrated_room_uuid === page_room_uuid ? active_messages : messages
 
@@ -772,10 +772,9 @@ export function WebChat({
         user_uuid={session?.user_uuid ?? null}
         tier={session?.tier ?? null}
         source_channel={session?.source_channel ?? 'web'}
-        enabled={Boolean(room_uuid.trim())}
+        locale={locale}
+        enabled={message_realtime_enabled}
         active_typing_identity_ref={active_typing_identity_ref}
-        export_messages_channel_ref={room_realtime_channelRef}
-        on_message={handle_realtime_message}
         visible_messages={visible_messages}
         set_scroll_container={set_scroll_container}
         on_typing_banner_change={handle_typing_banner_change}

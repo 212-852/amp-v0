@@ -1,5 +1,7 @@
 'use client'
 
+import type { locale_key } from '@/lib/locale/action'
+
 import {
   chat_typing_expire_ms,
   chat_typing_is_fresh,
@@ -7,6 +9,7 @@ import {
   type chat_presence_payload,
   type chat_typing_payload,
 } from './client'
+import { pick_chat_typing_label } from './typing_labels'
 
 export type peer_typing_row = {
   participant_uuid: string
@@ -152,6 +155,7 @@ export function sweep_expired_peer_typing(
 export function peer_typing_label_for_admin(
   map: Map<string, peer_typing_row>,
   staff_participant_uuid: string,
+  locale: locale_key | string | null | undefined = 'ja',
   now?: Date,
 ): string | null {
   const staff = staff_participant_uuid.trim()
@@ -187,11 +191,11 @@ export function peer_typing_label_for_admin(
   }
 
   if (user_typing) {
-    return 'ユーザー入力中'
+    return pick_chat_typing_label('user_typing', locale)
   }
 
   if (staff_typing) {
-    return 'スタッフ入力中'
+    return pick_chat_typing_label('staff_typing', locale)
   }
 
   return null
@@ -200,6 +204,7 @@ export function peer_typing_label_for_admin(
 export function peer_typing_label_for_user(
   map: Map<string, peer_typing_row>,
   self_participant_uuid: string,
+  locale: locale_key | string | null | undefined = 'ja',
   now?: Date,
 ): string | null {
   const self = self_participant_uuid.trim()
@@ -223,7 +228,7 @@ export function peer_typing_label_for_user(
         now,
       })
     ) {
-      return 'スタッフ入力中'
+      return pick_chat_typing_label('staff_typing', locale)
     }
   }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowDown } from 'lucide-react'
 
 import PawIcon from '@/components/icons/paw'
@@ -15,6 +15,8 @@ import {
 } from '@/lib/chat/timeline_display'
 import type { message_bundle } from '@/lib/chat/message'
 import { send_room_typing_status } from '@/lib/chat/realtime/typing_client'
+import type { locale_key } from '@/lib/locale/action'
+import { get_locale, subscribe_locale } from '@/lib/locale/state'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
 import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
@@ -171,16 +173,15 @@ export default function AdminChatTimeline({
   const local_messages_channel_ref = useRef<RealtimeChannel | null>(null)
   const messages_channel_ref =
     parent_messages_channel_ref ?? local_messages_channel_ref
-  const display_rows = useMemo(
-    () =>
-      merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
-    [initial_messages],
+  const [rows, set_rows] = useState<chat_room_timeline_message[]>(() =>
+    merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
   const [show_jump_button, set_show_jump_button] = useState(false)
   const [local_peer_typing_label, set_local_peer_typing_label] =
     useState<string | null>(null)
+  const [ui_locale, set_ui_locale] = useState<locale_key>('ja')
   const publish_typing_timer_ref = useRef<number | null>(null)
   const typing_active_ref = useRef(false)
   const display_peer_typing_label =
@@ -204,6 +205,12 @@ export default function AdminChatTimeline({
   }, [room_display_title])
 
   useEffect(() => {
+    set_ui_locale(get_locale())
+
+    return subscribe_locale(set_ui_locale)
+  }, [])
+
+  useEffect(() => {
     staff_participant_uuid_ref.current = staff_participant_uuid
     latest_room_uuid_ref.current = room_uuid
     admin_rt_ctx_ref.current = {
@@ -219,6 +226,12 @@ export default function AdminChatTimeline({
   ])
 
   useEffect(() => {
+    set_rows(
+      merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
+    )
+  }, [initial_messages, room_uuid])
+
+  useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       bottom_ref.current?.scrollIntoView({ block: 'end' })
     })
@@ -226,7 +239,10 @@ export default function AdminChatTimeline({
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [display_rows.length, room_uuid])
+  }, [rows.length, room_uuid])
+
+  const bubble_realtime_enabled =
+    Boolean(room_uuid.trim()) && !disable_message_realtime
 
   const handle_realtime_message = useCallback(
     (archived: realtime_archived_message) => {
@@ -238,40 +254,38 @@ export default function AdminChatTimeline({
         bundle: archived.bundle as message_bundle_payload,
       })
 
-      if (!on_append_timeline_messages) {
-        return {
-          prev_count: 0,
-          next_count: 0,
-          dedupe_hit: true,
+      let update_result = {
+        prev_count: 0,
+        next_count: 0,
+        dedupe_hit: false,
+      }
+
+      set_rows((previous) => {
+        const merged = merge_timeline_rows(previous, [mapped], 'realtime')
+
+        update_result = {
+          prev_count: merged.prev_message_count,
+          next_count: merged.next_message_count,
+          dedupe_hit: merged.dedupe_hit,
+        }
+
+        return merged.rows
+      })
+
+      if (on_append_timeline_messages) {
+        const appended = on_append_timeline_messages([mapped])
+
+        update_result = {
+          prev_count: appended.prev_count,
+          next_count: appended.next_count,
+          dedupe_hit: appended.dedupe_hit,
         }
       }
 
-      const appended = on_append_timeline_messages([mapped])
-
-      return {
-        prev_count: appended.prev_count,
-        next_count: appended.next_count,
-        dedupe_hit: appended.dedupe_hit,
-      }
+      return update_result
     },
     [on_append_timeline_messages],
   )
-
-  const bubble_realtime_enabled =
-    Boolean(room_uuid.trim()) && !disable_message_realtime
-
-  const { handle_presence: handle_realtime_presence } = use_typing_realtime({
-    owner: 'admin',
-    room_uuid,
-    active_room_uuid: room_uuid,
-    enabled: bubble_realtime_enabled,
-    participant_uuid: staff_participant_uuid,
-    user_uuid: staff_user_uuid,
-    role: 'admin',
-    tier: staff_tier,
-    source_channel: 'admin',
-    on_label_change: set_local_peer_typing_label,
-  })
 
   use_message_realtime({
     owner: 'admin',
@@ -286,7 +300,21 @@ export default function AdminChatTimeline({
     include_typing_broadcast: false,
     export_messages_channel_ref: messages_channel_ref,
     on_message: handle_realtime_message,
-    on_presence: handle_realtime_presence,
+    on_typing: () => {},
+  })
+
+  const { handle_presence: handle_realtime_presence } = use_typing_realtime({
+    owner: 'admin',
+    room_uuid,
+    active_room_uuid: room_uuid,
+    enabled: bubble_realtime_enabled,
+    participant_uuid: staff_participant_uuid,
+    user_uuid: staff_user_uuid,
+    role: 'admin',
+    tier: staff_tier,
+    source_channel: 'admin',
+    locale: ui_locale,
+    on_label_change: set_local_peer_typing_label,
   })
 
   useEffect(() => {
@@ -297,7 +325,7 @@ export default function AdminChatTimeline({
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [display_peer_typing_label, display_rows.length])
+  }, [display_peer_typing_label, rows.length])
 
   const update_jump_button_visibility = useCallback((visible: boolean) => {
     if (show_jump_button_ref.current === visible) {
@@ -437,6 +465,10 @@ export default function AdminChatTimeline({
 
       if (on_append_timeline_messages) {
         on_append_timeline_messages(mapped)
+      } else {
+        set_rows(
+          (previous) => merge_timeline_rows(previous, mapped, 'realtime').rows,
+        )
       }
 
       set_reply_text('')
@@ -464,13 +496,13 @@ export default function AdminChatTimeline({
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
             メッセージを読み込めませんでした
           </div>
-        ) : display_rows.length === 0 ? (
+        ) : rows.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
             メッセージはまだありません
           </div>
         ) : (
           <ol className="flex flex-col gap-2">
-            {display_rows.map((message) => {
+            {rows.map((message) => {
               if (message.bundle_type === 'room_action_log') {
                 return (
                   <li
