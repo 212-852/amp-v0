@@ -189,6 +189,8 @@ export function resolve_debug_rule(input: {
   }
 
   const admin_chat_reception_lifecycle_events = new Set([
+    'admin_reception_live_mounted',
+    'support_lifecycle_mounted',
     'admin_reception_page_rendered',
     'admin_reception_room_rendered',
     'admin_chat_component_mounted',
