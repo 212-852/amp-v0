@@ -54,6 +54,23 @@ function parse_messages_row_body(
   }
 }
 
+function pick_nested_text_from_record(
+  obj: Record<string, unknown> | null | undefined,
+  path: string[],
+): string {
+  let cur: unknown = obj
+
+  for (const key of path) {
+    if (!cur || typeof cur !== 'object' || Array.isArray(cur)) {
+      return ''
+    }
+
+    cur = (cur as Record<string, unknown>)[key]
+  }
+
+  return typeof cur === 'string' ? cur.trim() : ''
+}
+
 /**
  * Client-safe parse of `messages.body` (same shape as server archive insert).
  * Supabase Realtime often delivers JSON/JSONB `body` as an object; `load_archived_messages` uses a string.
@@ -73,7 +90,46 @@ function bundle_from_flat_message_body(
     return nested as message_bundle
   }
 
-  const text_raw = typeof flat.text === 'string' ? flat.text.trim() : ''
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    const loose = nested as Record<string, unknown>
+    const nested_text = pick_nested_text_from_record(loose, ['payload', 'text'])
+
+    if (nested_text) {
+      const sr =
+        typeof flat.sender_role === 'string' ? flat.sender_role : null
+      const bundle_sender =
+        typeof loose.sender === 'string' ? loose.sender : null
+      const sender: 'user' | 'bot' =
+        sr === 'bot' || bundle_sender === 'bot' ? 'bot' : 'user'
+
+      return {
+        bundle_uuid:
+          typeof loose.bundle_uuid === 'string' && loose.bundle_uuid.trim()
+            ? loose.bundle_uuid.trim()
+            : message_uuid,
+        bundle_type:
+          typeof loose.bundle_type === 'string' && loose.bundle_type.trim()
+            ? (loose.bundle_type.trim() as message_bundle['bundle_type'])
+            : 'text',
+        sender,
+        version: 1,
+        locale: 'ja',
+        payload: {
+          text: nested_text,
+        },
+      } as message_bundle
+    }
+  }
+
+  let text_raw = typeof flat.text === 'string' ? flat.text.trim() : ''
+
+  if (!text_raw) {
+    text_raw = pick_nested_text_from_record(flat, ['payload', 'text'])
+  }
+
+  if (!text_raw) {
+    text_raw = pick_nested_text_from_record(flat, ['bundle', 'payload', 'text'])
+  }
 
   if (!text_raw) {
     return null

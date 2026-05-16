@@ -426,6 +426,10 @@ export function subscribe_chat_room_realtime(input: {
   on_message: (message: realtime_archived_message) => void
   on_typing: (payload: chat_typing_payload) => void
   on_presence?: (payload: chat_presence_payload) => void
+  on_subscribe_status?: (payload: {
+    status: string
+    error_message: string | null
+  }) => void
 }): RealtimeChannel {
   const listener_scope = input.listener_scope ?? 'default'
   const channel_name = chat_realtime_postgres_channel_name(
@@ -448,6 +452,7 @@ export function subscribe_chat_room_realtime(input: {
     table: 'messages',
     filter: postgres_filter,
   }
+  const focus_room_uuid = (input.active_room_uuid ?? input.room_uuid).trim()
 
   send_chat_realtime_debug({
     event: admin_subscribe_started_event(listener_scope),
@@ -578,7 +583,9 @@ export function subscribe_chat_room_realtime(input: {
         const message_uuid =
           typeof row?.message_uuid === 'string' ? row.message_uuid : null
 
-        if (payload_room_uuid && payload_room_uuid !== input.room_uuid) {
+        const pr = payload_room_uuid?.trim() ?? ''
+
+        if (pr && pr !== focus_room_uuid) {
           if (admin_insert) {
             send_chat_realtime_debug({
               event:
@@ -609,7 +616,7 @@ export function subscribe_chat_room_realtime(input: {
           })
 
           console_chat_realtime('message_callback_ignored', {
-            expected: input.room_uuid,
+            expected: focus_room_uuid,
             payload_room_uuid,
             message_uuid,
             ignored_reason: 'payload_room_uuid_mismatch',
@@ -714,7 +721,7 @@ export function subscribe_chat_room_realtime(input: {
 
         if (message.bundle.bundle_type === 'room_action_log') {
           const event =
-            payload_room_uuid === input.room_uuid
+            (payload_room_uuid?.trim() ?? '') === focus_room_uuid
               ? 'chat_realtime_action_callback_received'
               : 'chat_realtime_action_callback_ignored'
 
@@ -785,7 +792,7 @@ export function subscribe_chat_room_realtime(input: {
         const payload_room_uuid =
           typeof row?.room_uuid === 'string' ? row.room_uuid : null
 
-        if (!payload_room_uuid || payload_room_uuid !== input.room_uuid) {
+        if (!payload_room_uuid || payload_room_uuid.trim() !== focus_room_uuid) {
           return
         }
 
@@ -1204,6 +1211,11 @@ export function subscribe_chat_room_realtime(input: {
       postgres_event: 'INSERT',
       error_message: err ? String(err) : null,
       phase: 'subscribe_callback',
+    })
+
+    input.on_subscribe_status?.({
+      status,
+      error_message: err ? String(err) : null,
     })
 
     if (status === 'SUBSCRIBED') {

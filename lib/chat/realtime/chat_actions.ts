@@ -319,7 +319,7 @@ export function subscribe_chat_actions_realtime(input: {
           action?.action_type === 'support_left'
         ) {
           send_chat_realtime_debug({
-            event: 'support_action_realtime_received',
+            event: 'support_action_realtime_payload_received',
             room_uuid: action.room_uuid,
             active_room_uuid: input.room_uuid,
             action_uuid: action.action_uuid,
@@ -341,7 +341,7 @@ export function subscribe_chat_actions_realtime(input: {
           return
         }
 
-        if (action.room_uuid !== input.room_uuid) {
+        if (action.room_uuid.trim() !== input.room_uuid.trim()) {
           if (
             action.action_type === 'support_started' ||
             action.action_type === 'support_left'
