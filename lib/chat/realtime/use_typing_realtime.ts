@@ -89,6 +89,22 @@ function listener_scope_for_owner(owner: typing_realtime_owner) {
   return owner === 'admin' ? ('admin_active' as const) : ('user_active' as const)
 }
 
+function is_staff_typing_role(role: string | null | undefined): boolean {
+  const normalized = role?.trim().toLowerCase() ?? ''
+
+  return (
+    normalized === 'admin' ||
+    normalized === 'concierge' ||
+    normalized === 'staff'
+  )
+}
+
+function is_end_user_typing_role(role: string | null | undefined): boolean {
+  const normalized = role?.trim().toLowerCase() ?? ''
+
+  return normalized === 'user' || normalized === 'driver'
+}
+
 export type use_typing_realtime_input = {
   owner: typing_realtime_owner
   room_uuid: string
@@ -100,6 +116,8 @@ export type use_typing_realtime_input = {
   tier?: string | null
   source_channel?: string | null
   locale?: locale_key | string | null
+  /** When `shared`, typing broadcast is owned by `use_message_realtime` on the same channel. */
+  channel_subscribe?: 'standalone' | 'shared'
   export_typing_channel_ref?: MutableRefObject<RealtimeChannel | null>
   on_label_change: (label: string | null) => void
   active_typing_identity_ref?: MutableRefObject<{
@@ -160,9 +178,68 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     [active_room_uuid, self_participant_uuid],
   )
 
+  const emit_staff_typing_realtime_debug = useCallback(
+    (
+      event:
+        | 'staff_typing_realtime_payload_received'
+        | 'staff_typing_realtime_rendered'
+        | 'staff_typing_realtime_ignored',
+      payload: {
+        payload_room_uuid: string | null
+        participant_uuid: string
+        role?: string | null
+        is_typing?: boolean | null
+        ignored_reason?: string | null
+      },
+    ) => {
+      if (owner !== 'user') {
+        return
+      }
+
+      send_chat_realtime_debug({
+        category: 'chat_realtime',
+        event,
+        owner,
+        room_uuid,
+        active_room_uuid,
+        payload_room_uuid: payload.payload_room_uuid,
+        participant_uuid: payload.participant_uuid,
+        role: payload.role ?? null,
+        is_typing: payload.is_typing ?? null,
+        ignored_reason: payload.ignored_reason ?? null,
+        phase: 'use_typing_realtime_staff',
+      })
+    },
+    [active_room_uuid, owner, room_uuid],
+  )
+
   const handle_typing = useCallback(
     (typing: chat_typing_payload) => {
       const payload_room_uuid = typing.room_uuid.trim() || null
+
+      if (owner === 'admin' && is_end_user_typing_role(typing.role)) {
+        send_chat_realtime_debug({
+          category: 'chat_realtime',
+          event: 'user_typing_status_received',
+          owner,
+          room_uuid,
+          active_room_uuid,
+          payload_room_uuid,
+          participant_uuid: typing.participant_uuid,
+          role: typing.role,
+          is_typing: typing.is_typing,
+          phase: 'use_typing_realtime_user',
+        })
+      }
+
+      if (owner === 'user' && is_staff_typing_role(typing.role)) {
+        emit_staff_typing_realtime_debug('staff_typing_realtime_payload_received', {
+          payload_room_uuid,
+          participant_uuid: typing.participant_uuid,
+          role: typing.role,
+          is_typing: typing.is_typing,
+        })
+      }
 
       emit_typing_realtime_debug('typing_realtime_payload_received', {
         owner,
@@ -183,6 +260,16 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
       })
 
       if (!acceptance.accept) {
+        if (owner === 'user' && is_staff_typing_role(typing.role)) {
+          emit_staff_typing_realtime_debug('staff_typing_realtime_ignored', {
+            payload_room_uuid,
+            participant_uuid: typing.participant_uuid,
+            role: typing.role,
+            is_typing: typing.is_typing,
+            ignored_reason: acceptance.ignored_reason,
+          })
+        }
+
         emit_typing_realtime_debug('typing_realtime_payload_ignored', {
           owner,
           room_uuid,
@@ -230,10 +317,20 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
         prev_count: peer_map_ref.current.size,
         next_count: peer_map_ref.current.size,
       })
+
+      if (owner === 'user' && is_staff_typing_role(typing.role)) {
+        emit_staff_typing_realtime_debug('staff_typing_realtime_rendered', {
+          payload_room_uuid,
+          participant_uuid: typing.participant_uuid,
+          role: typing.role,
+          is_typing: typing.is_typing,
+        })
+      }
     },
     [
       accept_peer_typing_payload,
       active_room_uuid,
+      emit_staff_typing_realtime_debug,
       input.source_channel,
       owner,
       resolve_label,
@@ -324,8 +421,10 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     ],
   )
 
+  const channel_subscribe = input.channel_subscribe ?? 'standalone'
+
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || channel_subscribe === 'shared') {
       return
     }
 
@@ -409,6 +508,7 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
     }
   }, [
     active_room_uuid,
+    channel_subscribe,
     enabled,
     handle_presence,
     handle_typing,

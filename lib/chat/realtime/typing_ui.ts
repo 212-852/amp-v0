@@ -221,7 +221,10 @@ export function peer_typing_label_for_user(
     const role = row.role?.trim().toLowerCase() ?? ''
 
     if (
-      (role === 'admin' || role === 'concierge' || role === 'bot') &&
+      (role === 'admin' ||
+        role === 'concierge' ||
+        role === 'staff' ||
+        role === 'bot') &&
       chat_typing_is_fresh({
         is_typing: row.is_typing,
         sent_at: row.sent_at ?? '',

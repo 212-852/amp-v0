@@ -382,59 +382,13 @@ function WebChatMessageRow({ message }: { message: archived_message }) {
 }
 
 type web_chat_message_timeline_props = {
-  room_uuid: string
-  active_room_uuid: string
-  participant_uuid: string
-  user_uuid: string | null
-  tier: string | null
-  source_channel: 'web' | 'liff' | 'pwa' | 'line'
-  enabled: boolean
-  active_typing_identity_ref: MutableRefObject<{
-    user_uuid: string | null
-    participant_uuid: string | null
-    role: string | null
-  }>
   visible_messages: archived_message[]
   set_scroll_container: (node: HTMLDivElement | null) => void
-  on_typing_banner_change?: (label: string | null) => void
+  typing_banner: string | null
   scroll_spacer?: ReactNode
-  locale: chat_locale
 }
 
 function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
-  const [typing_banner, set_typing_banner] = useState<string | null>(null)
-  const [ui_locale, set_ui_locale] = useState<locale_key>(() =>
-    normalize_locale(props.locale),
-  )
-
-  useEffect(() => {
-    set_ui_locale(normalize_locale(props.locale))
-  }, [props.locale])
-
-  useEffect(() => {
-    set_ui_locale(get_locale())
-
-    return subscribe_locale(set_ui_locale)
-  }, [])
-
-  const { handle_presence } = use_typing_realtime({
-    owner: 'user',
-    room_uuid: props.room_uuid,
-    active_room_uuid: props.active_room_uuid,
-    enabled: props.enabled,
-    participant_uuid: props.participant_uuid,
-    user_uuid: props.user_uuid,
-    role: 'user',
-    tier: props.tier,
-    source_channel: props.source_channel,
-    locale: ui_locale,
-    active_typing_identity_ref: props.active_typing_identity_ref,
-    on_label_change: set_typing_banner,
-  })
-
-  useEffect(() => {
-    props.on_typing_banner_change?.(typing_banner)
-  }, [props.on_typing_banner_change, typing_banner])
 
   return (
     <div
@@ -446,9 +400,9 @@ function WebChatMessageTimeline(props: web_chat_message_timeline_props) {
           <WebChatMessageRow key={message.archive_uuid} message={message} />
         ))}
       </div>
-      {typing_banner ? (
+      {props.typing_banner ? (
         <div className="px-5 pb-2 pt-4 text-center text-[12px] font-medium text-[#8a7568]">
-          {typing_banner}
+          {props.typing_banner}
         </div>
       ) : null}
       {props.scroll_spacer ?? (
@@ -515,7 +469,20 @@ export function WebChat({
   })
 
   const did_initial_scroll_ref = useRef(false)
-  const typing_banner_ref = useRef<string | null>(null)
+  const [typing_banner, set_typing_banner] = useState<string | null>(null)
+  const [ui_locale, set_ui_locale] = useState<locale_key>(() =>
+    normalize_locale(locale),
+  )
+
+  useEffect(() => {
+    set_ui_locale(normalize_locale(locale))
+  }, [locale])
+
+  useEffect(() => {
+    set_ui_locale(get_locale())
+
+    return subscribe_locale(set_ui_locale)
+  }, [])
 
   useEffect(() => {
     append_realtime_message_ref.current = append_realtime_message
@@ -544,6 +511,29 @@ export function WebChat({
     session?.user_uuid,
   ])
 
+  const page_room_uuid = room_uuid.trim()
+  const message_realtime_enabled = Boolean(page_room_uuid)
+
+  const {
+    handle_typing: handle_realtime_typing,
+    handle_presence: handle_realtime_presence,
+    clear_peer_participant: clear_peer_typing_on_message,
+  } = use_typing_realtime({
+    owner: 'user',
+    room_uuid: page_room_uuid,
+    active_room_uuid: page_room_uuid,
+    enabled: message_realtime_enabled,
+    participant_uuid,
+    user_uuid: session?.user_uuid ?? null,
+    role: 'user',
+    tier: session?.tier ?? null,
+    source_channel: session?.source_channel ?? 'web',
+    channel_subscribe: 'shared',
+    locale: ui_locale,
+    active_typing_identity_ref,
+    on_label_change: set_typing_banner,
+  })
+
   const handle_realtime_message = useCallback(
     (message: realtime_archived_message) => {
       if (
@@ -555,6 +545,12 @@ export function WebChat({
           next_count: 0,
           dedupe_hit: true,
         }
+      }
+
+      const sender_participant_uuid = message.sender_participant_uuid?.trim()
+
+      if (sender_participant_uuid) {
+        clear_peer_typing_on_message(sender_participant_uuid)
       }
 
       const dbg = web_rt_ctx_ref.current
@@ -591,11 +587,8 @@ export function WebChat({
         dedupe_hit: update_result.dedupe_hit,
       }
     },
-    [get_message_list_near_bottom, scroll_to_bottom],
+    [clear_peer_typing_on_message, get_message_list_near_bottom, scroll_to_bottom],
   )
-
-  const page_room_uuid = room_uuid.trim()
-  const message_realtime_enabled = Boolean(page_room_uuid)
 
   use_message_realtime({
     owner: 'user',
@@ -607,11 +600,12 @@ export function WebChat({
     role: 'user',
     tier: session?.tier ?? null,
     source_channel: session?.source_channel ?? 'web',
-    include_typing_broadcast: false,
+    include_typing_broadcast: true,
     active_typing_identity_ref,
     export_messages_channel_ref: room_realtime_channelRef,
     on_message: handle_realtime_message,
-    on_typing: () => {},
+    on_typing: handle_realtime_typing,
+    on_presence: handle_realtime_presence,
   })
 
   const handle_realtime_action = useCallback(
@@ -653,18 +647,13 @@ export function WebChat({
     [get_message_list_near_bottom, scroll_to_bottom],
   )
 
-  const handle_typing_banner_change = useCallback(
-    (label: string | null) => {
-      typing_banner_ref.current = label
+  useEffect(() => {
+    if (!typing_banner) {
+      return
+    }
 
-      if (!label) {
-        return
-      }
-
-      scroll_to_bottom('smooth')
-    },
-    [scroll_to_bottom],
-  )
+    scroll_to_bottom('smooth')
+  }, [scroll_to_bottom, typing_banner])
 
   useEffect(() => {
     if (!room_uuid.trim()) {
@@ -766,18 +755,9 @@ export function WebChat({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <WebChatMessageTimeline
-        room_uuid={room_uuid}
-        active_room_uuid={page_room_uuid}
-        participant_uuid={participant_uuid}
-        user_uuid={session?.user_uuid ?? null}
-        tier={session?.tier ?? null}
-        source_channel={session?.source_channel ?? 'web'}
-        locale={locale}
-        enabled={message_realtime_enabled}
-        active_typing_identity_ref={active_typing_identity_ref}
         visible_messages={visible_messages}
         set_scroll_container={set_scroll_container}
-        on_typing_banner_change={handle_typing_banner_change}
+        typing_banner={typing_banner}
       />
     </div>
   )

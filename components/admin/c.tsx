@@ -287,6 +287,25 @@ export default function AdminChatTimeline({
     [on_append_timeline_messages],
   )
 
+  const {
+    handle_typing: handle_realtime_typing,
+    handle_presence: handle_realtime_presence,
+    clear_peer_participant: clear_peer_typing_on_message,
+  } = use_typing_realtime({
+    owner: 'admin',
+    room_uuid,
+    active_room_uuid: room_uuid,
+    enabled: bubble_realtime_enabled,
+    participant_uuid: staff_participant_uuid,
+    user_uuid: staff_user_uuid,
+    role: 'admin',
+    tier: staff_tier,
+    source_channel: 'web',
+    channel_subscribe: 'shared',
+    locale: ui_locale,
+    on_label_change: set_local_peer_typing_label,
+  })
+
   use_message_realtime({
     owner: 'admin',
     room_uuid,
@@ -297,24 +316,19 @@ export default function AdminChatTimeline({
     role: 'admin',
     tier: staff_tier,
     source_channel: 'admin',
-    include_typing_broadcast: false,
+    include_typing_broadcast: true,
     export_messages_channel_ref: messages_channel_ref,
-    on_message: handle_realtime_message,
-    on_typing: () => {},
-  })
+    on_message: (archived) => {
+      const sender_participant_uuid = archived.sender_participant_uuid?.trim()
 
-  const { handle_presence: handle_realtime_presence } = use_typing_realtime({
-    owner: 'admin',
-    room_uuid,
-    active_room_uuid: room_uuid,
-    enabled: bubble_realtime_enabled,
-    participant_uuid: staff_participant_uuid,
-    user_uuid: staff_user_uuid,
-    role: 'admin',
-    tier: staff_tier,
-    source_channel: 'admin',
-    locale: ui_locale,
-    on_label_change: set_local_peer_typing_label,
+      if (sender_participant_uuid) {
+        clear_peer_typing_on_message(sender_participant_uuid)
+      }
+
+      return handle_realtime_message(archived)
+    },
+    on_typing: handle_realtime_typing,
+    on_presence: handle_realtime_presence,
   })
 
   useEffect(() => {
@@ -367,11 +381,11 @@ export default function AdminChatTimeline({
         active_room_uuid: room_uuid,
         participant_uuid: staff_participant_uuid,
         user_uuid: staff_user_uuid,
-        role: 'admin',
+        role: 'concierge',
         tier: staff_tier,
         display_name: staff_display_name,
         is_typing: action === 'typing_start',
-        source_channel: 'admin',
+        source_channel: 'web',
         channel: messages_channel_ref.current,
         typing_phase:
           action === 'typing_start'
