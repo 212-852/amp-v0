@@ -151,20 +151,25 @@ export function use_message_realtime(input: use_message_realtime_input) {
     input.source_channel ?? (owner === 'admin' ? 'admin' : 'web')
 
   useLayoutEffect(() => {
-    if (!enabled) {
-      return
-    }
-
     emit_message_realtime_debug('message_realtime_mounted', {
       owner,
       room_uuid,
       active_room_uuid,
-      subscribe_status: 'HOOK_MOUNTED',
+      subscribe_status: enabled ? 'HOOK_MOUNTED' : 'HOOK_DISABLED',
+      ignored_reason: enabled ? null : 'message_realtime_disabled',
     })
   }, [active_room_uuid, enabled, owner, room_uuid, source_channel])
 
   useEffect(() => {
     if (!enabled) {
+      emit_message_realtime_debug('message_realtime_subscribe_status', {
+        owner,
+        room_uuid,
+        active_room_uuid,
+        subscribe_status: 'SUBSCRIBE_SKIPPED',
+        ignored_reason: room_uuid ? 'message_realtime_disabled' : 'missing_room_uuid',
+      })
+
       return
     }
 

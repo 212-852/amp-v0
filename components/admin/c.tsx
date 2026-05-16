@@ -189,6 +189,11 @@ export default function AdminChatTimeline({
     local_peer_typing_label ?? peer_typing_label
   const typing_participant_uuid =
     admin_participant_uuid.trim() || staff_participant_uuid.trim()
+  const active_typing_identity_ref = useRef({
+    user_uuid: staff_user_uuid,
+    participant_uuid: typing_participant_uuid,
+    role: 'concierge',
+  })
 
   const staff_participant_uuid_ref = useRef(staff_participant_uuid)
 
@@ -221,11 +226,17 @@ export default function AdminChatTimeline({
       staff_user_uuid,
       staff_tier,
     }
+    active_typing_identity_ref.current = {
+      user_uuid: staff_user_uuid,
+      participant_uuid: typing_participant_uuid,
+      role: 'concierge',
+    }
   }, [
     room_uuid,
     staff_participant_uuid,
     staff_tier,
     staff_user_uuid,
+    typing_participant_uuid,
   ])
 
   const synced_room_uuid_ref = useRef<string | null>(null)
@@ -317,6 +328,7 @@ export default function AdminChatTimeline({
     source_channel: 'web',
     channel_subscribe: 'shared',
     locale: ui_locale,
+    active_typing_identity_ref,
     on_label_change: set_local_peer_typing_label,
   })
 
@@ -331,6 +343,7 @@ export default function AdminChatTimeline({
     tier: staff_tier,
     source_channel: 'admin',
     include_typing_broadcast: true,
+    active_typing_identity_ref,
     export_messages_channel_ref: messages_channel_ref,
     on_message: (archived) => {
       const sender_participant_uuid = archived.sender_participant_uuid?.trim()

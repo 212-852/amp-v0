@@ -438,16 +438,17 @@ export function use_typing_realtime(input: use_typing_realtime_input) {
   const channel_subscribe = input.channel_subscribe ?? 'standalone'
 
   useLayoutEffect(() => {
-    if (!enabled) {
-      return
-    }
-
     emit_typing_realtime_debug('typing_realtime_mounted', {
       owner,
       room_uuid,
       active_room_uuid,
       subscribe_status:
-        channel_subscribe === 'shared' ? 'SHARED_HOOK_MOUNTED' : 'HOOK_MOUNTED',
+        enabled
+          ? channel_subscribe === 'shared'
+            ? 'SHARED_HOOK_MOUNTED'
+            : 'HOOK_MOUNTED'
+          : 'HOOK_DISABLED',
+      ignored_reason: enabled ? null : 'typing_realtime_disabled',
     })
   }, [active_room_uuid, channel_subscribe, enabled, owner, room_uuid])
 
