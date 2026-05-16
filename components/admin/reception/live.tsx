@@ -1,6 +1,5 @@
 'use client'
 
-import dynamic from 'next/dynamic'
 import {
   useCallback,
   useEffect,
@@ -10,11 +9,13 @@ import {
 } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
+import AdminReceptionRoomInterior from '@/components/admin/reception/room_interior'
 import { use_admin_reception_support_presence } from '@/components/admin/reception/admin_support_presence'
 import type { admin_reception_room_shell_props } from '@/components/admin/reception/room_props'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import {
   append_chat_action_to_admin_timeline,
+  emit_chat_action_realtime_rendered,
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
@@ -34,16 +35,11 @@ import { use_support_lifecycle } from './use_support_lifecycle'
 
 const component_file = 'components/admin/reception/live.tsx'
 
-const AdminReceptionRoomInterior = dynamic(
-  () => import('@/components/admin/reception/room_interior'),
-  { ssr: false },
-)
-
 export type admin_reception_live_props = admin_reception_room_shell_props
 
 export default function AdminReceptionLive(props: admin_reception_live_props) {
   const live_mounted_room_ref = useRef<string | null>(null)
-  const room_uuid = props.room_uuid.trim()
+  const room_uuid = (props.room?.room_uuid ?? props.room_uuid ?? '').trim()
   const [live_messages, set_live_messages] = useState<chat_room_timeline_message[]>(
     () => props.messages,
   )
@@ -85,7 +81,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
       return
     }
 
-    if (external_support_action.room_uuid.trim() !== props.room_uuid.trim()) {
+    if (external_support_action.room_uuid.trim() !== room_uuid) {
       return
     }
 
@@ -95,9 +91,19 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
         external_support_action,
       )
 
+      if (merged.appended) {
+        emit_chat_action_realtime_rendered({
+          room_uuid: external_support_action.room_uuid,
+          action: external_support_action,
+          inserted_index: merged.rows.length - 1,
+          source_channel: 'admin',
+          phase: 'admin_reception_live_support_action',
+        })
+      }
+
       return merged.appended ? merged.rows : previous
     })
-  }, [external_support_action, props.room_uuid])
+  }, [external_support_action, room_uuid])
 
   const handle_support_action = useCallback(
     (action: chat_action_realtime_payload) => {
@@ -108,7 +114,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
 
   const handle_realtime_message = useCallback(
     (archived: realtime_archived_message) => {
-      const active_room_focus = props.room_uuid.trim()
+      const active_room_focus = room_uuid
       const mapped = archived_message_to_timeline_message({
         archive_uuid: archived.archive_uuid,
         room_uuid: archived.room_uuid,
@@ -167,7 +173,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
       return update_result
     },
     [
-      props.room_uuid,
+      room_uuid,
       props.staff_participant_uuid,
       props.staff_tier,
       props.staff_user_uuid,
@@ -175,11 +181,12 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
   )
 
   const handle_realtime_action = useCallback(
-    (action: chat_action_realtime_payload, _inserted_index: number) => {
+    (action: chat_action_realtime_payload, inserted_index: number) => {
       let update_result = {
         prev_count: 0,
         next_count: 0,
         dedupe_hit: false,
+        appended: false,
       }
 
       set_live_messages((previous) => {
@@ -189,10 +196,21 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
           prev_count: previous.length,
           next_count: merged.rows.length,
           dedupe_hit: !merged.appended,
+          appended: merged.appended,
         }
 
         return merged.appended ? merged.rows : previous
       })
+
+      if (update_result.appended) {
+        emit_chat_action_realtime_rendered({
+          room_uuid: action.room_uuid,
+          action,
+          inserted_index,
+          source_channel: 'admin',
+          phase: 'admin_reception_live_realtime_action',
+        })
+      }
 
       return update_result
     },
@@ -209,7 +227,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
   )
 
   const lifecycle = use_support_lifecycle({
-    room_uuid: props.room_uuid,
+    room_uuid,
     admin_user_uuid: props.admin_user_uuid,
     admin_participant_uuid: props.admin_participant_uuid,
     on_support_action: handle_support_action,
@@ -217,8 +235,8 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
 
   use_chat_realtime({
     owner: 'admin',
-    room_uuid: props.room_uuid,
-    active_room_uuid: props.room_uuid,
+    room_uuid,
+    active_room_uuid: room_uuid,
     enabled: Boolean(room_uuid),
     participant_uuid: props.staff_participant_uuid,
     user_uuid: props.staff_user_uuid,
@@ -232,7 +250,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
   })
 
   use_admin_reception_support_presence({
-    room_uuid: props.room_uuid,
+    room_uuid,
     staff_participant_uuid: props.staff_participant_uuid,
     staff_user_uuid: props.staff_user_uuid,
     staff_tier: props.staff_tier,
@@ -247,6 +265,7 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
   return (
     <AdminReceptionRoomInterior
       {...props}
+      room_uuid={room_uuid}
       live_messages={live_messages}
       realtime_messages_channel_ref={realtime_messages_channel_ref}
       append_live_timeline_messages={append_live_timeline_messages}

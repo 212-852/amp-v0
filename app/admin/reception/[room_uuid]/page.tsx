@@ -19,6 +19,10 @@ type AdminReceptionRoomPageProps = {
   params: Promise<{ room_uuid: string }>
 }
 
+function to_client_json<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 async function load_room(
   room_uuid: string,
 ): Promise<{ ok: true; room: reception_room | null } | { ok: false; room: null }> {
@@ -130,6 +134,8 @@ export default async function AdminReceptionRoomPage({
   const memos = await load_memos(room_uuid)
   const message_result = await load_messages(room_uuid)
   const room = room_result.room
+    ? to_client_json(room_result.room)
+    : null
   const customer_display_name =
     room?.display_name?.trim() || customer_display_name_fallback
 
@@ -144,8 +150,8 @@ export default async function AdminReceptionRoomPage({
       staff_tier={access.tier}
       staff_participant_uuid={staff_participant_uuid}
       staff_display_name={staff_display_name}
-      memos={memos}
-      messages={message_result.messages}
+      memos={to_client_json(memos)}
+      messages={to_client_json(message_result.messages)}
       load_failed={!message_result.ok}
     />
   )
