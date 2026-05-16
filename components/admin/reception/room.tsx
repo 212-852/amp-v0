@@ -1,14 +1,17 @@
 'use client'
 
-import Link from 'next/link'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import AdminChat from '@/components/admin/chat'
 import AdminHandoffMemo from '@/components/admin/memo'
+import {
+  use_admin_reception_support_presence,
+  type admin_support_session_ref_value,
+} from '@/components/admin/reception/admin_support_presence'
 import AdminReceptionActiveSummary from '@/components/admin/reception/active_summary'
-import AdminReceptionLive from '@/components/admin/reception/live'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
-import type { handoff_memo } from '@/lib/chat/action'
+import AdminReceptionLive from '@/components/admin/reception/live'
+import type { handoff_memo } from '@/lib/chat/handoff'
 import type {
   reception_room,
   reception_room_message,
@@ -17,19 +20,12 @@ import {
   append_chat_action_to_admin_timeline,
   type chat_action_realtime_payload,
 } from '@/lib/chat/realtime/chat_actions'
-import type {
-  chat_presence_payload,
-  chat_typing_payload,
-} from '@/lib/chat/realtime/client'
-import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import {
-  clear_peer_typing_participant,
-  handle_presence_typing_for_ui,
-  handle_typing_broadcast_for_ui,
-  peer_typing_label_for_admin,
-  schedule_peer_typing_sweep,
-  type peer_typing_row,
-} from '@/lib/chat/realtime/typing_ui'
+  call_enter_support_room,
+  call_leave_support_room,
+  support_room_api_action_to_realtime,
+} from '@/lib/chat/realtime/support_room_client'
+import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import {
   archived_message_to_timeline_message,
   merge_timeline_message_rows,
@@ -54,23 +50,44 @@ type AdminReceptionRoomProps = {
   admin_participant_uuid: string
 }
 
+const component_file = 'components/admin/reception/room.tsx'
+const support_lifecycle_owner = component_file
+
+type global_lifecycle_owner = {
+  key: string
+  owner: string
+  room_uuid: string
+  admin_participant_uuid: string
+}
+
+function current_owner_global(): typeof globalThis & {
+  __admin_support_lifecycle_owner?: global_lifecycle_owner
+} {
+  return globalThis as typeof globalThis & {
+    __admin_support_lifecycle_owner?: global_lifecycle_owner
+  }
+}
+
 export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
+  const pathname = `/admin/reception/${props.room_uuid}`
   const [live_messages, set_live_messages] = useState<chat_room_timeline_message[]>(
     () => props.messages,
   )
+  const [external_support_action, set_external_support_action] =
+    useState<chat_action_realtime_payload | null>(null)
   const realtime_messages_channel_ref = useRef<RealtimeChannel | null>(null)
-  const peer_typing_map_ref = useRef<Map<string, peer_typing_row>>(new Map())
-  const active_typing_identity_ref = useRef({
-    user_uuid: null as string | null,
-    participant_uuid: null as string | null,
-    role: null as string | null,
-  })
-  const [peer_typing_label, set_peer_typing_label] = useState<string | null>(
-    null,
-  )
   const room_display_title_ref = useRef(props.customer_display_name)
+  const support_session_ref =
+    useRef<admin_support_session_ref_value | null>(null)
+  const enter_session_ref = useRef<string | null>(null)
+  const has_entered_support_ref = useRef(false)
+  const owner_registered_ref = useRef(false)
+  const [owner_registered, set_owner_registered] = useState(false)
+  const latest_room_uuid_ref = useRef(props.room_uuid)
+  const admin_user_uuid_ref = useRef(props.admin_user_uuid)
+  const admin_participant_uuid_ref = useRef(props.admin_participant_uuid)
+
   const room_rendered_debug_ref = useRef<string | null>(null)
-  const live_room_uuid = props.room?.room_uuid ?? props.room_uuid
 
   useLayoutEffect(() => {
     const focus_room = props.room_uuid.trim()
@@ -87,79 +104,23 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
       active_room_uuid: focus_room,
       admin_user_uuid: props.admin_user_uuid.trim() || null,
       admin_participant_uuid: props.admin_participant_uuid.trim() || null,
-      component_file: 'components/admin/reception/room.tsx',
+      component_file,
       pathname: `/admin/reception/${focus_room}`,
       phase: 'admin_reception_room',
     })
   }, [props.admin_participant_uuid, props.admin_user_uuid, props.room_uuid])
 
   useEffect(() => {
+    latest_room_uuid_ref.current = props.room_uuid
+    admin_user_uuid_ref.current = props.admin_user_uuid
+    admin_participant_uuid_ref.current = props.admin_participant_uuid
     room_display_title_ref.current = props.customer_display_name
-    active_typing_identity_ref.current = {
-      user_uuid: props.staff_user_uuid,
-      participant_uuid: props.staff_participant_uuid,
-      role: 'admin',
-    }
   }, [
+    props.admin_participant_uuid,
+    props.admin_user_uuid,
     props.customer_display_name,
-    props.staff_participant_uuid,
-    props.staff_user_uuid,
+    props.room_uuid,
   ])
-
-  const refresh_peer_typing_label = useCallback(() => {
-    set_peer_typing_label(
-      peer_typing_label_for_admin(
-        peer_typing_map_ref.current,
-        props.staff_participant_uuid,
-      ),
-    )
-  }, [props.staff_participant_uuid])
-
-  const handle_remote_typing = useCallback(
-    (typing: chat_typing_payload) => {
-      handle_typing_broadcast_for_ui({
-        owner: 'admin',
-        room_uuid: props.room_uuid,
-        map: peer_typing_map_ref.current,
-        typing,
-        self_participant_uuid: props.staff_participant_uuid,
-        on_label_change: set_peer_typing_label,
-        resolve_label: peer_typing_label_for_admin,
-      })
-      schedule_peer_typing_sweep({
-        owner: 'admin',
-        room_uuid: props.room_uuid,
-        map: peer_typing_map_ref.current,
-        self_participant_uuid: props.staff_participant_uuid,
-        on_label_change: set_peer_typing_label,
-        resolve_label: peer_typing_label_for_admin,
-      })
-    },
-    [props.room_uuid, props.staff_participant_uuid],
-  )
-
-  const handle_remote_presence = useCallback(
-    (presence: chat_presence_payload) => {
-      handle_presence_typing_for_ui({
-        owner: 'admin',
-        room_uuid: props.room_uuid,
-        map: peer_typing_map_ref.current,
-        presence,
-        self_participant_uuid: props.staff_participant_uuid,
-        on_label_change: set_peer_typing_label,
-        resolve_label: peer_typing_label_for_admin,
-      })
-      schedule_peer_typing_sweep({
-        owner: 'admin',
-        room_uuid: props.room_uuid,
-        map: peer_typing_map_ref.current,
-        self_participant_uuid: props.staff_participant_uuid,
-        on_label_change: set_peer_typing_label,
-        resolve_label: peer_typing_label_for_admin,
-      })
-    },
-    [props.room_uuid, props.staff_participant_uuid],
-  )
 
   useEffect(() => {
     set_live_messages(
@@ -167,20 +128,24 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     )
   }, [props.messages, props.room_uuid])
 
-  const handle_support_action = useCallback(
-    (action: chat_action_realtime_payload) => {
-      if (action.room_uuid.trim() !== props.room_uuid.trim()) {
-        return
-      }
+  useEffect(() => {
+    if (!external_support_action) {
+      return
+    }
 
-      set_live_messages((previous) => {
-        const merged = append_chat_action_to_admin_timeline(previous, action)
+    if (external_support_action.room_uuid.trim() !== props.room_uuid.trim()) {
+      return
+    }
 
-        return merged.appended ? merged.rows : previous
-      })
-    },
-    [props.room_uuid],
-  )
+    set_live_messages((previous) => {
+      const merged = append_chat_action_to_admin_timeline(
+        previous,
+        external_support_action,
+      )
+
+      return merged.appended ? merged.rows : previous
+    })
+  }, [external_support_action, props.room_uuid])
 
   const handle_realtime_message = useCallback(
     (archived: realtime_archived_message) => {
@@ -215,14 +180,6 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         return merged.rows
       })
 
-      if (archived.sender_participant_uuid) {
-        clear_peer_typing_participant(
-          peer_typing_map_ref.current,
-          archived.sender_participant_uuid,
-        )
-        refresh_peer_typing_label()
-      }
-
       if (!update_result.dedupe_hit) {
         handle_chat_message_toast({
           room_uuid: archived.room_uuid,
@@ -255,7 +212,6 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
       props.staff_participant_uuid,
       props.staff_tier,
       props.staff_user_uuid,
-      refresh_peer_typing_label,
     ],
   )
 
@@ -293,33 +249,367 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     [],
   )
 
-  return (
-    <div className="-mx-6 -mb-6 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-      <header className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
-        <nav
-          aria-label="Breadcrumb"
-          className="flex items-center gap-1.5 text-[12px] font-medium text-neutral-500"
-        >
-          <Link href="/admin" className="transition-colors hover:text-black">
-            Home
-          </Link>
-          <span aria-hidden>{'>'}</span>
-          <Link
-            href="/admin/reception"
-            className="transition-colors hover:text-black"
-          >
-            チャット一覧
-          </Link>
-          <span aria-hidden>{'>'}</span>
-          <span className="truncate text-neutral-900">
-            {props.customer_display_name}
-          </span>
-        </nav>
-      </header>
+  useEffect(() => {
+    const admin_participant_uuid = props.admin_participant_uuid.trim()
+    const owner_key = `${support_lifecycle_owner}|${props.room_uuid}|${admin_participant_uuid}`
+    const root = current_owner_global()
+    const current = root.__admin_support_lifecycle_owner
 
+    if (current && current.key !== owner_key) {
+      send_admin_chat_debug({
+        event: 'support_lifecycle_duplicate_owner_skipped',
+        room_uuid: props.room_uuid,
+        active_room_uuid: props.room_uuid,
+        admin_user_uuid: props.admin_user_uuid.trim() || null,
+        admin_participant_uuid: admin_participant_uuid || null,
+        component_file,
+        support_lifecycle_owner,
+        ignored_reason: 'support_lifecycle_owner_already_registered',
+        pathname,
+        phase: 'support_lifecycle_owner',
+      })
+
+      return
+    }
+
+    root.__admin_support_lifecycle_owner = {
+      key: owner_key,
+      owner: support_lifecycle_owner,
+      room_uuid: props.room_uuid,
+      admin_participant_uuid,
+    }
+    owner_registered_ref.current = true
+    set_owner_registered(true)
+
+    send_admin_chat_debug({
+      event: 'support_lifecycle_owner_registered',
+      room_uuid: props.room_uuid,
+      active_room_uuid: props.room_uuid,
+      admin_user_uuid: props.admin_user_uuid.trim() || null,
+      admin_participant_uuid: admin_participant_uuid || null,
+      component_file,
+      support_lifecycle_owner,
+      pathname,
+      phase: 'support_lifecycle_owner',
+    })
+
+    return () => {
+      if (root.__admin_support_lifecycle_owner?.key === owner_key) {
+        delete root.__admin_support_lifecycle_owner
+      }
+      owner_registered_ref.current = false
+      set_owner_registered(false)
+    }
+  }, [
+    pathname,
+    props.admin_participant_uuid,
+    props.admin_user_uuid,
+    props.room_uuid,
+  ])
+
+  const run_enter_support_room = useCallback(async (trigger_source: string) => {
+    const room_uuid = latest_room_uuid_ref.current
+    const admin_user_uuid = admin_user_uuid_ref.current.trim()
+    const admin_participant_uuid = admin_participant_uuid_ref.current.trim()
+    const timestamp = new Date().toISOString()
+    const stack_hint =
+      typeof Error === 'function'
+        ? new Error('support_started_trigger_detected').stack
+            ?.split('\n')
+            .slice(1, 5)
+            .join(' | ') ?? null
+        : null
+
+    send_admin_chat_debug({
+      event: 'support_started_trigger_detected',
+      room_uuid,
+      active_room_uuid: room_uuid,
+      admin_user_uuid: admin_user_uuid || null,
+      admin_participant_uuid: admin_participant_uuid || null,
+      component_file,
+      support_lifecycle_owner,
+      trigger_source,
+      stack_hint,
+      timestamp,
+      pathname,
+      phase: 'support_enter',
+    })
+
+    if (!owner_registered_ref.current) {
+      send_admin_chat_debug({
+        event: 'support_lifecycle_duplicate_owner_skipped',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        admin_user_uuid: admin_user_uuid || null,
+        admin_participant_uuid: admin_participant_uuid || null,
+        component_file,
+        support_lifecycle_owner,
+        ignored_reason: 'support_lifecycle_owner_not_registered',
+        pathname,
+        phase: 'support_enter',
+      })
+
+      return
+    }
+
+    if (!room_uuid || !admin_user_uuid || !admin_participant_uuid) {
+      send_admin_chat_debug({
+        event: 'enter_support_room_skipped_missing_admin_identity',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        admin_user_uuid: admin_user_uuid || null,
+        admin_participant_uuid: admin_participant_uuid || null,
+        admin_user_uuid_exists: admin_user_uuid.length > 0,
+        admin_participant_uuid_exists: admin_participant_uuid.length > 0,
+        component_file,
+        support_lifecycle_owner,
+        ignored_reason: !admin_user_uuid
+          ? 'missing_admin_user_uuid'
+          : 'missing_admin_participant_uuid',
+        pathname,
+        phase: 'support_enter',
+        level: 'warn',
+      })
+
+      return
+    }
+
+    const enter_key = `${room_uuid}|${admin_participant_uuid}`
+
+    if (
+      has_entered_support_ref.current ||
+      enter_session_ref.current === enter_key
+    ) {
+      send_admin_chat_debug({
+        event: 'support_started_duplicate_skipped',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        admin_user_uuid,
+        admin_participant_uuid,
+        component_file,
+        support_lifecycle_owner,
+        trigger_source,
+        stack_hint,
+        timestamp,
+        skipped_reason: 'already_entered_in_client_ref',
+        ignored_reason: 'already_entered_in_client_ref',
+        pathname,
+        phase: 'support_enter',
+      })
+
+      return
+    }
+
+    has_entered_support_ref.current = true
+    enter_session_ref.current = enter_key
+
+    send_admin_chat_debug({
+      event: 'admin_support_enter_call_started',
+      room_uuid,
+      active_room_uuid: room_uuid,
+      admin_user_uuid,
+      admin_participant_uuid,
+      component_file,
+      support_lifecycle_owner,
+      trigger_source,
+      stack_hint,
+      timestamp,
+      pathname,
+      phase: 'support_enter',
+    })
+
+    try {
+      const result = await call_enter_support_room({
+        room_uuid,
+        admin_user_uuid,
+        admin_participant_uuid,
+        trigger_source,
+      })
+
+      if (!result.ok) {
+        send_admin_chat_debug({
+          event: 'admin_support_enter_call_failed',
+          room_uuid,
+          active_room_uuid: room_uuid,
+          admin_user_uuid,
+          admin_participant_uuid,
+          component_file,
+          support_lifecycle_owner,
+          trigger_source,
+          stack_hint,
+          timestamp,
+          pathname,
+          error_code: result.error,
+          error_message: result.error,
+          phase: 'support_enter',
+          level: 'error',
+        })
+        has_entered_support_ref.current = false
+        enter_session_ref.current = null
+
+        return
+      }
+
+      if (result.action) {
+        const action = support_room_api_action_to_realtime(result.action)
+        support_session_ref.current = {
+          room_uuid,
+          admin_participant_uuid,
+          enter_action_uuid: result.action.action_uuid,
+          support_session_key: `${room_uuid}|${admin_participant_uuid}|${result.action.action_uuid}`,
+          left_sent: false,
+          existing_left_action_uuid: null,
+        }
+        set_external_support_action(action)
+      }
+
+      send_admin_chat_debug({
+        event: result.skipped
+          ? 'support_started_duplicate_skipped'
+          : 'admin_support_enter_call_succeeded',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        admin_user_uuid,
+        admin_participant_uuid,
+        action_uuid: result.action?.action_uuid ?? null,
+        existing_action_uuid: result.skipped
+          ? result.action?.action_uuid ?? null
+          : null,
+        existing_action_count: result.skipped ? 1 : 0,
+        created_action_uuid: result.skipped
+          ? null
+          : result.action?.action_uuid ?? null,
+        component_file,
+        support_lifecycle_owner,
+        trigger_source,
+        stack_hint,
+        timestamp,
+        skipped_reason: result.skipped ? 'server_enter_skipped' : null,
+        ignored_reason: result.skipped ? 'server_enter_skipped' : null,
+        pathname,
+        phase: 'support_enter',
+      })
+    } catch (error) {
+      send_admin_chat_debug({
+        event: 'admin_support_enter_call_failed',
+        room_uuid,
+        active_room_uuid: room_uuid,
+        admin_user_uuid,
+        admin_participant_uuid,
+        component_file,
+        support_lifecycle_owner,
+        trigger_source,
+        stack_hint,
+        timestamp,
+        pathname,
+        error_code: 'enter_support_room_call_failed',
+        error_message: error instanceof Error ? error.message : String(error),
+        phase: 'support_enter',
+        level: 'error',
+      })
+      has_entered_support_ref.current = false
+      enter_session_ref.current = null
+    }
+  }, [pathname])
+
+  const run_leave_support_room = useCallback(
+    (leave_reason: string) => {
+      const room_uuid = latest_room_uuid_ref.current
+      const admin_participant_uuid = admin_participant_uuid_ref.current.trim()
+      const current = support_session_ref.current
+
+      if (current?.left_sent === true) {
+        send_admin_chat_debug({
+          event: 'support_left_duplicate_skipped',
+          room_uuid,
+          active_room_uuid: room_uuid,
+          admin_participant_uuid,
+          component_file,
+          support_lifecycle_owner,
+          leave_reason,
+          support_session_key: current.support_session_key,
+          existing_left_action_uuid: current.existing_left_action_uuid,
+          ignored_reason: 'client_support_session_already_left',
+          pathname,
+          phase: 'support_leave',
+        })
+
+        return
+      }
+
+      if (
+        !current ||
+        current.room_uuid !== room_uuid ||
+        current.admin_participant_uuid !== admin_participant_uuid
+      ) {
+        send_admin_chat_debug({
+          event: 'support_left_duplicate_skipped',
+          room_uuid,
+          active_room_uuid: room_uuid,
+          admin_participant_uuid,
+          component_file,
+          support_lifecycle_owner,
+          leave_reason,
+          support_session_key: current?.support_session_key ?? null,
+          existing_left_action_uuid: current?.existing_left_action_uuid ?? null,
+          ignored_reason: 'missing_current_support_session',
+          pathname,
+          phase: 'support_leave',
+        })
+
+        return
+      }
+
+      current.left_sent = true
+
+      void call_leave_support_room({
+        room_uuid,
+        participant_uuid: admin_participant_uuid,
+        leave_reason,
+        support_session_key: current.support_session_key,
+        keepalive: true,
+      })
+        .then((result) => {
+          if (result.ok && result.action) {
+            current.existing_left_action_uuid = result.action.action_uuid
+            set_external_support_action(
+              support_room_api_action_to_realtime(result.action),
+            )
+          }
+        })
+        .catch(() => {})
+    },
+    [pathname],
+  )
+
+  useEffect(() => {
+    void run_enter_support_room('room_mount')
+
+    return () => {
+      run_leave_support_room('component_cleanup')
+    }
+  }, [run_enter_support_room, run_leave_support_room])
+
+  use_admin_reception_support_presence({
+    room_uuid: props.room_uuid,
+    staff_participant_uuid: props.staff_participant_uuid,
+    staff_user_uuid: props.staff_user_uuid,
+    staff_tier: props.staff_tier,
+    enabled: owner_registered,
+    support_session_ref,
+    on_support_action: (action) => {
+      set_external_support_action(action)
+    },
+    on_recover_enter: () => {
+      void run_enter_support_room('visibility_focus')
+    },
+  })
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <AdminReceptionLive
-        key={`live:${live_room_uuid}:${props.admin_participant_uuid}`}
-        room_uuid={live_room_uuid}
+        key={`live:${props.room?.room_uuid ?? props.room_uuid}:${props.admin_participant_uuid}`}
+        room_uuid={props.room?.room_uuid ?? props.room_uuid}
         admin_user_uuid={props.admin_user_uuid}
         admin_participant_uuid={props.admin_participant_uuid}
         staff_user_uuid={props.staff_user_uuid}
@@ -327,13 +617,8 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         staff_participant_uuid={props.staff_participant_uuid}
         on_message={handle_realtime_message}
         on_action={handle_realtime_action}
-        on_support_action={handle_support_action}
-        on_typing={handle_remote_typing}
-        on_presence={handle_remote_presence}
-        active_typing_identity_ref={active_typing_identity_ref}
         realtime_messages_channel_ref={realtime_messages_channel_ref}
       />
-
       <div className="shrink-0 border-b border-neutral-200 px-6 py-4">
         <div className="flex flex-col gap-3">
           <AdminReceptionActiveSummary
@@ -365,8 +650,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         admin_participant_uuid={props.admin_participant_uuid}
         realtime_messages_channel_ref={realtime_messages_channel_ref}
         on_append_timeline_messages={append_live_timeline_messages}
-        peer_typing_label={peer_typing_label}
       />
-    </div>
+    </section>
   )
 }

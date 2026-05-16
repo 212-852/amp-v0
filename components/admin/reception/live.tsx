@@ -5,18 +5,11 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
-import type {
-  chat_presence_payload,
-  chat_typing_payload,
-} from '@/lib/chat/realtime/client'
 import type { realtime_archived_message } from '@/lib/chat/realtime/row'
 import {
   use_chat_realtime,
   type chat_realtime_hook_append_result,
 } from '@/lib/chat/realtime/use_chat_realtime'
-
-import { use_admin_reception_support_presence } from './admin_support_presence'
-import { use_support_lifecycle } from './use_support_lifecycle'
 
 const component_file = 'components/admin/reception/live.tsx'
 
@@ -34,14 +27,6 @@ export type admin_reception_live_props = {
     action: chat_action_realtime_payload,
     inserted_index: number,
   ) => chat_realtime_hook_append_result | void
-  on_support_action: (action: chat_action_realtime_payload) => void
-  on_typing?: (payload: chat_typing_payload) => void
-  on_presence?: (payload: chat_presence_payload) => void
-  active_typing_identity_ref?: RefObject<{
-    user_uuid: string | null
-    participant_uuid: string | null
-    role: string | null
-  }>
   realtime_messages_channel_ref: RefObject<RealtimeChannel | null>
 }
 
@@ -67,13 +52,6 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
     })
   }, [props.admin_participant_uuid, props.admin_user_uuid, room_uuid])
 
-  const lifecycle = use_support_lifecycle({
-    room_uuid: props.room_uuid,
-    admin_user_uuid: props.admin_user_uuid,
-    admin_participant_uuid: props.admin_participant_uuid,
-    on_support_action: props.on_support_action,
-  })
-
   use_chat_realtime({
     owner: 'admin',
     room_uuid: props.room_uuid,
@@ -85,25 +63,9 @@ export default function AdminReceptionLive(props: admin_reception_live_props) {
     tier: props.staff_tier,
     source_channel: 'admin',
     receiver_participant_uuid: props.staff_participant_uuid,
-    active_typing_identity_ref: props.active_typing_identity_ref,
     export_messages_channel_ref: props.realtime_messages_channel_ref,
     on_message: props.on_message,
     on_action: props.on_action,
-    on_typing: props.on_typing,
-    on_presence: props.on_presence,
-  })
-
-  use_admin_reception_support_presence({
-    room_uuid: props.room_uuid,
-    staff_participant_uuid: props.staff_participant_uuid,
-    staff_user_uuid: props.staff_user_uuid,
-    staff_tier: props.staff_tier,
-    enabled: lifecycle.owner_registered,
-    support_session_ref: lifecycle.support_session_ref,
-    on_support_action: props.on_support_action,
-    on_recover_enter: () => {
-      void lifecycle.run_enter_support_room('visibility_focus')
-    },
   })
 
   return null
