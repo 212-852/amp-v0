@@ -15,12 +15,25 @@ import type {
   reception_room,
   reception_room_message,
 } from '@/lib/admin/reception/room'
-import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
+import {
+  append_chat_action_to_admin_timeline,
+  type chat_action_realtime_payload,
+} from '@/lib/chat/realtime/chat_actions'
 import {
   call_enter_support_room,
   call_leave_support_room,
   support_room_api_action_to_realtime,
 } from '@/lib/chat/realtime/support_room_client'
+import { use_chat_realtime } from '@/lib/chat/realtime/use_chat_realtime'
+import type { realtime_archived_message } from '@/lib/chat/realtime/row'
+import {
+  archived_message_to_timeline_message,
+  merge_timeline_message_rows,
+  type chat_room_timeline_message,
+} from '@/lib/chat/timeline_display'
+import { handle_chat_message_toast } from '@/lib/output/toast'
+import { resolve_realtime_message_subtitle_for_toast } from '@/lib/chat/realtime/toast_decision'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 type AdminReceptionRoomProps = {
   room_uuid: string
@@ -57,8 +70,13 @@ function current_owner_global(): typeof globalThis & {
 
 export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
   const pathname = `/admin/reception/${props.room_uuid}`
+  const [live_messages, set_live_messages] = useState<chat_room_timeline_message[]>(
+    () => props.messages,
+  )
   const [external_support_action, set_external_support_action] =
     useState<chat_action_realtime_payload | null>(null)
+  const realtime_messages_channel_ref = useRef<RealtimeChannel | null>(null)
+  const room_display_title_ref = useRef(props.customer_display_name)
   const support_session_ref =
     useRef<admin_support_session_ref_value | null>(null)
   const enter_session_ref = useRef<string | null>(null)
@@ -73,7 +91,156 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
     latest_room_uuid_ref.current = props.room_uuid
     admin_user_uuid_ref.current = props.admin_user_uuid
     admin_participant_uuid_ref.current = props.admin_participant_uuid
-  }, [props.admin_participant_uuid, props.admin_user_uuid, props.room_uuid])
+    room_display_title_ref.current = props.customer_display_name
+  }, [
+    props.admin_participant_uuid,
+    props.admin_user_uuid,
+    props.customer_display_name,
+    props.room_uuid,
+  ])
+
+  useEffect(() => {
+    set_live_messages(
+      merge_timeline_message_rows([], props.messages, 'initial_fetch').rows,
+    )
+  }, [props.messages, props.room_uuid])
+
+  useEffect(() => {
+    if (!external_support_action) {
+      return
+    }
+
+    if (external_support_action.room_uuid.trim() !== props.room_uuid.trim()) {
+      return
+    }
+
+    set_live_messages((previous) => {
+      const merged = append_chat_action_to_admin_timeline(
+        previous,
+        external_support_action,
+      )
+
+      return merged.appended ? merged.rows : previous
+    })
+  }, [external_support_action, props.room_uuid])
+
+  const handle_realtime_message = useCallback(
+    (archived: realtime_archived_message) => {
+      const active_room_focus = props.room_uuid.trim()
+      const mapped = archived_message_to_timeline_message({
+        archive_uuid: archived.archive_uuid,
+        room_uuid: archived.room_uuid,
+        sequence: archived.sequence,
+        created_at: archived.created_at,
+        bundle: archived.bundle,
+      })
+
+      let update_result = {
+        prev_count: 0,
+        next_count: 0,
+        dedupe_hit: false,
+      }
+
+      set_live_messages((previous) => {
+        const merged = merge_timeline_message_rows(
+          previous,
+          [mapped],
+          'realtime',
+        )
+
+        update_result = {
+          prev_count: previous.length,
+          next_count: merged.rows.length,
+          dedupe_hit: merged.duplicates_skipped.length > 0,
+        }
+
+        return merged.rows
+      })
+
+      if (!update_result.dedupe_hit) {
+        handle_chat_message_toast({
+          room_uuid: archived.room_uuid,
+          active_room_uuid: active_room_focus,
+          message_uuid: archived.archive_uuid,
+          sender_user_uuid: archived.sender_user_uuid ?? null,
+          sender_participant_uuid: archived.sender_participant_uuid ?? null,
+          sender_role: archived.sender_role ?? archived.bundle.sender ?? null,
+          active_user_uuid: props.staff_user_uuid,
+          active_participant_uuid: props.staff_participant_uuid,
+          active_role: 'admin',
+          role: 'admin',
+          tier: props.staff_tier,
+          source_channel: 'admin',
+          target_path: `/admin/reception/${archived.room_uuid}`,
+          phase: 'admin_reception_room_realtime_message',
+          is_scrolled_to_bottom: true,
+          subtitle: resolve_realtime_message_subtitle_for_toast(
+            archived,
+            room_display_title_ref.current,
+          ),
+          scroll_to_bottom: () => {},
+        })
+      }
+
+      return update_result
+    },
+    [
+      props.room_uuid,
+      props.staff_participant_uuid,
+      props.staff_tier,
+      props.staff_user_uuid,
+    ],
+  )
+
+  const handle_realtime_action = useCallback(
+    (action: chat_action_realtime_payload, _inserted_index: number) => {
+      let update_result = {
+        prev_count: 0,
+        next_count: 0,
+        dedupe_hit: false,
+      }
+
+      set_live_messages((previous) => {
+        const merged = append_chat_action_to_admin_timeline(previous, action)
+
+        update_result = {
+          prev_count: previous.length,
+          next_count: merged.rows.length,
+          dedupe_hit: !merged.appended,
+        }
+
+        return merged.appended ? merged.rows : previous
+      })
+
+      return update_result
+    },
+    [],
+  )
+
+  const append_live_timeline_messages = useCallback(
+    (addition: chat_room_timeline_message[]) => {
+      set_live_messages((previous) =>
+        merge_timeline_message_rows(previous, addition, 'realtime').rows,
+      )
+    },
+    [],
+  )
+
+  use_chat_realtime({
+    owner: 'admin',
+    room_uuid: props.room_uuid,
+    active_room_uuid: props.room_uuid,
+    enabled: Boolean(props.room_uuid.trim()),
+    participant_uuid: props.staff_participant_uuid,
+    user_uuid: props.staff_user_uuid,
+    role: 'admin',
+    tier: props.staff_tier,
+    source_channel: 'admin',
+    receiver_participant_uuid: props.staff_participant_uuid,
+    export_messages_channel_ref: realtime_messages_channel_ref,
+    on_message: handle_realtime_message,
+    on_action: handle_realtime_action,
+  })
 
   useEffect(() => {
     const admin_participant_uuid = props.admin_participant_uuid.trim()
@@ -452,7 +619,7 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
 
       <AdminChat
         key={props.room_uuid}
-        messages={props.messages}
+        messages={live_messages}
         load_failed={props.load_failed}
         room_uuid={props.room_uuid}
         staff_participant_uuid={props.staff_participant_uuid}
@@ -462,7 +629,8 @@ export default function AdminReceptionRoom(props: AdminReceptionRoomProps) {
         room_display_title={props.customer_display_name}
         admin_user_uuid={props.admin_user_uuid}
         admin_participant_uuid={props.admin_participant_uuid}
-        external_support_action={external_support_action}
+        realtime_messages_channel_ref={realtime_messages_channel_ref}
+        on_append_timeline_messages={append_live_timeline_messages}
       />
     </section>
   )

@@ -202,6 +202,7 @@ export type chat_realtime_debug_payload = {
   tier?: string | null
   source_channel?: string | null
   subscribe_status?: string | null
+  subscription_status?: string | null
   channel_name?: string | null
   event_name?: string | null
   schema?: string | null

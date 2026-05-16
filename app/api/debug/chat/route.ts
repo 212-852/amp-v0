@@ -16,6 +16,7 @@ type chat_debug_body = {
   tier?: unknown
   source_channel?: unknown
   subscribe_status?: unknown
+  subscription_status?: unknown
   channel_name?: unknown
   event_name?: unknown
   schema?: unknown
@@ -169,6 +170,7 @@ export async function POST(request: Request) {
       tier: string_or_null(body?.tier),
       source_channel: string_or_null(body?.source_channel) ?? 'web',
       subscribe_status: string_or_null(body?.subscribe_status),
+      subscription_status: string_or_null(body?.subscription_status),
       channel_name: string_or_null(body?.channel_name),
       event_name: string_or_null(body?.event_name),
       schema: string_or_null(body?.schema),

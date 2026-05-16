@@ -4,8 +4,9 @@ import { useEffect } from 'react'
 
 import AdminChatTimeline from '@/components/admin/c'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
-import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_actions'
 import type { chat_room_timeline_message } from '@/lib/chat/timeline_display'
+import type { RealtimeChannel } from '@supabase/supabase-js'
+import type { RefObject } from 'react'
 
 type AdminChatProps = {
   messages: chat_room_timeline_message[]
@@ -18,7 +19,8 @@ type AdminChatProps = {
   room_display_title: string
   admin_user_uuid: string
   admin_participant_uuid: string
-  external_support_action?: chat_action_realtime_payload | null
+  realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
+  on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
 }
 
 const component_file = 'components/admin/chat.tsx'

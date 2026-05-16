@@ -74,6 +74,7 @@ type hook_debug_payload = {
   prev_count?: number | null
   next_count?: number | null
   subscribe_status?: string | null
+  subscription_status?: string | null
   error_message?: string | null
 }
 
@@ -116,7 +117,9 @@ function emit_chat_realtime_hook_debug(
     next_count: payload.next_count ?? null,
     prev_message_count: payload.prev_count ?? null,
     next_message_count: payload.next_count ?? null,
-    subscribe_status: payload.subscribe_status ?? null,
+    subscribe_status: payload.subscribe_status ?? payload.subscription_status ?? null,
+    subscription_status:
+      payload.subscription_status ?? payload.subscribe_status ?? null,
     error_message: payload.error_message ?? null,
     phase: 'use_chat_realtime',
   })
@@ -129,6 +132,7 @@ export function use_chat_realtime(input: use_chat_realtime_input) {
   const on_action_ref = useRef(input.on_action)
   const on_typing_ref = useRef(input.on_typing)
   const on_presence_ref = useRef(input.on_presence)
+  const mount_debug_key_ref = useRef<string | null>(null)
 
   useEffect(() => {
     on_message_ref.current = input.on_message
@@ -152,22 +156,20 @@ export function use_chat_realtime(input: use_chat_realtime_input) {
   const owner = input.owner
   const listener_scope = listener_scope_for_owner(owner)
   const source_channel = input.source_channel ?? (owner === 'admin' ? 'admin' : 'web')
-  const receiver_participant_uuid =
-    input.receiver_participant_uuid?.trim() ||
-    input.participant_uuid?.trim() ||
-    null
 
-  useEffect(() => {
-    if (!enabled) {
-      return
+  if (enabled) {
+    const mount_key = `${owner}:${room_uuid}`
+
+    if (mount_debug_key_ref.current !== mount_key) {
+      mount_debug_key_ref.current = mount_key
+      emit_chat_realtime_hook_debug('chat_realtime_hook_mounted', {
+        owner,
+        room_uuid,
+        active_room_uuid,
+        subscription_status: 'HOOK_MOUNTED',
+      })
     }
-
-    emit_chat_realtime_hook_debug('chat_realtime_hook_mounted', {
-      owner,
-      room_uuid,
-      active_room_uuid,
-    })
-  }, [active_room_uuid, enabled, owner, room_uuid])
+  }
 
   useEffect(() => {
     if (!enabled) {
@@ -179,6 +181,7 @@ export function use_chat_realtime(input: use_chat_realtime_input) {
       room_uuid,
       active_room_uuid,
       source_channel,
+      subscription_status: 'SUBSCRIBE_REQUESTED',
     })
 
     const supabase = create_browser_supabase()
@@ -189,6 +192,7 @@ export function use_chat_realtime(input: use_chat_realtime_input) {
         room_uuid,
         active_room_uuid,
         subscribe_status: 'SUPABASE_CLIENT_UNAVAILABLE',
+        subscription_status: 'SUPABASE_CLIENT_UNAVAILABLE',
         error_message: 'create_browser_supabase_returned_null',
         ignored_reason: 'supabase_client_unavailable',
       })
@@ -216,6 +220,7 @@ export function use_chat_realtime(input: use_chat_realtime_input) {
           room_uuid,
           active_room_uuid,
           subscribe_status: status,
+          subscription_status: status,
           error_message,
         })
       },

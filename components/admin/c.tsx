@@ -21,20 +21,10 @@ import {
   sync_chat_typing_presence,
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
-import {
-  append_chat_action_to_admin_timeline,
-  emit_chat_action_realtime_rendered,
-  type chat_action_realtime_payload,
-} from '@/lib/chat/realtime/chat_actions'
-import { use_chat_realtime } from '@/lib/chat/realtime/use_chat_realtime'
 import { create_browser_supabase } from '@/lib/db/browser'
-import { handle_chat_message_toast } from '@/lib/output/toast'
-import {
-  compute_message_list_near_bottom,
-  resolve_realtime_message_subtitle_for_toast,
-} from '@/lib/chat/realtime/toast_decision'
+import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_decision'
 import type { RealtimeChannel } from '@supabase/supabase-js'
-import type { realtime_archived_message } from '@/lib/chat/realtime/row'
+import type { RefObject } from 'react'
 
 const component_file = 'components/admin/c.tsx'
 
@@ -49,7 +39,8 @@ type AdminChatTimelineProps = {
   room_display_title: string
   admin_user_uuid: string
   admin_participant_uuid: string
-  external_support_action?: chat_action_realtime_payload | null
+  realtime_messages_channel_ref?: RefObject<RealtimeChannel | null>
+  on_append_timeline_messages?: (messages: chat_room_timeline_message[]) => void
 }
 
 function emit_timeline_duplicate_skips(skips: timeline_item_duplicate_skip[]) {
@@ -168,11 +159,14 @@ export default function AdminChatTimeline({
   staff_user_uuid,
   staff_tier,
   room_display_title,
-  external_support_action,
+  realtime_messages_channel_ref: parent_messages_channel_ref,
+  on_append_timeline_messages,
 }: AdminChatTimelineProps) {
   const bottom_ref = useRef<HTMLDivElement | null>(null)
   const message_list_scroll_ref = useRef<HTMLDivElement | null>(null)
-  const messages_channel_ref = useRef<RealtimeChannel | null>(null)
+  const local_messages_channel_ref = useRef<RealtimeChannel | null>(null)
+  const messages_channel_ref =
+    parent_messages_channel_ref ?? local_messages_channel_ref
   const typing_broadcast_channel_ref = useRef<RealtimeChannel | null>(null)
   const typing_rows_ref = useRef<Map<string, chat_typing_payload>>(new Map())
   const [rows, set_rows] = useState(() =>
@@ -229,64 +223,19 @@ export default function AdminChatTimeline({
     staff_user_uuid,
   ])
 
-  const apply_support_action_to_timeline = useCallback(
-    (
-      action: chat_action_realtime_payload,
-      source: 'realtime' | 'enter_api' | 'leave_api',
-      inserted_index: number | null = null,
-    ) => {
-      const locked_room = latest_room_uuid_ref.current
-
-      const focus = (latest_room_uuid_ref.current ?? '').trim()
-
-      if (action.room_uuid.trim() !== focus) {
-        return
-      }
-
-      const near_bottom_before = compute_message_list_near_bottom(
-        message_list_scroll_ref.current,
-      )
-
-      set_rows((previous) => {
-        const merged = append_chat_action_to_admin_timeline(previous, action)
-
-        if (!merged.appended) {
-          return previous
-        }
-
-        return merged.rows
-      })
-
-      emit_chat_action_realtime_rendered({
-        room_uuid: locked_room,
-        active_room_uuid: locked_room,
-        action,
-        inserted_index: inserted_index ?? 0,
-        source_channel: 'admin',
-        phase: `admin_chat_support_action_${source}`,
-      })
-
-      if (near_bottom_before) {
-        bottom_ref.current?.scrollIntoView({
-          block: 'end',
-          behavior: 'smooth',
-        })
-      }
-    },
-    [],
-  )
-
   useEffect(() => {
-    if (!external_support_action) {
-      return
-    }
+    set_rows(
+      merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
+    )
 
-    if (external_support_action.room_uuid !== latest_room_uuid_ref.current) {
-      return
-    }
+    const frame = window.requestAnimationFrame(() => {
+      bottom_ref.current?.scrollIntoView({ block: 'end' })
+    })
 
-    apply_support_action_to_timeline(external_support_action, 'enter_api')
-  }, [apply_support_action_to_timeline, external_support_action])
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [initial_messages, room_uuid])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -356,149 +305,6 @@ export default function AdminChatTimeline({
 
     update_jump_button_visibility(!near_bottom)
   }, [update_jump_button_visibility])
-
-  const handle_realtime_message = useCallback(
-    (archived: realtime_archived_message) => {
-      const active_room_focus = (latest_room_uuid_ref.current ?? '').trim()
-      const mapped = archived_message_to_timeline_message({
-        archive_uuid: archived.archive_uuid,
-        room_uuid: archived.room_uuid,
-        sequence: archived.sequence,
-        created_at: archived.created_at,
-        bundle: archived.bundle,
-      })
-      const near_bottom_before = compute_message_list_near_bottom(
-        message_list_scroll_ref.current,
-      )
-
-      let update_result = {
-        prev_count: 0,
-        next_count: 0,
-        dedupe_hit: false,
-      }
-
-      set_rows((previous) => {
-        const result = merge_timeline_rows(previous, [mapped], 'realtime')
-
-        update_result = {
-          prev_count: result.prev_message_count,
-          next_count: result.next_message_count,
-          dedupe_hit: result.dedupe_hit,
-        }
-
-        return result.rows
-      })
-
-      if (!update_result.dedupe_hit) {
-        const dbg = admin_rt_ctx_ref.current
-
-        handle_chat_message_toast({
-          room_uuid: archived.room_uuid,
-          active_room_uuid: active_room_focus,
-          message_uuid: archived.archive_uuid,
-          sender_user_uuid: archived.sender_user_uuid ?? null,
-          sender_participant_uuid: archived.sender_participant_uuid ?? null,
-          sender_role: archived.sender_role ?? archived.bundle.sender ?? null,
-          active_user_uuid: dbg.staff_user_uuid,
-          active_participant_uuid: dbg.staff_participant_uuid,
-          active_role: 'admin',
-          role: 'admin',
-          tier: dbg.staff_tier,
-          source_channel: 'admin',
-          target_path: `/admin/reception/${archived.room_uuid}`,
-          phase: 'admin_chat_detail_realtime_message',
-          is_scrolled_to_bottom: near_bottom_before,
-          subtitle: resolve_realtime_message_subtitle_for_toast(
-            archived,
-            room_display_title_ref.current,
-          ),
-          scroll_to_bottom: () => {
-            bottom_ref.current?.scrollIntoView({
-              block: 'end',
-              behavior: 'smooth',
-            })
-          },
-        })
-      }
-
-      return update_result
-    },
-    [],
-  )
-
-  const handle_realtime_action = useCallback(
-    (action: chat_action_realtime_payload, inserted_index: number) => {
-      const locked_room = latest_room_uuid_ref.current
-      const near_bottom_before = compute_message_list_near_bottom(
-        message_list_scroll_ref.current,
-      )
-
-      let update_result = {
-        prev_count: 0,
-        next_count: 0,
-        dedupe_hit: false,
-      }
-
-      set_rows((previous) => {
-        const merged = append_chat_action_to_admin_timeline(previous, action)
-
-        update_result = {
-          prev_count: previous.length,
-          next_count: merged.rows.length,
-          dedupe_hit: !merged.appended,
-        }
-
-        return merged.appended ? merged.rows : previous
-      })
-
-      if (!update_result.dedupe_hit) {
-        emit_chat_action_realtime_rendered({
-          room_uuid: locked_room,
-          active_room_uuid: locked_room,
-          action,
-          inserted_index,
-          source_channel: 'admin',
-          phase: 'admin_chat_support_action_realtime',
-        })
-
-        if (near_bottom_before) {
-          bottom_ref.current?.scrollIntoView({
-            block: 'end',
-            behavior: 'smooth',
-          })
-        }
-      }
-
-      return update_result
-    },
-    [],
-  )
-
-  const handle_realtime_typing = useCallback(
-    (typing: chat_typing_payload) => {
-      typing_rows_ref.current.set(typing.participant_uuid, typing)
-      refresh_typing_lines()
-      schedule_typing_refresh()
-    },
-    [refresh_typing_lines, schedule_typing_refresh],
-  )
-
-  use_chat_realtime({
-    owner: 'admin',
-    room_uuid,
-    enabled: Boolean(room_uuid.trim()),
-    participant_uuid: staff_participant_uuid,
-    user_uuid: staff_user_uuid,
-    role: 'admin',
-    tier: staff_tier,
-    source_channel: 'admin',
-    receiver_participant_uuid: staff_participant_uuid,
-    active_typing_identity_ref,
-    export_messages_channel_ref: messages_channel_ref,
-    on_message: handle_realtime_message,
-    on_action: handle_realtime_action,
-    on_typing: handle_realtime_typing,
-  })
 
   useEffect(() => {
     if (!room_uuid.trim()) {
@@ -679,9 +485,14 @@ export default function AdminChatTimeline({
 
       const mapped = returned.map(archived_payload_to_reception_message)
 
-      set_rows(
-        (previous) => merge_timeline_rows(previous, mapped, 'realtime').rows,
-      )
+      if (on_append_timeline_messages) {
+        on_append_timeline_messages(mapped)
+      } else {
+        set_rows(
+          (previous) => merge_timeline_rows(previous, mapped, 'realtime').rows,
+        )
+      }
+
       set_reply_text('')
     } catch (error) {
       console.error('[admin_reception] submit_reply_failed', error)
