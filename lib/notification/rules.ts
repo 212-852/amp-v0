@@ -2,6 +2,7 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
+import { derive_presence_recent_within_ms } from '@/lib/chat/presence/rules'
 
 export type notification_kind_key = 'chat' | 'reservation' | 'announcement'
 
@@ -364,6 +365,8 @@ async function resolve_line_identity_exists(
   return !result.error && (result.data?.length ?? 0) > 0
 }
 
+const foreground_presence_within_ms = 5 * 60 * 1000
+
 async function resolve_foreground_app_open(
   participant_uuid: string | null,
 ): Promise<boolean> {
@@ -373,7 +376,7 @@ async function resolve_foreground_app_open(
 
   const result = await supabase
     .from('participants')
-    .select('is_active, last_seen_at')
+    .select('last_seen_at, is_typing, typing_at')
     .eq('participant_uuid', participant_uuid)
     .maybeSingle()
 
@@ -382,25 +385,22 @@ async function resolve_foreground_app_open(
   }
 
   const row = result.data as {
-    is_active?: boolean | null
     last_seen_at?: string | null
+    is_typing?: boolean | null
+    typing_at?: string | null
   }
 
-  if (row.is_active !== true) {
-    return false
-  }
+  const last_seen_at =
+    typeof row.last_seen_at === 'string' ? row.last_seen_at : null
+  const typing_at =
+    typeof row.typing_at === 'string' ? row.typing_at : null
 
-  if (!row.last_seen_at) {
-    return true
-  }
-
-  const last_seen = new Date(row.last_seen_at).getTime()
-
-  if (Number.isNaN(last_seen)) {
-    return true
-  }
-
-  return Date.now() - last_seen < 5 * 60 * 1000
+  return derive_presence_recent_within_ms({
+    last_seen_at,
+    is_typing: row.is_typing === true,
+    typing_at,
+    active_within_ms: foreground_presence_within_ms,
+  })
 }
 
 export async function user_allows_notification(input: {

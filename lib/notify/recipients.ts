@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { is_reception_state } from '@/lib/admin/reception/rules'
+import { derive_presence_recent_within_ms } from '@/lib/chat/presence/rules'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 
@@ -243,10 +244,9 @@ export async function load_admin_notify_recipients(input: {
 
   const presence_result = await supabase
     .from('participants')
-    .select('participant_uuid, user_uuid, is_active, last_seen_at')
+    .select('participant_uuid, user_uuid, last_seen_at, is_typing, typing_at')
     .eq('room_uuid', room_uuid)
     .in('role', ['admin', 'concierge'])
-    .eq('is_active', true)
 
   if (presence_result.error) {
     return {
@@ -256,7 +256,7 @@ export async function load_admin_notify_recipients(input: {
     }
   }
 
-  const now = Date.now()
+  const admin_page_open_within_ms = 5 * 60 * 1000
   const active_admin_count = (presence_result.data ?? []).filter((row) => {
     const user_uuid =
       typeof row.user_uuid === 'string' && row.user_uuid.length > 0
@@ -268,14 +268,19 @@ export async function load_admin_notify_recipients(input: {
     }
 
     const raw = row.last_seen_at
+    const last_seen_at =
+      typeof raw === 'string' && raw.length > 0 ? raw : null
+    const typing_at =
+      typeof row.typing_at === 'string' && row.typing_at.length > 0
+        ? row.typing_at
+        : null
 
-    if (typeof raw !== 'string' || raw.length === 0) {
-      return true
-    }
-
-    const last_seen = new Date(raw).getTime()
-
-    return !Number.isNaN(last_seen) && now - last_seen < 5 * 60 * 1000
+    return derive_presence_recent_within_ms({
+      last_seen_at,
+      is_typing: row.is_typing === true,
+      typing_at,
+      active_within_ms: admin_page_open_within_ms,
+    })
   }).length
 
   return {

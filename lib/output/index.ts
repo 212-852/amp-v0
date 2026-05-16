@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type { archived_message } from '@/lib/chat/archive'
+import { derive_presence_recent_from_timestamps } from '@/lib/chat/presence/rules'
 import { debug_event } from '@/lib/debug'
 import { supabase } from '@/lib/db/supabase'
 import { resolve_chat_external_notification_decision } from '@/lib/notification/rules'
@@ -101,20 +102,34 @@ export async function output_chat_bundles(
   const participant_presence = is_admin_reply
     ? await supabase
         .from('participants')
-        .select('is_active, last_channel, last_seen_at')
+        .select('last_channel, last_seen_at, is_typing, typing_at')
         .eq('participant_uuid', input.room.participant_uuid)
         .maybeSingle()
     : null
   const active_row =
     (participant_presence?.data as
       | {
-          is_active?: boolean | null
           last_channel?: string | null
           last_seen_at?: string | null
+          is_typing?: boolean | null
+          typing_at?: string | null
         }
       | null) ?? null
+  const presence_recent =
+    active_row &&
+    derive_presence_recent_from_timestamps({
+      last_seen_at:
+        typeof active_row.last_seen_at === 'string'
+          ? active_row.last_seen_at
+          : null,
+      is_typing: active_row.is_typing === true,
+      typing_at:
+        typeof active_row.typing_at === 'string'
+          ? active_row.typing_at
+          : null,
+    })
   const user_active_channel =
-    active_row?.is_active === true &&
+    presence_recent &&
     (active_row.last_channel === 'web' ||
       active_row.last_channel === 'pwa' ||
       active_row.last_channel === 'liff')

@@ -10,6 +10,7 @@ import {
   type message_insert_row,
   type realtime_archived_message,
 } from './row'
+import { derive_presence_recent_from_timestamps } from '@/lib/chat/presence/rules'
 import { is_self_typing_broadcast } from './typing_identity'
 
 export type chat_realtime_role = 'user' | 'admin' | 'concierge' | 'bot'
@@ -345,16 +346,23 @@ function presence_payload_from_participant_row(
       ? user_uuid_raw.trim()
       : null
 
+  const last_seen_at =
+    typeof row.last_seen_at === 'string' ? row.last_seen_at : null
+  const typing_at = typeof row.typing_at === 'string' ? row.typing_at : null
+
   return {
     room_uuid: row.room_uuid,
     participant_uuid: row.participant_uuid,
     user_uuid,
     role: typeof row.role === 'string' ? row.role : null,
-    is_active: row.is_active === true,
+    is_active: derive_presence_recent_from_timestamps({
+      last_seen_at,
+      is_typing: row.is_typing === true,
+      typing_at,
+    }),
     is_typing: row.is_typing === true,
-    last_seen_at:
-      typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
-    typing_at: typeof row.typing_at === 'string' ? row.typing_at : null,
+    last_seen_at,
+    typing_at,
     source_channel:
       typeof row.last_channel === 'string' ? row.last_channel : null,
   }

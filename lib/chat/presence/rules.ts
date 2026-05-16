@@ -110,6 +110,50 @@ export function typing_timestamp_is_fresh(
   return now.getTime() - typed_at <= typing_timeout_ms
 }
 
+/**
+ * App-layer "recently in room" from last_seen_at / typing (no DB is_active).
+ */
+export function derive_presence_recent_within_ms(input: {
+  last_seen_at: string | null
+  is_typing: boolean
+  typing_at: string | null
+  active_within_ms: number
+  now?: Date
+}): boolean {
+  const now = input.now ?? new Date()
+
+  if (typing_timestamp_is_fresh(input.typing_at, input.is_typing, now)) {
+    return true
+  }
+
+  if (!input.last_seen_at) {
+    return false
+  }
+
+  const t = new Date(input.last_seen_at).getTime()
+
+  if (Number.isNaN(t)) {
+    return false
+  }
+
+  return now.getTime() - t <= input.active_within_ms
+}
+
+export function derive_presence_recent_from_timestamps(input: {
+  last_seen_at: string | null
+  is_typing: boolean
+  typing_at: string | null
+  now?: Date
+}): boolean {
+  return derive_presence_recent_within_ms({
+    last_seen_at: input.last_seen_at,
+    is_typing: input.is_typing,
+    typing_at: input.typing_at,
+    active_within_ms: admin_support_active_within_ms,
+    now: input.now,
+  })
+}
+
 function typing_is_fresh(
   participant: presence_participant,
   now: Date,
@@ -202,10 +246,6 @@ export function admin_support_tier_from_row(
   }
 
   const age = now.getTime() - last
-
-  if (row.is_active === false) {
-    return age <= admin_support_idle_within_ms ? 'idle' : 'left'
-  }
 
   if (age <= admin_support_active_within_ms) {
     return 'active'

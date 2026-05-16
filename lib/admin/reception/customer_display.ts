@@ -21,7 +21,6 @@ export type reception_customer_participant_row = {
   display_name?: string | null
   nickname?: string | null
   label?: string | null
-  is_active?: boolean | null
   is_typing?: boolean | null
   last_seen_at?: string | null
   typing_at?: string | null

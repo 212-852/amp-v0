@@ -9,6 +9,7 @@ import {
   admin_support_active_within_ms,
   decide_active_participants,
   decide_typing_participants,
+  derive_presence_recent_from_timestamps,
   is_participant_role,
   resolve_chat_room_list_preview_text,
   type participant_role,
@@ -24,7 +25,6 @@ type participant_row = {
   user_uuid: string | null
   visitor_uuid: string | null
   role: string | null
-  is_active: boolean | null
   is_typing: boolean | null
   last_seen_at: string | null
   typing_at: string | null
@@ -102,7 +102,11 @@ function to_presence_participant(input: {
     display_name: participant_name(input),
     avatar_url: participant_avatar(input),
     role: normalize_role(input.row.role),
-    is_active: input.row.is_active === true,
+    is_active: derive_presence_recent_from_timestamps({
+      last_seen_at: input.row.last_seen_at,
+      is_typing: input.row.is_typing === true,
+      typing_at: input.row.typing_at,
+    }),
     is_typing: input.row.is_typing === true,
     last_seen_at: input.row.last_seen_at,
     typing_at: input.row.typing_at,
@@ -182,7 +186,6 @@ export async function mark_room_entered(input: {
   last_channel?: participant_surface_channel | null
 }) {
   const patch: Record<string, unknown> = {
-    is_active: true,
     last_seen_at: new Date().toISOString(),
   }
 
@@ -228,7 +231,7 @@ export async function mark_room_left(input: {
       payload: {
         room_uuid: input.room_uuid,
         admin_participant_uuid: input.participant_uuid,
-        is_active: null,
+        presence_recent: null,
         last_seen_at: null,
       },
     })
@@ -239,7 +242,6 @@ export async function mark_room_left(input: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
       patch: {
-        is_active: false,
         is_typing: false,
         typing_at: null,
         last_seen_at: now,
@@ -253,7 +255,7 @@ export async function mark_room_left(input: {
         payload: {
           room_uuid: input.room_uuid,
           admin_participant_uuid: input.participant_uuid,
-          is_active: false,
+          presence_recent: false,
           last_seen_at: now,
           error_code: null,
           error_message: null,
@@ -268,7 +270,7 @@ export async function mark_room_left(input: {
         payload: {
           room_uuid: input.room_uuid,
           admin_participant_uuid: input.participant_uuid,
-          is_active: null,
+          presence_recent: null,
           last_seen_at: null,
           error_code: 'presence_patch_failed',
           error_message:
@@ -409,10 +411,10 @@ export async function mark_typing_stopped(input: {
 type admin_support_event_row = {
   user_uuid: string | null
   role: string | null
-  is_active: boolean | null
   is_typing: boolean | null
   last_seen_at: string | null
   last_channel: string | null
+  typing_at: string | null
 }
 
 async function load_participant_admin_support_event_payload(input: {
@@ -426,12 +428,13 @@ async function load_participant_admin_support_event_payload(input: {
   is_active: boolean
   is_typing: boolean
   last_seen_at: string | null
+  typing_at: string | null
   source_channel: string | null
 } | null> {
   const snap = await supabase
     .from('participants')
     .select(
-      'user_uuid, role, is_active, is_typing, last_seen_at, last_channel',
+      'user_uuid, role, is_typing, last_seen_at, last_channel, typing_at',
     )
     .eq('room_uuid', input.room_uuid)
     .eq('participant_uuid', input.participant_uuid)
@@ -449,16 +452,24 @@ async function load_participant_admin_support_event_payload(input: {
   const role = typeof row.role === 'string' ? row.role : null
   const last_channel =
     typeof row.last_channel === 'string' ? row.last_channel : null
+  const typing_at =
+    typeof row.typing_at === 'string' ? row.typing_at : null
 
   return {
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
     user_uuid,
     role,
-    is_active: row.is_active === true,
+    is_active: derive_presence_recent_from_timestamps({
+      last_seen_at:
+        typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+      is_typing: row.is_typing === true,
+      typing_at,
+    }),
     is_typing: row.is_typing === true,
     last_seen_at:
       typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+    typing_at,
     source_channel: last_channel,
   }
 }
@@ -515,6 +526,13 @@ export async function mark_admin_support_heartbeat(input: {
   participant_uuid: string
 }) {
   const before = await load_participant_admin_support_event_payload(input)
+  const before_recent = before
+    ? derive_presence_recent_from_timestamps({
+        last_seen_at: before.last_seen_at,
+        is_typing: before.is_typing,
+        typing_at: before.typing_at,
+      })
+    : false
 
   await mark_room_entered({
     room_uuid: input.room_uuid,
@@ -538,7 +556,7 @@ export async function mark_admin_support_heartbeat(input: {
     },
   })
 
-  if (before && before.is_active === false) {
+  if (before && !before_recent) {
     await debug_event({
       category: 'admin_chat',
       event: 'admin_presence_recovered',
@@ -636,11 +654,14 @@ export async function expire_admin_support_presence(input: {
   room_uuid?: string | null
 }): Promise<Array<{ room_uuid: string; participant_uuid: string }>> {
   const cutoff_ms = Date.now() - admin_support_active_within_ms
+  const cutoff_iso = new Date(cutoff_ms).toISOString()
   let query = supabase
     .from('participants')
-    .select('participant_uuid, room_uuid, user_uuid, role, is_active, is_typing, last_seen_at, last_channel')
+    .select(
+      'participant_uuid, room_uuid, user_uuid, role, is_typing, last_seen_at, typing_at, last_channel',
+    )
     .in('role', ['admin', 'concierge'])
-    .eq('is_active', true)
+    .or(`last_seen_at.is.null,last_seen_at.lt.${cutoff_iso}`)
 
   if (input.room_uuid) {
     query = query.eq('room_uuid', input.room_uuid)
@@ -657,9 +678,9 @@ export async function expire_admin_support_presence(input: {
     room_uuid: string | null
     user_uuid: string | null
     role: string | null
-    is_active: boolean | null
     is_typing: boolean | null
     last_seen_at: string | null
+    typing_at: string | null
     last_channel: string | null
   }>
   const expired: Array<{ room_uuid: string; participant_uuid: string }> = []
@@ -674,6 +695,16 @@ export async function expire_admin_support_presence(input: {
       : NaN
 
     if (!Number.isNaN(last_seen_ms) && last_seen_ms >= cutoff_ms) {
+      continue
+    }
+
+    if (
+      derive_presence_recent_from_timestamps({
+        last_seen_at: row.last_seen_at,
+        is_typing: row.is_typing === true,
+        typing_at: row.typing_at,
+      })
+    ) {
       continue
     }
 
@@ -696,7 +727,6 @@ export async function expire_admin_support_presence(input: {
       room_uuid: row.room_uuid,
       participant_uuid: row.participant_uuid,
       patch: {
-        is_active: false,
         is_typing: false,
         typing_at: null,
       },
@@ -715,7 +745,7 @@ export async function expire_admin_support_presence(input: {
         admin_user_uuid: row.user_uuid,
         user_uuid: row.user_uuid,
         role: row.role,
-        is_active: false,
+        presence_recent: false,
         is_typing: false,
         visibility_state: null,
         last_seen_at: row.last_seen_at,
@@ -798,7 +828,7 @@ export async function list_room_presence(input: {
   const participants_result = await supabase
     .from('participants')
     .select(
-      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, is_active, is_typing, last_seen_at, typing_at',
+      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, is_typing, last_seen_at, typing_at',
     )
     .eq('room_uuid', input.room_uuid)
 
@@ -938,7 +968,7 @@ export async function list_reception_room_cards(
   const participants_result = await supabase
     .from('participants')
     .select(
-      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, last_channel, status, is_active, is_typing, last_seen_at, typing_at',
+      'participant_uuid, room_uuid, user_uuid, visitor_uuid, role, last_channel, status, is_typing, last_seen_at, typing_at',
     )
     .in('room_uuid', room_uuids)
 

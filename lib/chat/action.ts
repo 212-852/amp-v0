@@ -77,6 +77,7 @@ import {
   mark_participant_last_channel,
   mark_room_entered,
 } from '@/lib/chat/presence/action'
+import { derive_presence_recent_from_timestamps } from '@/lib/chat/presence/rules'
 import { resolve_room_subject } from '@/lib/admin/reception/room'
 import {
   create_handoff_memo as create_handoff_memo_core,
@@ -2561,7 +2562,9 @@ export async function handle_admin_reception_room_opened(
       .maybeSingle(),
     supabase
       .from('participants')
-      .select('participant_uuid, is_active')
+      .select(
+        'participant_uuid, last_seen_at, is_typing, typing_at',
+      )
       .eq('room_uuid', room_uuid)
       .eq('user_uuid', admin_uuid)
       .in('role', ['admin', 'concierge'])
@@ -2597,9 +2600,22 @@ export async function handle_admin_reception_room_opened(
     (admin_participant_pick.data as { participant_uuid?: string } | null)
       ?.participant_uuid ?? null,
   )
-  let admin_already_active =
-    (admin_participant_pick.data as { is_active?: boolean } | null)
-      ?.is_active === true
+  const pick_row = admin_participant_pick.data as {
+    participant_uuid?: string
+    last_seen_at?: string | null
+    is_typing?: boolean | null
+    typing_at?: string | null
+  } | null
+
+  let admin_already_active = derive_presence_recent_from_timestamps({
+    last_seen_at:
+      typeof pick_row?.last_seen_at === 'string'
+        ? pick_row.last_seen_at
+        : null,
+    is_typing: pick_row?.is_typing === true,
+    typing_at:
+      typeof pick_row?.typing_at === 'string' ? pick_row.typing_at : null,
+  })
 
   const client_participant_candidate = clean_uuid(
     typeof body?.admin_participant_uuid === 'string'
@@ -2610,7 +2626,9 @@ export async function handle_admin_reception_room_opened(
   if (client_participant_candidate) {
     const verify = await supabase
       .from('participants')
-      .select('participant_uuid, user_uuid, role, is_active')
+      .select(
+        'participant_uuid, user_uuid, role, last_seen_at, is_typing, typing_at',
+      )
       .eq('room_uuid', room_uuid)
       .eq('participant_uuid', client_participant_candidate)
       .maybeSingle()
@@ -2622,7 +2640,9 @@ export async function handle_admin_reception_room_opened(
     const vr = verify.data as {
       user_uuid?: string
       role?: string
-      is_active?: boolean
+      last_seen_at?: string | null
+      is_typing?: boolean | null
+      typing_at?: string | null
     } | null
 
     const role_l = (vr?.role ?? '').trim().toLowerCase()
@@ -2640,7 +2660,13 @@ export async function handle_admin_reception_room_opened(
     }
 
     admin_participant_uuid = client_participant_candidate
-    admin_already_active = vr.is_active === true
+    admin_already_active = derive_presence_recent_from_timestamps({
+      last_seen_at:
+        typeof vr?.last_seen_at === 'string' ? vr.last_seen_at : null,
+      is_typing: vr?.is_typing === true,
+      typing_at:
+        typeof vr?.typing_at === 'string' ? vr.typing_at : null,
+    })
   }
 
   if (!user_participant_uuid || !bot_participant_uuid) {
@@ -2767,6 +2793,20 @@ export async function handle_admin_reception_room_opened(
     }
   }
 
+  await debug_event({
+    category: 'admin_chat',
+    event: 'enter_support_room_realtime_emit_expected',
+    payload: {
+      room_uuid,
+      admin_user_uuid: admin_uuid,
+      admin_participant_uuid,
+      customer_participant_uuid: user_participant_uuid,
+      payload_message_uuid:
+        archived_support_messages[0]?.archive_uuid ?? null,
+      payload_action_uuid: bundle.bundle_uuid,
+    },
+  })
+
   await emit_chat_realtime_support_debug({
     event: 'chat_support_started_insert_succeeded',
     room_uuid,
@@ -2885,6 +2925,18 @@ export async function handle_admin_reception_room_opened(
     },
   })
 
+  await debug_event({
+    category: 'admin_chat',
+    event: 'enter_support_room_action_insert_started',
+    payload: {
+      room_uuid,
+      admin_user_uuid: admin_uuid,
+      admin_participant_uuid,
+      customer_participant_uuid: user_participant_uuid,
+      discord_thread_action_id: discord_thread_action_id ?? null,
+    },
+  })
+
   const inserted = await insert_support_started_action(supabase, {
     room_uuid,
     admin_user_uuid: admin_uuid,
@@ -2945,6 +2997,18 @@ export async function handle_admin_reception_room_opened(
         action_uuid,
         ...support_started_debug_participants,
         insert_payload_keys: inserted.insert_payload_keys,
+      },
+    })
+
+    await debug_event({
+      category: 'admin_chat',
+      event: 'enter_support_room_action_insert_succeeded',
+      payload: {
+        room_uuid,
+        admin_user_uuid: admin_uuid,
+        admin_participant_uuid,
+        customer_participant_uuid: user_participant_uuid,
+        action_uuid,
       },
     })
 
@@ -3053,7 +3117,7 @@ export async function record_admin_support_left_session(input: {
   const [staff_pick, user_pick, bot_pick, room_pick] = await Promise.all([
     supabase
       .from('participants')
-      .select('participant_uuid, user_uuid, last_seen_at, is_active')
+      .select('participant_uuid, user_uuid, last_seen_at, is_typing, typing_at')
       .eq('room_uuid', room_uuid)
       .eq('participant_uuid', staff_participant_uuid)
       .maybeSingle(),
@@ -3082,14 +3146,21 @@ export async function record_admin_support_left_session(input: {
   const staff_row = staff_pick.data as {
     user_uuid?: string
     last_seen_at?: unknown
-    is_active?: boolean | null
+    is_typing?: boolean | null
+    typing_at?: string | null
   } | null
 
   const raw_staff_seen = staff_row?.last_seen_at
   const staff_last_seen_at =
     typeof raw_staff_seen === 'string' ? raw_staff_seen : null
+  const staff_typing_at =
+    typeof staff_row?.typing_at === 'string' ? staff_row.typing_at : null
 
-  const staff_is_active = staff_row?.is_active === true
+  const staff_is_active = derive_presence_recent_from_timestamps({
+    last_seen_at: staff_last_seen_at,
+    is_typing: staff_row?.is_typing === true,
+    typing_at: staff_typing_at,
+  })
 
   const admin_uuid = clean_uuid(staff_row?.user_uuid ?? null)
   const user_participant_uuid = clean_uuid(

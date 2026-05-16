@@ -3,6 +3,7 @@ import 'server-only'
 import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import {
   build_admin_support_ui_strings,
+  derive_presence_recent_from_timestamps,
   is_participant_role,
   typing_timestamp_is_fresh,
   type admin_support_staff_row,
@@ -106,7 +107,6 @@ type participant_row = {
   display_name?: string | null
   nickname?: string | null
   label?: string | null
-  is_active?: boolean | null
   is_typing?: boolean | null
   last_seen_at?: string | null
   typing_at?: string | null
@@ -869,7 +869,12 @@ async function enrich_room_cards(
         last_seen_at: string_value(p.last_seen_at ?? null),
         typing_at: string_value(p.typing_at ?? null),
         is_typing: p.is_typing === true,
-        is_active: p.is_active === true,
+        is_active: derive_presence_recent_from_timestamps({
+          last_seen_at: string_value(p.last_seen_at ?? null),
+          is_typing: p.is_typing === true,
+          typing_at: string_value(p.typing_at ?? null),
+          now: now_support,
+        }),
       })
     }
 
@@ -895,7 +900,12 @@ async function enrich_room_cards(
       preview: preview_resolved,
       user_participant_uuid: string_value(customer?.participant_uuid ?? null),
       user_is_typing: typing_snapshot.is_typing,
-      user_is_online: customer?.is_active === true,
+      user_is_online: derive_presence_recent_from_timestamps({
+        last_seen_at: string_value(customer?.last_seen_at ?? null),
+        is_typing: typing_snapshot.is_typing,
+        typing_at: string_value(customer?.typing_at ?? null),
+        now: now_support,
+      }),
       user_last_seen_at: string_value(customer?.last_seen_at ?? null),
       presence_source_channel: normalize_reception_channel(customer?.last_channel),
       user_typing_at: typing_snapshot.typing_at,
