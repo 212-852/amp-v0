@@ -10,6 +10,9 @@ import {
 import { useUserChat } from '@/components/chat/context'
 import { use_session_profile } from '@/components/session/profile'
 import type { archived_message } from '@/lib/chat/archive'
+import { use_message_realtime } from '@/lib/chat/realtime/use_message_realtime'
+import type { realtime_archived_message } from '@/lib/chat/realtime/row'
+import { use_typing_realtime } from '@/lib/chat/realtime/use_typing_realtime'
 import {
   chat_action_to_archived_message,
   emit_chat_action_realtime_rendered,
@@ -19,6 +22,7 @@ import {
   cleanup_chat_actions_realtime,
   subscribe_chat_actions_realtime,
 } from '@/lib/chat/realtime/chat_actions'
+import { normalize_locale } from '@/lib/locale/action'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
@@ -432,6 +436,8 @@ export function WebChat({
     messages: active_messages,
     staff_typing_label,
     is_chat_open,
+    room_realtime_channel_ref,
+    set_staff_typing_label,
   } = chat
   const append_realtime_message_ref = useRef(append_realtime_message)
 
@@ -455,6 +461,12 @@ export function WebChat({
 
   const did_initial_scroll_ref = useRef(false)
   const prev_message_count_ref = useRef(0)
+  const active_typing_identity_ref = useRef({
+    user_uuid: null as string | null,
+    participant_uuid: null as string | null,
+    role: null as string | null,
+  })
+
   useEffect(() => {
     append_realtime_message_ref.current = append_realtime_message
     latest_room_uuid_ref.current = room_uuid
@@ -465,6 +477,11 @@ export function WebChat({
       user_uuid: session?.user_uuid ?? null,
       tier: session?.tier ?? null,
       source_channel: session?.source_channel ?? 'web',
+    }
+    active_typing_identity_ref.current = {
+      user_uuid: session?.user_uuid ?? null,
+      participant_uuid,
+      role: 'user',
     }
   }, [
     active_room_uuid,
@@ -478,6 +495,78 @@ export function WebChat({
   ])
 
   const page_room_uuid = room_uuid.trim()
+  const active_participant_uuid = participant_uuid.trim()
+  const message_realtime_enabled = Boolean(
+    page_room_uuid && active_participant_uuid,
+  )
+
+  const {
+    handle_typing: handle_realtime_typing,
+    handle_presence: handle_realtime_presence,
+    clear_peer_participant: clear_peer_typing_on_message,
+  } = use_typing_realtime({
+    owner: 'user',
+    room_uuid: page_room_uuid,
+    active_room_uuid: page_room_uuid,
+    enabled: message_realtime_enabled,
+    participant_uuid: active_participant_uuid,
+    user_uuid: session?.user_uuid ?? null,
+    role: 'user',
+    tier: session?.tier ?? null,
+    source_channel: session?.source_channel ?? 'web',
+    channel_subscribe: 'shared',
+    locale: normalize_locale(locale),
+    active_typing_identity_ref,
+    on_label_change: set_staff_typing_label,
+  })
+
+  const handle_realtime_message = useCallback(
+    (message: realtime_archived_message) => {
+      if (
+        message.bundle.bundle_type === 'room_action_log' &&
+        !end_user_should_see_room_action_log_bundle(message.bundle)
+      ) {
+        return {
+          prev_count: 0,
+          next_count: 0,
+          dedupe_hit: true,
+        }
+      }
+
+      const sender_participant_uuid = message.sender_participant_uuid?.trim()
+
+      if (sender_participant_uuid) {
+        clear_peer_typing_on_message(sender_participant_uuid)
+      }
+
+      const update_result = append_realtime_message_ref.current(message)
+
+      return {
+        prev_count: update_result.prev_message_count,
+        next_count: update_result.next_message_count,
+        dedupe_hit: update_result.dedupe_hit,
+      }
+    },
+    [clear_peer_typing_on_message],
+  )
+
+  use_message_realtime({
+    owner: 'user',
+    room_uuid: page_room_uuid,
+    active_room_uuid: page_room_uuid,
+    enabled: message_realtime_enabled,
+    participant_uuid: active_participant_uuid,
+    user_uuid: session?.user_uuid ?? null,
+    role: 'user',
+    tier: session?.tier ?? null,
+    source_channel: session?.source_channel ?? 'web',
+    include_typing_broadcast: true,
+    active_typing_identity_ref,
+    export_messages_channel_ref: room_realtime_channel_ref,
+    on_message: handle_realtime_message,
+    on_typing: handle_realtime_typing,
+    on_presence: handle_realtime_presence,
+  })
 
   const handle_realtime_action = useCallback(
     (action: chat_action_realtime_payload, inserted_index: number) => {

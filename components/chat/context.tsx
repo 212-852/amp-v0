@@ -26,8 +26,6 @@ import { compute_message_list_near_bottom } from '@/lib/chat/realtime/toast_deci
 import type { chat_locale } from '@/lib/chat/message'
 import type { room_mode } from '@/lib/chat/room'
 
-import { UserChatRealtimeBridge } from '@/components/chat/user_realtime_bridge'
-
 type chat_room_client_state = {
   room_uuid: string | null
   participant_uuid: string | null
@@ -407,16 +405,6 @@ export function UserChatProvider({
 
   return (
     <UserChatContext.Provider value={value}>
-      {room_state.room_uuid && room_state.participant_uuid ? (
-        <UserChatRealtimeBridge
-          room_uuid={room_state.room_uuid}
-          participant_uuid={room_state.participant_uuid}
-          locale={room_state.locale}
-          room_realtime_channel_ref={room_realtime_channel_ref}
-          append_realtime_message={append_realtime_message}
-          on_staff_typing_label_change={set_staff_typing_label}
-        />
-      ) : null}
       {children}
     </UserChatContext.Provider>
   )
