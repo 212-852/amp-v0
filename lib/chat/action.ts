@@ -42,6 +42,11 @@ import { deliver_line_text_reply } from '@/lib/output/line'
 import type { chat_locale } from './message'
 import { insert_support_started_action, merge_support_started_notify_meta_into_chat_action } from '@/lib/actions/support_started'
 import { insert_support_left_action } from '@/lib/actions/support_left'
+import {
+  build_support_session_key,
+  decide_admin_support_enter,
+  read_support_session_key_from_meta,
+} from '@/lib/actions/support_session'
 import { public_actions_table_name } from '@/lib/actions/table'
 import { notify } from '@/lib/notify'
 import {
@@ -2439,6 +2444,7 @@ export type admin_reception_room_open_request_body = {
   room_uuid?: string | null
   admin_user_uuid?: string | null
   admin_participant_uuid?: string | null
+  client_session_id?: string | null
   trigger_source?: string | null
 }
 
@@ -2453,12 +2459,13 @@ async function latest_admin_support_action(input: {
   actor_display_name: string | null
   actor_user_uuid: string | null
   source_channel: string | null
+  support_session_key: string | null
   existing_action_count: number
 } | null> {
   const picked = await supabase
     .from(public_actions_table_name())
     .select(
-      'action_uuid, action_type, body, created_at, actor_display_name, actor_user_uuid, source_channel',
+      'action_uuid, action_type, body, created_at, actor_display_name, actor_user_uuid, source_channel, meta_json',
     )
     .eq('room_uuid', input.room_uuid)
     .eq('actor_participant_uuid', input.admin_participant_uuid)
@@ -2478,6 +2485,7 @@ async function latest_admin_support_action(input: {
     actor_display_name?: unknown
     actor_user_uuid?: unknown
     source_channel?: unknown
+    meta_json?: unknown
   }>
   const row = rows[0] ?? null
 
@@ -2501,8 +2509,17 @@ async function latest_admin_support_action(input: {
       typeof row.actor_user_uuid === 'string' ? row.actor_user_uuid : null,
     source_channel:
       typeof row.source_channel === 'string' ? row.source_channel : null,
+    support_session_key: read_support_session_key_from_meta(row.meta_json),
     existing_action_count: rows.length,
   }
+}
+
+function resolve_client_session_id(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
+  }
+
+  return 'legacy'
 }
 
 export async function handle_admin_reception_room_opened(
@@ -2654,6 +2671,15 @@ export async function handle_admin_reception_room_opened(
     }
   }
 
+  const client_session_id = resolve_client_session_id(body?.client_session_id)
+  const current_session_key = admin_participant_uuid
+    ? build_support_session_key({
+        room_uuid,
+        admin_participant_uuid,
+        client_session_id,
+      })
+    : ''
+
   if (admin_participant_uuid) {
     const latest_support = await latest_admin_support_action({
       room_uuid,
@@ -2661,61 +2687,101 @@ export async function handle_admin_reception_room_opened(
     })
 
     if (latest_support?.action_type === 'support_started') {
-      const room_mode_row = await supabase
-        .from('rooms')
-        .select('mode')
-        .eq('room_uuid', room_uuid)
-        .maybeSingle()
-      const support_mode_dup =
-        typeof room_mode_row.data?.mode === 'string'
-          ? room_mode_row.data.mode
-          : null
+      const enter_decision = decide_admin_support_enter({
+        latest_action_type: latest_support.action_type,
+        latest_action_uuid: latest_support.action_uuid,
+        latest_created_at: latest_support.created_at,
+        latest_session_key: latest_support.support_session_key,
+        current_session_key,
+      })
 
-      const duplicate_payload = {
+      const session_debug_base = {
         room_uuid,
         admin_user_uuid: admin_uuid,
         admin_participant_uuid,
-        support_mode: support_mode_dup,
-        action_uuid: latest_support.action_uuid,
+        latest_action_uuid: latest_support.action_uuid,
+        latest_created_at: latest_support.created_at,
+        latest_session_key: latest_support.support_session_key,
+        current_session_key,
         existing_action_uuid: latest_support.action_uuid,
         existing_action_count: latest_support.existing_action_count,
-        created_at: latest_support.created_at,
-        skipped_reason: 'latest_support_started_without_later_left',
         trigger_source,
-        reason: 'latest_support_started_without_later_left',
       }
 
-      await debug_event({
-        category: 'admin_chat',
-        event: 'support_started_existing_active_found',
-        payload: duplicate_payload,
-      })
+      if (enter_decision.decision === 'skip') {
+        const duplicate_payload = {
+          ...session_debug_base,
+          skipped_reason: enter_decision.skipped_reason,
+          reason: enter_decision.skipped_reason,
+        }
 
-      await debug_event({
-        category: 'admin_chat',
-        event: 'support_started_duplicate_skipped',
-        payload: duplicate_payload,
-      })
+        await debug_event({
+          category: 'admin_chat',
+          event: 'support_started_existing_active_found',
+          payload: duplicate_payload,
+        })
 
-      return {
-        status: 200,
-        body: {
-          ok: true,
-          skipped: true,
-          action: latest_support.action_uuid
-            ? build_support_room_action_api_payload({
-                room_uuid,
-                action_uuid: latest_support.action_uuid,
-                action_type: 'support_started',
-                body: latest_support.body ?? '',
-                created_at:
-                  latest_support.created_at ?? new Date().toISOString(),
-                actor_display_name: latest_support.actor_display_name ?? '',
-                actor_user_uuid: latest_support.actor_user_uuid ?? admin_uuid,
-                source_channel: latest_support.source_channel ?? 'web',
-              })
-            : undefined,
-        },
+        await debug_event({
+          category: 'admin_chat',
+          event: 'support_started_duplicate_skipped',
+          payload: duplicate_payload,
+        })
+
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            skipped: true,
+            action: latest_support.action_uuid
+              ? build_support_room_action_api_payload({
+                  room_uuid,
+                  action_uuid: latest_support.action_uuid,
+                  action_type: 'support_started',
+                  body: latest_support.body ?? '',
+                  created_at:
+                    latest_support.created_at ?? new Date().toISOString(),
+                  actor_display_name: latest_support.actor_display_name ?? '',
+                  actor_user_uuid:
+                    latest_support.actor_user_uuid ?? admin_uuid,
+                  source_channel: latest_support.source_channel ?? 'web',
+                })
+              : undefined,
+          },
+        }
+      }
+
+      if (enter_decision.decision === 'close_stale_and_create') {
+        await debug_event({
+          category: 'admin_chat',
+          event: 'support_stale_session_detected',
+          payload: {
+            ...session_debug_base,
+            stale_session_key: enter_decision.stale_session_key,
+            skipped_reason: 'stale_session_closed',
+          },
+        })
+
+        const stale_left = await record_admin_support_left_session({
+          room_uuid,
+          staff_participant_uuid: admin_participant_uuid,
+          leave_reason: 'stale_session_closed',
+          previous_active_room_uuid: room_uuid,
+          next_active_room_uuid: room_uuid,
+          support_session_key: enter_decision.stale_session_key,
+        })
+
+        if (stale_left.ok && !stale_left.skipped) {
+          await debug_event({
+            category: 'admin_chat',
+            event: 'support_stale_session_closed',
+            payload: {
+              ...session_debug_base,
+              stale_session_key: enter_decision.stale_session_key,
+              created_action_uuid: stale_left.action?.action_uuid ?? null,
+              action_uuid: stale_left.action?.action_uuid ?? null,
+            },
+          })
+        }
       }
     }
   }
@@ -2985,6 +3051,7 @@ export async function handle_admin_reception_room_opened(
     customer_display_name: customer_display_name.slice(0, 500),
     admin_internal_name,
     admin_display_label: display_name,
+    support_session_key: current_session_key || null,
   })
 
   if (!inserted.ok) {
@@ -3510,6 +3577,7 @@ export async function record_admin_support_left_session(input: {
     admin_internal_name,
     admin_display_label: display_name,
     support_session_key,
+    leave_reason: input.leave_reason ?? null,
   })
 
   if (!inserted.ok) {

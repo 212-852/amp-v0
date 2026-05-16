@@ -9,6 +9,7 @@ import {
   call_leave_support_room,
   support_room_api_action_to_realtime,
 } from '@/lib/chat/realtime/support_room_client'
+import { get_or_create_admin_support_client_session_id } from '@/lib/support/lifecycle/client_session'
 
 const component_file = 'lib/support/lifecycle/client.ts'
 const support_lifecycle_owner = component_file
@@ -52,6 +53,7 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
   const owner_registered_ref = useRef(false)
   const [owner_registered, set_owner_registered] = useState(false)
   const lifecycle_mounted_room_ref = useRef<string | null>(null)
+  const client_session_id_ref = useRef<string | null>(null)
   const latest_room_uuid_ref = useRef(input.room_uuid)
   const admin_user_uuid_ref = useRef(input.admin_user_uuid)
   const admin_participant_uuid_ref = useRef(input.admin_participant_uuid)
@@ -156,10 +158,19 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
     })
 
     try {
+      if (!client_session_id_ref.current) {
+        client_session_id_ref.current =
+          get_or_create_admin_support_client_session_id()
+      }
+
+      const client_session_id = client_session_id_ref.current
+      const support_session_key = `${room_uuid}|${admin_participant_uuid}|${client_session_id}`
+
       const result = await call_enter_support_room({
         room_uuid,
         admin_user_uuid,
         admin_participant_uuid,
+        client_session_id,
         trigger_source,
       })
 
@@ -175,7 +186,7 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
           room_uuid,
           admin_participant_uuid,
           enter_action_uuid: result.action.action_uuid,
-          support_session_key: `${room_uuid}|${admin_participant_uuid}|${result.action.action_uuid}`,
+          support_session_key,
           left_sent: false,
           existing_left_action_uuid: null,
         }

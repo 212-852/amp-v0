@@ -195,6 +195,8 @@ export function resolve_debug_rule(input: {
     'support_started_action_create_started',
     'support_started_action_create_succeeded',
     'support_started_duplicate_skipped',
+    'support_stale_session_detected',
+    'support_stale_session_closed',
     'admin_reception_page_rendered',
     'admin_reception_visible_room_rendered',
     'admin_reception_room_rendered',

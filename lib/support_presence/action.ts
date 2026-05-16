@@ -98,6 +98,10 @@ export async function enter_support_room(request: Request) {
     typeof raw?.trigger_source === 'string' && raw.trigger_source.trim()
       ? raw.trigger_source.trim()
       : null
+  const client_session_id =
+    typeof raw?.client_session_id === 'string' && raw.client_session_id.trim()
+      ? raw.client_session_id.trim()
+      : null
 
   await debug_event({
     category: 'admin_chat',
@@ -121,6 +125,7 @@ export async function enter_support_room(request: Request) {
       room_uuid: room_uuid ?? null,
       admin_user_uuid: request_admin_user_uuid,
       admin_participant_uuid: request_admin_participant_uuid,
+      client_session_id,
       trigger_source,
     })
     const skipped = result.body.ok === true && result.body.skipped === true
