@@ -28,6 +28,7 @@ export const control = {
     discord_category_allowlist: [
       'pwa',
       'chat_message',
+      'chat_realtime',
       'user_message',
       'admin_chat',
     ],

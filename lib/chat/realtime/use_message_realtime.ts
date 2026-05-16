@@ -127,7 +127,6 @@ export function use_message_realtime(input: use_message_realtime_input) {
   const on_message_ref = useRef(input.on_message)
   const on_typing_ref = useRef(input.on_typing)
   const on_presence_ref = useRef(input.on_presence)
-  const mount_debug_key_ref = useRef<string | null>(null)
 
   useEffect(() => {
     on_message_ref.current = input.on_message
@@ -154,26 +153,12 @@ export function use_message_realtime(input: use_message_realtime_input) {
       return
     }
 
-    const mount_key = `${owner}:${room_uuid}`
-
-    if (mount_debug_key_ref.current === mount_key) {
-      return
-    }
-
-    mount_debug_key_ref.current = mount_key
-
     emit_message_realtime_debug('message_realtime_mounted', {
       owner,
       room_uuid,
       active_room_uuid,
       subscribe_status: 'HOOK_MOUNTED',
     })
-  }, [active_room_uuid, enabled, owner, room_uuid])
-
-  useEffect(() => {
-    if (!enabled) {
-      return
-    }
 
     emit_message_realtime_debug('message_realtime_subscribe_started', {
       owner,

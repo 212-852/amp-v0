@@ -737,9 +737,10 @@ export function WebChat({
   }, [participant_uuid, room_uuid, session?.source_channel])
 
 
-  const render_messages = active_room_uuid === room_uuid
-    ? active_messages
-    : messages
+  const hydrated_room_uuid = (active_room_uuid ?? '').trim()
+  const page_room_uuid = room_uuid.trim()
+  const render_messages =
+    hydrated_room_uuid === page_room_uuid ? active_messages : messages
 
   const visible_messages = render_messages.filter((message) => {
     if (message.bundle.bundle_type === 'room_action_log') {
@@ -771,7 +772,7 @@ export function WebChat({
     <div className="flex min-h-0 flex-1 flex-col">
       <WebChatMessageTimeline
         room_uuid={room_uuid}
-        active_room_uuid={active_room_uuid ?? room_uuid}
+        active_room_uuid={page_room_uuid}
         participant_uuid={participant_uuid}
         user_uuid={session?.user_uuid ?? null}
         tier={session?.tier ?? null}

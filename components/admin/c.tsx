@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown } from 'lucide-react'
 
 import PawIcon from '@/components/icons/paw'
@@ -174,8 +174,10 @@ export default function AdminChatTimeline({
   const local_messages_channel_ref = useRef<RealtimeChannel | null>(null)
   const messages_channel_ref =
     parent_messages_channel_ref ?? local_messages_channel_ref
-  const [rows, set_rows] = useState(() =>
-    merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
+  const display_rows = useMemo(
+    () =>
+      merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
+    [initial_messages],
   )
   const [reply_text, set_reply_text] = useState('')
   const [is_sending, set_is_sending] = useState(false)
@@ -220,10 +222,6 @@ export default function AdminChatTimeline({
   ])
 
   useEffect(() => {
-    set_rows(
-      merge_timeline_message_rows([], initial_messages, 'initial_fetch').rows,
-    )
-
     const frame = window.requestAnimationFrame(() => {
       bottom_ref.current?.scrollIntoView({ block: 'end' })
     })
@@ -231,7 +229,7 @@ export default function AdminChatTimeline({
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [initial_messages, room_uuid])
+  }, [display_rows.length, room_uuid])
 
   const handle_realtime_message = useCallback(
     (archived: realtime_archived_message) => {
@@ -243,29 +241,21 @@ export default function AdminChatTimeline({
         bundle: archived.bundle as message_bundle_payload,
       })
 
-      let update_result = {
-        prev_count: 0,
-        next_count: 0,
-        dedupe_hit: false,
-      }
-
-      set_rows((previous) => {
-        const merged = merge_timeline_rows(previous, [mapped], 'realtime')
-
-        update_result = {
-          prev_count: merged.prev_message_count,
-          next_count: merged.next_message_count,
-          dedupe_hit: merged.dedupe_hit,
+      if (!on_append_timeline_messages) {
+        return {
+          prev_count: 0,
+          next_count: 0,
+          dedupe_hit: true,
         }
-
-        return merged.rows
-      })
-
-      if (on_append_timeline_messages) {
-        on_append_timeline_messages([mapped])
       }
 
-      return update_result
+      const appended = on_append_timeline_messages([mapped])
+
+      return {
+        prev_count: appended.prev_count,
+        next_count: appended.next_count,
+        dedupe_hit: appended.dedupe_hit,
+      }
     },
     [on_append_timeline_messages],
   )
@@ -315,7 +305,7 @@ export default function AdminChatTimeline({
     return () => {
       window.cancelAnimationFrame(frame)
     }
-  }, [display_peer_typing_label, rows.length])
+  }, [display_peer_typing_label, display_rows.length])
 
   const update_jump_button_visibility = useCallback((visible: boolean) => {
     if (show_jump_button_ref.current === visible) {
@@ -475,10 +465,6 @@ export default function AdminChatTimeline({
 
       if (on_append_timeline_messages) {
         on_append_timeline_messages(mapped)
-      } else {
-        set_rows(
-          (previous) => merge_timeline_rows(previous, mapped, 'realtime').rows,
-        )
       }
 
       set_reply_text('')
@@ -506,13 +492,13 @@ export default function AdminChatTimeline({
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
             メッセージを読み込めませんでした
           </div>
-        ) : rows.length === 0 ? (
+        ) : display_rows.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-neutral-200 px-4 py-10 text-center text-sm font-medium text-neutral-500">
             メッセージはまだありません
           </div>
         ) : (
           <ol className="flex flex-col gap-2">
-            {rows.map((message) => {
+            {display_rows.map((message) => {
               if (message.bundle_type === 'room_action_log') {
                 return (
                   <li
