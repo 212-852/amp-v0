@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 
+import { use_admin_reception } from '@/components/admin/reception/provider'
 import AdminAssistantNekoSvg from './neko'
 
 type AdminAssistantProps = {
@@ -20,7 +21,12 @@ export default function AdminAssistant({
   display_name,
 }: AdminAssistantProps) {
   void display_name
+  const { reception_state } = use_admin_reception()
   const [is_open, set_is_open] = useState(false)
+
+  if (reception_state !== 'open') {
+    return null
+  }
 
   return (
     <>

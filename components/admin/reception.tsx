@@ -53,15 +53,7 @@ export default function AdminReception() {
   }, [load_rooms, reception_state])
 
   if (reception_state !== 'open') {
-    return (
-      <section
-        aria-label="Admin reception inbox"
-        className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-8 text-center text-sm font-medium text-neutral-500"
-        data-debug="actual_admin_top_renderer"
-      >
-        Chat reception is OFF
-      </section>
-    )
+    return null
   }
 
   return (

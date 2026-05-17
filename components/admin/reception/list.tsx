@@ -71,6 +71,10 @@ export default function AdminReceptionList({
     })
   }, [load_rooms, reception_state])
 
+  if (reception_state !== 'open') {
+    return null
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <header>
@@ -127,11 +131,7 @@ export default function AdminReceptionList({
         </div>
       </section>
 
-      {!reception_open ? (
-        <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
-          Chat reception is OFF
-        </div>
-      ) : !rooms_load_ok ? (
+      {!rooms_load_ok ? (
         <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
           チャット一覧を読み込めませんでした
         </div>
