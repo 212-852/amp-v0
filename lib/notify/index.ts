@@ -15,7 +15,10 @@ import { send_line_push_notify } from './line'
 import { send_push_notify } from './push'
 import { env } from '@/lib/config/env'
 import { next_public_liff_id } from '@/lib/config/line/env'
-import { resolve_chat_external_notification_decision } from '@/lib/notification/rules'
+import {
+  load_notification_preferences_for_user,
+  resolve_chat_external_notification_decision,
+} from '@/lib/notification/rules'
 import {
   load_concierge_recipients,
   load_admin_notify_recipients,
@@ -27,12 +30,14 @@ import {
 } from './recipients'
 import {
   format_support_left_notify_content,
+  format_support_started_customer_line_copy,
   format_support_started_notify_content,
   normalize_line_notify_last_channel,
   resolve_concierge_targets,
   resolve_line_new_chat_display_copy,
   resolve_line_new_chat_open_url,
   resolve_notify_rule,
+  resolve_support_started_customer_line_route,
   should_send_notify,
   type notify_event,
 } from './rules'
@@ -347,6 +352,176 @@ async function emit_support_started_admin_chat_debug(
   })
 }
 
+type support_started_customer_line_debug_payload = {
+  room_uuid: string
+  action_uuid: string
+  customer_user_uuid: string | null
+  customer_participant_uuid: string | null
+  has_line_identity: boolean
+  line_enabled: boolean
+  selected_method: string | null
+  skipped_reason: string | null
+  error_code?: string | null
+  error_message?: string | null
+}
+
+async function emit_support_started_customer_line_debug(
+  event:
+    | 'customer_line_notification_rule_checked'
+    | 'customer_line_notification_send_started'
+    | 'customer_line_notification_send_succeeded'
+    | 'customer_line_notification_skipped',
+  payload: support_started_customer_line_debug_payload,
+) {
+  const { debug_event } = await import('@/lib/debug')
+
+  await debug_event({
+    category: 'admin_chat',
+    event,
+    payload: {
+      phase: 'deliver_support_started_customer_line',
+      ...payload,
+    },
+  })
+}
+
+async function deliver_support_started_customer_line(
+  event: Extract<notify_event, { event: 'support_started' }>,
+): Promise<{
+  delivered: boolean
+  delivery: notify_delivery_result | null
+}> {
+  const customer_user_uuid =
+    typeof event.customer_user_uuid === 'string' &&
+    event.customer_user_uuid.trim().length > 0
+      ? event.customer_user_uuid.trim()
+      : null
+  const customer_participant_uuid =
+    typeof event.customer_participant_uuid === 'string' &&
+    event.customer_participant_uuid.trim().length > 0
+      ? event.customer_participant_uuid.trim()
+      : null
+
+  const [route_decision, line_user_id, customer_preferences] = await Promise.all([
+    resolve_chat_external_notification_decision({
+      user_uuid: customer_user_uuid,
+      participant_uuid: customer_participant_uuid,
+      source_channel: event.source_channel,
+    }),
+    customer_user_uuid
+      ? load_line_provider_id_for_user(customer_user_uuid)
+      : Promise.resolve(null),
+    customer_user_uuid
+      ? load_notification_preferences_for_user(customer_user_uuid)
+      : Promise.resolve(null),
+  ])
+  const has_line_identity = Boolean(line_user_id)
+  const line_enabled = route_decision.line_enabled
+  const chat_notifications_enabled = customer_preferences?.kinds.chat === true
+
+  const route = resolve_support_started_customer_line_route({
+    customer_user_uuid,
+    has_line_identity,
+    line_enabled,
+    chat_notifications_enabled,
+    external_selected_route: route_decision.selected_route,
+    external_skipped_reason: route_decision.skipped_reason,
+  })
+
+  const base_debug: support_started_customer_line_debug_payload = {
+    room_uuid: event.room_uuid,
+    action_uuid: event.action_uuid,
+    customer_user_uuid,
+    customer_participant_uuid,
+    has_line_identity,
+    line_enabled,
+    selected_method: route.selected_method,
+    skipped_reason: route.skipped_reason,
+  }
+
+  await emit_support_started_customer_line_debug(
+    'customer_line_notification_rule_checked',
+    base_debug,
+  )
+
+  if (!route.selected_method || !line_user_id || !customer_user_uuid) {
+    await emit_support_started_customer_line_debug(
+      'customer_line_notification_skipped',
+      base_debug,
+    )
+
+    return { delivered: false, delivery: null }
+  }
+
+  const last_channel_raw = await load_participant_last_channel(
+    customer_participant_uuid,
+  )
+  const last_channel = normalize_line_notify_last_channel(last_channel_raw)
+  const display = format_support_started_customer_line_copy(event)
+  const app_origin = env.app_url.trim() || 'https://app.da-nya.com'
+  const open_url = resolve_line_new_chat_open_url({
+    last_channel,
+    room_uuid: event.room_uuid,
+    app_origin,
+    liff_id: next_public_liff_id(),
+  })
+
+  await emit_support_started_customer_line_debug(
+    'customer_line_notification_send_started',
+    {
+      ...base_debug,
+      selected_method: 'line',
+      skipped_reason: null,
+    },
+  )
+
+  try {
+    const line_result = await send_line_push_notify({
+      line_user_id,
+      user_uuid: customer_user_uuid,
+      room_uuid: event.room_uuid,
+      message_uuid: null,
+      last_channel,
+      open_url,
+      title: display.title,
+      body: display.body,
+      should_include_body: display.should_include_body,
+      selected_route: 'line',
+    })
+
+    if (!line_result.ok) {
+      throw new Error(line_result.error_message ?? 'line_push_failed')
+    }
+
+    await emit_support_started_customer_line_debug(
+      'customer_line_notification_send_succeeded',
+      {
+        ...base_debug,
+        selected_method: 'line',
+        skipped_reason: null,
+      },
+    )
+
+    return {
+      delivered: true,
+      delivery: { channel: 'line' },
+    }
+  } catch (error) {
+    await emit_support_started_customer_line_debug(
+      'customer_line_notification_skipped',
+      {
+        ...base_debug,
+        selected_method: 'line',
+        skipped_reason: 'line_push_failed',
+        error_code: 'line_push_failed',
+        error_message: error instanceof Error ? error.message : String(error),
+      },
+    )
+
+    return { delivered: false, delivery: null }
+  }
+}
+
 async function notification_route_trace(
   debug_event: string,
   payload: Record<string, unknown>,
@@ -525,6 +700,8 @@ async function deliver_support_started(
     })
   }
 
+  const customer_line = await deliver_support_started_customer_line(event)
+
   const discord_line = `${event.admin_display_label} が対応を開始しました`
 
   const thread_exists_before_discord_send = Boolean(
@@ -603,18 +780,31 @@ async function deliver_support_started(
     source_channel: event.source_channel,
   })
 
-  if (admin_route.outcome === 'delivered' || discord_webhook_delivered) {
+  if (
+    admin_route.outcome === 'delivered' ||
+    discord_webhook_delivered ||
+    customer_line.delivered
+  ) {
+    const notification_channel = customer_line.delivered
+      ? 'line'
+      : discord_webhook_delivered
+        ? 'discord_action_webhook_thread'
+        : admin_route.transport
+
     await emit_support_started_admin_chat_debug(
       'support_started_notify_succeeded',
       {
         ...base_debug_payload,
-        notification_channel: discord_webhook_delivered
-          ? 'discord_action_webhook_thread'
-          : admin_route.transport,
+        notification_channel,
+        customer_line_delivered: customer_line.delivered,
       },
     )
 
     const deliveries = [...admin_route.deliveries]
+
+    if (customer_line.delivery) {
+      deliveries.push(customer_line.delivery)
+    }
 
     if (discord_webhook_delivered && discord_delivery_action_id) {
       deliveries.push({
@@ -625,9 +815,11 @@ async function deliver_support_started(
 
     return support_started_notify_run(deliveries, {
       outcome: 'delivered',
-      transport: discord_webhook_delivered
-        ? 'discord_action_webhook'
-        : admin_route.transport,
+      transport: customer_line.delivered
+        ? 'line'
+        : discord_webhook_delivered
+          ? 'discord_action_webhook'
+          : admin_route.transport,
     })
   }
 

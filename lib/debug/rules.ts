@@ -383,6 +383,10 @@ export function resolve_debug_rule(input: {
     'support_started_discord_send_started',
     'support_started_discord_send_succeeded',
     'support_started_discord_send_failed',
+    'customer_line_notification_rule_checked',
+    'customer_line_notification_send_started',
+    'customer_line_notification_send_succeeded',
+    'customer_line_notification_skipped',
   ])
 
   if (

@@ -278,7 +278,7 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
     return {
       category: 'support_started',
       priority: 'normal',
-      channels: ['push', 'discord_action'],
+      channels: ['push', 'discord_action', 'line'],
     }
   }
 
@@ -452,6 +452,79 @@ export function format_support_left_notify_content(
   event: Extract<notify_event, { event: 'support_left' }>,
 ): string {
   return `${event.admin_display_label} が退出しました`
+}
+
+export function format_support_started_customer_line_copy(
+  event: Extract<notify_event, { event: 'support_started' }>,
+): { title: string; body: string; should_include_body: boolean } {
+  const title = `${event.admin_display_label} \u304c\u5bfe\u5fdc\u3092\u958b\u59cb\u3057\u307e\u3057\u305f`
+  const body =
+    '\u30b9\u30bf\u30c3\u30d5\u304c\u5bfe\u5fdc\u3092\u958b\u59cb\u3057\u307e\u3057\u305f\u3002\u30c1\u30e3\u30c3\u30c8\u3092\u3054\u78ba\u8a8d\u304f\u3060\u3055\u3044\u3002'
+
+  return {
+    title,
+    body,
+    should_include_body: true,
+  }
+}
+
+export function resolve_support_started_customer_line_route(input: {
+  customer_user_uuid: string | null
+  has_line_identity: boolean
+  line_enabled: boolean
+  chat_notifications_enabled: boolean
+  external_selected_route: 'push' | 'line' | null
+  external_skipped_reason: string | null
+}): {
+  selected_method: 'line' | null
+  skipped_reason: string | null
+} {
+  if (!input.customer_user_uuid) {
+    return {
+      selected_method: null,
+      skipped_reason: 'customer_user_missing',
+    }
+  }
+
+  if (!input.chat_notifications_enabled) {
+    return {
+      selected_method: null,
+      skipped_reason: 'chat_notifications_disabled',
+    }
+  }
+
+  if (!input.line_enabled) {
+    return {
+      selected_method: null,
+      skipped_reason: 'line_disabled',
+    }
+  }
+
+  if (!input.has_line_identity) {
+    return {
+      selected_method: null,
+      skipped_reason: 'line_identity_missing',
+    }
+  }
+
+  if (input.external_selected_route === 'line') {
+    return {
+      selected_method: 'line',
+      skipped_reason: null,
+    }
+  }
+
+  if (input.external_selected_route === 'push') {
+    return {
+      selected_method: null,
+      skipped_reason: 'primary_channel_push',
+    }
+  }
+
+  return {
+    selected_method: 'line',
+    skipped_reason: null,
+  }
 }
 
 export function format_support_started_notify_content(
