@@ -3,8 +3,8 @@ import 'server-only'
 export const debug_control = {
   debug_full: process.env.DEBUG_FULL === 'true',
   debug_presence: false,
-  debug_notify: true,
-  debug_line_notify: true,
+  debug_notify: false,
+  debug_line_notify: false,
   debug_admin_chat: false,
   handoff_memo_debug_enabled: false,
   admin_management_debug_enabled: false,

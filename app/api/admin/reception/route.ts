@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 
 import {
-  apply_admin_reception_request,
-  read_admin_reception,
-} from '@/lib/admin/reception/action'
-import { resolve_admin_reception_context } from '@/lib/admin/reception/context'
-import { debug_admin_reception } from '@/lib/admin/reception/debug'
-import type { reception_request_input } from '@/lib/admin/reception/rules'
+  apply_admin_availability_request,
+  read_admin_availability,
+  state_from_availability_record,
+} from '@/lib/admin/action'
+import { resolve_admin_context } from '@/lib/admin/context'
+import { debug_event } from '@/lib/debug'
+import type { admin_availability_request_input } from '@/lib/admin/rules'
 
 function serialize_error(error: unknown) {
   return {
@@ -19,7 +20,7 @@ function serialize_error(error: unknown) {
 }
 
 export async function GET() {
-  const context = await resolve_admin_reception_context()
+  const context = await resolve_admin_context()
 
   if (!context.ok) {
     return NextResponse.json(
@@ -29,17 +30,20 @@ export async function GET() {
   }
 
   try {
-    const record = await read_admin_reception(context.admin_user_uuid)
+    const record = await read_admin_availability(context.admin_user_uuid)
+    const state = state_from_availability_record(record)
 
     return NextResponse.json({
       ok: true,
       admin_user_uuid: context.admin_user_uuid,
-      state: record.state,
+      state,
+      is_available: record.is_available,
       updated_at: record.updated_at,
     })
   } catch (error) {
-    await debug_admin_reception({
-      event: 'admin_reception_failed',
+    await debug_event({
+      category: 'admin_management',
+      event: 'admin_availability_toggle_failed',
       payload: {
         step: 'get',
         admin_user_uuid: context.admin_user_uuid,
@@ -57,10 +61,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => null)) as
-      | reception_request_input
+      | admin_availability_request_input
       | null
 
-    const context = await resolve_admin_reception_context()
+    const context = await resolve_admin_context()
 
     if (!context.ok) {
       return NextResponse.json(
@@ -69,7 +73,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const result = await apply_admin_reception_request({
+    const result = await apply_admin_availability_request({
       admin_user_uuid: context.admin_user_uuid,
       body,
     })
@@ -81,15 +85,19 @@ export async function POST(request: Request) {
       )
     }
 
+    const state = state_from_availability_record(result.record)
+
     return NextResponse.json({
       ok: true,
       admin_user_uuid: context.admin_user_uuid,
-      state: result.record.state,
+      state,
+      is_available: result.record.is_available,
       updated_at: result.record.updated_at,
     })
   } catch (error) {
-    await debug_admin_reception({
-      event: 'admin_reception_failed',
+    await debug_event({
+      category: 'admin_management',
+      event: 'admin_availability_toggle_failed',
       payload: {
         step: 'unexpected',
         ...serialize_error(error),

@@ -127,6 +127,8 @@ export function resolve_debug_rule(input: {
     'profile_save_succeeded',
     'admin_internal_name_notify_failed',
     'admin_internal_name_notify_succeeded',
+    'admin_availability_toggle_failed',
+    'admin_availability_realtime_failed',
   ])
 
   if (
@@ -135,7 +137,9 @@ export function resolve_debug_rule(input: {
   ) {
     const is_failed =
       input.event === 'profile_save_failed' ||
-      input.event === 'admin_internal_name_notify_failed'
+      input.event === 'admin_internal_name_notify_failed' ||
+      input.event === 'admin_availability_toggle_failed' ||
+      input.event === 'admin_availability_realtime_failed'
 
     const is_save_trace_anchor =
       input.event === 'profile_fetch_started' ||
@@ -348,6 +352,17 @@ export function resolve_debug_rule(input: {
 
   if (
     input.category === 'admin_chat' &&
+    input.event === 'admin_availability_realtime_failed'
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'error',
+      channels: ['discord'],
+    }
+  }
+
+  if (
+    input.category === 'admin_chat' &&
     input.event === 'support_started_notify_discord_id_missing'
   ) {
     const has_error =
@@ -394,19 +409,28 @@ export function resolve_debug_rule(input: {
     input.category === 'admin_chat' &&
     support_started_ok_debug.has(input.event)
   ) {
-    const customer_notification_decision_events = new Set([
-      'customer_notification_rule_checked',
-      'customer_line_notification_rule_checked',
-      'customer_line_notification_send_started',
-      'customer_line_notification_send_succeeded',
-      'customer_line_notification_skipped',
-    ])
+    const skipped_reason =
+      typeof input.payload?.skipped_reason === 'string'
+        ? input.payload.skipped_reason
+        : null
+    const is_missing_resource =
+      input.event === 'customer_line_notification_skipped' &&
+      (skipped_reason === 'line_identity_missing' ||
+        skipped_reason === 'line_user_id_missing' ||
+        skipped_reason === 'push_missing' ||
+        skipped_reason === 'push_unavailable')
+    const is_failed =
+      input.event.endsWith('_failed') ||
+      skipped_reason === 'line_send_failed' ||
+      skipped_reason === 'line_push_failed' ||
+      skipped_reason === 'push_failed'
 
     return {
       category: 'admin_chat',
-      level: 'info',
+      level: is_failed ? 'error' : is_missing_resource ? 'warn' : 'info',
       channels:
-        customer_notification_decision_events.has(input.event) ||
+        is_failed ||
+        is_missing_resource ||
         debug_control.support_started_debug_enabled ||
         debug_control.debug_full
           ? ['discord']
@@ -726,12 +750,7 @@ export function resolve_debug_rule(input: {
     return {
       category: 'pwa',
       level: is_failed ? 'error' : 'info',
-      channels:
-        is_failed ||
-        (debug_control.debug_full &&
-          input.event === 'presence_channel_detected')
-          ? ['discord']
-          : [],
+      channels: is_failed || debug_control.debug_full ? ['discord'] : [],
     }
   }
 
@@ -1014,16 +1033,22 @@ export function resolve_debug_rule(input: {
   ) {
     const is_error =
       input.event === 'chat_realtime_subscribe_failed' ||
-      input.event === 'chat_typing_broadcast_failed'
-    const keep_notify_debug =
-      input.event === 'admin_notification_rule_checked' ||
-      input.event === 'admin_notification_skipped_receiver_active_in_app'
+      input.event === 'chat_typing_broadcast_failed' ||
+      input.event.endsWith('_failed')
+    const is_missing_resource =
+      input.event === 'admin_notification_skipped_offline' &&
+      (input.payload?.notification_skipped_reason ===
+        'push_subscription_missing' ||
+        input.payload?.notification_skipped_reason ===
+          'line_identity_missing' ||
+        input.payload?.notification_skipped_reason ===
+          'line_user_id_missing')
 
     return {
       category: 'chat_realtime',
-      level: is_error ? 'error' : 'warn',
+      level: is_error ? 'error' : is_missing_resource ? 'warn' : 'info',
       channels:
-        is_error || keep_notify_debug || debug_control.debug_full
+        is_error || is_missing_resource || debug_control.debug_full
           ? ['discord']
           : [],
     }

@@ -1,11 +1,8 @@
 // ============================================================================
 // Admin reception STATE rules (pure)
 // ----------------------------------------------------------------------------
-// Owns the state machine for the admin reception toggle (`open` | `offline`).
-// Used by:
-//   - `lib/admin/reception/action.ts` (DB read/write)
-//   - `lib/notify/recipients.ts`     (concierge target filtering)
-//   - `app/api/admin/reception/route.ts` (request body parsing)
+// Compatibility types for the admin reception toggle (`open` | `offline`).
+// The source of truth is `public.admin_availability` through `lib/admin/*`.
 // ============================================================================
 
 export type reception_state = 'open' | 'offline'
@@ -24,10 +21,9 @@ export type reception_request =
   | { kind: 'toggle' }
 
 /**
- * Default state when no row has ever been inserted for an admin.
- * 'open' is the safe default so a freshly created admin is reachable.
+ * Default state when no availability row has ever been inserted for an admin.
  */
-export const default_reception_state: reception_state = 'open'
+export const default_reception_state: reception_state = 'offline'
 
 export function is_reception_state(value: unknown): value is reception_state {
   return value === 'open' || value === 'offline'
@@ -88,15 +84,10 @@ export function resolve_next_reception_state(
 }
 
 /**
- * Decide whether an admin should receive a `concierge_requested`
- * notification. Used by notify/rules.ts during target filtering.
+ * Compatibility helper. New code should use `lib/admin/rules.ts`.
  */
 export function should_admin_receive_concierge_notify(
   state: reception_state | null,
 ): boolean {
-  if (state === null) {
-    return default_reception_state === 'open'
-  }
-
   return state === 'open'
 }

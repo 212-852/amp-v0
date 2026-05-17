@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { is_reception_state } from '@/lib/admin/reception/rules'
+import { should_admin_receive_concierge_notify } from '@/lib/admin/rules'
 import { derive_presence_recent_from_timestamps } from '@/lib/chat/presence/rules'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
@@ -37,9 +37,9 @@ type user_row = {
   role: string | null
 }
 
-type reception_row_min = {
-  user_uuid: string | null
-  state: string | null
+type admin_availability_row_min = {
+  admin_user_uuid: string | null
+  is_available: boolean | null
 }
 
 type identity_row_min = {
@@ -134,9 +134,9 @@ export async function load_customer_notify_target_for_room(
 
 /**
  * Single core query that loads admins + owner/core users and resolves their
- * reception state and LINE provider id in one pass.
+ * availability state and LINE provider id in one pass.
  *
- * - Admins with no `receptions` row are treated as `open` (default).
+ * - Admins with no `admin_availability` row are treated as unavailable.
  * - Owner/core are returned regardless of reception state (used for
  *   escalation fallback).
  */
@@ -164,21 +164,27 @@ export async function load_concierge_recipients(): Promise<concierge_recipients>
   )
 
   const admin_user_uuids = admin_users.map((row) => row.user_uuid)
-  const reception_state_by_uuid = new Map<string, string>()
+  const availability_by_uuid = new Map<string, boolean>()
 
   if (admin_user_uuids.length > 0) {
-    const reception_result = await supabase
-      .from('receptions')
-      .select('user_uuid, state')
-      .in('user_uuid', admin_user_uuids)
+    const availability_result = await supabase
+      .from('admin_availability')
+      .select('admin_user_uuid, is_available')
+      .in('admin_user_uuid', admin_user_uuids)
 
-    if (reception_result.error) {
-      throw reception_result.error
+    if (availability_result.error) {
+      throw availability_result.error
     }
 
-    for (const row of (reception_result.data ?? []) as reception_row_min[]) {
-      if (typeof row.user_uuid === 'string' && row.user_uuid.length > 0) {
-        reception_state_by_uuid.set(row.user_uuid, row.state ?? '')
+    for (const row of (availability_result.data ?? []) as admin_availability_row_min[]) {
+      if (
+        typeof row.admin_user_uuid === 'string' &&
+        row.admin_user_uuid.length > 0
+      ) {
+        availability_by_uuid.set(
+          row.admin_user_uuid,
+          row.is_available === true,
+        )
       }
     }
   }
@@ -187,10 +193,9 @@ export async function load_concierge_recipients(): Promise<concierge_recipients>
   const offline_admin_user_uuids: string[] = []
 
   for (const admin of admin_users) {
-    const raw_state = reception_state_by_uuid.get(admin.user_uuid)
-    const resolved_state = is_reception_state(raw_state) ? raw_state : 'open'
+    const is_available = availability_by_uuid.get(admin.user_uuid) ?? false
 
-    if (resolved_state === 'open') {
+    if (should_admin_receive_concierge_notify(is_available)) {
       open_admin_users.push(admin)
     } else {
       offline_admin_user_uuids.push(admin.user_uuid)
