@@ -194,6 +194,37 @@ async function participant_user_uuid_for_debug(input: {
   return typeof u === 'string' && u.trim() ? u.trim() : null
 }
 
+async function load_admin_presence_participant(input: {
+  room_uuid: string
+  participant_uuid: string
+}): Promise<{ admin_user_uuid: string | null; role: string | null } | null> {
+  const snap = await supabase
+    .from('participants')
+    .select('user_uuid, role')
+    .eq('room_uuid', input.room_uuid)
+    .eq('participant_uuid', input.participant_uuid)
+    .maybeSingle()
+
+  if (snap.error || !snap.data) {
+    return null
+  }
+
+  const row = snap.data as { user_uuid?: string | null; role?: string | null }
+  const role = typeof row.role === 'string' ? row.role : null
+
+  if (role !== 'admin' && role !== 'concierge') {
+    return null
+  }
+
+  return {
+    admin_user_uuid:
+      typeof row.user_uuid === 'string' && row.user_uuid.trim()
+        ? row.user_uuid.trim()
+        : null,
+    role,
+  }
+}
+
 async function hide_other_admin_presence_rooms(input: {
   admin_user_uuid: string
   room_uuid: string
@@ -215,10 +246,38 @@ async function upsert_admin_presence_state(input: {
   room_uuid: string
   participant_uuid: string
   visibility_state: 'visible' | 'hidden'
+  last_channel?: participant_surface_channel | null
 }) {
-  const admin_user_uuid = await participant_user_uuid_for_debug(input)
+  const participant = await load_admin_presence_participant(input)
+
+  if (!participant) {
+    return
+  }
+
+  const admin_user_uuid = participant.admin_user_uuid
   const now = new Date().toISOString()
   const realtime_active = input.visibility_state === 'visible'
+
+  const debug_payload = {
+    admin_user_uuid,
+    admin_participant_uuid: input.participant_uuid,
+    room_uuid: input.room_uuid,
+    role: participant.role,
+    source_channel: input.last_channel ?? null,
+    last_channel: input.last_channel ?? null,
+    active_room_uuid: input.visibility_state === 'visible' ? input.room_uuid : null,
+    visibility_state: input.visibility_state,
+    last_seen_at: now,
+    error_code: null as string | null,
+    error_message: null as string | null,
+  }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_participant_presence_update_started',
+    payload: debug_payload,
+  })
+
   const result = await supabase
     .from('admin_presence')
     .upsert(
@@ -235,6 +294,16 @@ async function upsert_admin_presence_state(input: {
     )
 
   if (result.error) {
+    await debug_event({
+      category: 'admin_chat',
+      event: 'admin_participant_presence_update_failed',
+      payload: {
+        ...debug_payload,
+        error_code: result.error.code ?? null,
+        error_message: result.error.message ?? 'admin_presence_update_failed',
+      },
+    })
+
     console.error('[admin_presence] upsert_failed', {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
@@ -244,6 +313,12 @@ async function upsert_admin_presence_state(input: {
 
     return
   }
+
+  await debug_event({
+    category: 'admin_chat',
+    event: 'admin_participant_presence_update_succeeded',
+    payload: debug_payload,
+  })
 
   if (input.visibility_state === 'visible' && admin_user_uuid) {
     await hide_other_admin_presence_rooms({
@@ -257,6 +332,7 @@ export async function mark_room_entered(input: {
   room_uuid: string
   participant_uuid: string
   last_channel?: participant_surface_channel | null
+  track_admin_presence?: boolean
 }) {
   const patch: Record<string, unknown> = {}
 
@@ -270,11 +346,12 @@ export async function mark_room_entered(input: {
     patch,
   })
 
-  if (input.last_channel === 'admin') {
+  if (input.track_admin_presence) {
     await upsert_admin_presence_state({
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
       visibility_state: 'visible',
+      last_channel: input.last_channel ?? null,
     })
   }
 }
@@ -341,6 +418,7 @@ export async function mark_room_left(input: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
       visibility_state: 'hidden',
+      last_channel: null,
     })
   } catch (error) {
     if (input.trace_admin_presence_leave_update) {
@@ -429,7 +507,7 @@ export async function mark_typing_started(input: {
     },
   })
 
-  if (input.last_channel === 'admin') {
+  if (input.last_channel && input.last_channel !== 'line') {
     const snap = await load_participant_admin_support_event_payload({
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
@@ -544,11 +622,13 @@ async function load_participant_admin_support_event_payload(input: {
 export async function mark_admin_support_join(input: {
   room_uuid: string
   participant_uuid: string
+  last_channel?: participant_surface_channel | null
 }) {
   await mark_room_entered({
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
-    last_channel: 'admin',
+    last_channel: input.last_channel ?? 'web',
+    track_admin_presence: true,
   })
   const room_pick = await supabase
     .from('rooms')
@@ -591,6 +671,7 @@ export async function mark_admin_support_join(input: {
 export async function mark_admin_support_heartbeat(input: {
   room_uuid: string
   participant_uuid: string
+  last_channel?: participant_surface_channel | null
 }) {
   const before = await load_participant_admin_support_event_payload(input)
   const before_recent = before
@@ -604,7 +685,8 @@ export async function mark_admin_support_heartbeat(input: {
   await mark_room_entered({
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
-    last_channel: 'admin',
+    last_channel: input.last_channel ?? 'web',
+    track_admin_presence: true,
   })
   const snap = await load_participant_admin_support_event_payload(input)
 
@@ -693,11 +775,13 @@ export async function mark_admin_support_idle_notice(input: {
 export async function mark_admin_support_recovered_notice(input: {
   room_uuid: string
   participant_uuid: string
+  last_channel?: participant_surface_channel | null
 }) {
   await mark_room_entered({
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
-    last_channel: 'admin',
+    last_channel: input.last_channel ?? 'web',
+    track_admin_presence: true,
   })
   const snap = await load_participant_admin_support_event_payload(input)
 

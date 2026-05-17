@@ -7,6 +7,7 @@ import { send_chat_realtime_debug } from '@/lib/chat/realtime/client'
 import { participant_presence_columns_available } from '@/lib/chat/presence/schema'
 import {
   call_leave_support_room,
+  resolve_admin_presence_source_channel,
   support_room_api_action_to_realtime,
 } from '@/lib/chat/realtime/support_room_client'
 
@@ -80,7 +81,7 @@ async function post_admin_support_presence(input: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
       action: input.action,
-      last_channel: 'admin',
+      last_channel: resolve_admin_presence_source_channel(),
       leave_reason: input.leave_reason,
       previous_active_room_uuid: input.room_uuid,
       next_active_room_uuid: null,
@@ -418,7 +419,7 @@ export function use_admin_reception_support_presence(input: {
               room_uuid,
               participant_uuid,
               action: 'admin_support_recovered',
-              last_channel: 'admin',
+              last_channel: resolve_admin_presence_source_channel(),
               support_session_key: support_session_key_ref.current,
             }),
           }).catch(() => {})

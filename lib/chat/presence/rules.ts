@@ -4,7 +4,7 @@ export const typing_timeout_ms = 5_000
 export const admin_support_active_within_ms = 45_000
 export const admin_support_idle_within_ms = 120_000
 
-export type participant_surface_channel = 'web' | 'pwa' | 'liff' | 'line' | 'admin'
+export type participant_surface_channel = 'web' | 'pwa' | 'liff' | 'line'
 
 export function normalize_participant_surface_channel(
   raw: unknown,
@@ -15,7 +15,7 @@ export function normalize_participant_surface_channel(
 
   const t = raw.trim().toLowerCase()
 
-  if (t === 'web' || t === 'pwa' || t === 'liff' || t === 'line' || t === 'admin') {
+  if (t === 'web' || t === 'pwa' || t === 'liff' || t === 'line') {
     return t
   }
 

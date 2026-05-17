@@ -7,6 +7,7 @@ import type { chat_action_realtime_payload } from '@/lib/chat/realtime/chat_acti
 import {
   call_enter_support_room,
   call_leave_support_room,
+  resolve_admin_presence_source_channel,
   support_room_api_action_to_realtime,
 } from '@/lib/chat/realtime/support_room_client'
 import { get_or_create_admin_support_client_session_id } from '@/lib/support/lifecycle/client_session'
@@ -296,7 +297,7 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
           room_uuid,
           participant_uuid,
           action,
-          last_channel: 'admin',
+          last_channel: resolve_admin_presence_source_channel(),
         }),
       }).catch(() => {})
     }

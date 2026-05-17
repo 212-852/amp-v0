@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const raw_action = typeof body?.action === 'string' ? body.action : ''
   const last_channel_raw =
     body?.last_channel ??
-    (raw_action.startsWith('admin_support') ? 'admin' : undefined)
+    (raw_action.startsWith('admin_support') ? 'web' : undefined)
 
   if (raw_action === 'admin_support_timeout_check') {
     try {
@@ -118,9 +118,17 @@ export async function POST(request: Request) {
         last_channel: context.last_channel ?? undefined,
       })
     } else if (body?.action === 'admin_support_join') {
-      await mark_admin_support_join({ room_uuid, participant_uuid })
+      await mark_admin_support_join({
+        room_uuid,
+        participant_uuid,
+        last_channel: context.last_channel ?? 'web',
+      })
     } else if (body?.action === 'admin_support_heartbeat') {
-      await mark_admin_support_heartbeat({ room_uuid, participant_uuid })
+      await mark_admin_support_heartbeat({
+        room_uuid,
+        participant_uuid,
+        last_channel: context.last_channel ?? 'web',
+      })
     } else if (body?.action === 'admin_support_leave') {
       const left = await leave_support_room({
         room_uuid,
@@ -173,7 +181,11 @@ export async function POST(request: Request) {
     } else if (body?.action === 'admin_support_idle') {
       await mark_admin_support_idle_notice({ room_uuid, participant_uuid })
     } else if (body?.action === 'admin_support_recovered') {
-      await mark_admin_support_recovered_notice({ room_uuid, participant_uuid })
+      await mark_admin_support_recovered_notice({
+        room_uuid,
+        participant_uuid,
+        last_channel: context.last_channel ?? 'web',
+      })
     } else {
       return NextResponse.json(
         { ok: false, error: 'invalid_presence_action' },
