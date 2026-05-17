@@ -195,15 +195,19 @@ async function participant_user_uuid_for_debug(input: {
 }
 
 async function load_presence_participant(input: {
-  room_uuid: string
+  room_uuid?: string | null
   participant_uuid: string
 }): Promise<{ user_uuid: string | null; role: string | null } | null> {
-  const snap = await supabase
+  let query = supabase
     .from('participants')
     .select('user_uuid, role')
-    .eq('room_uuid', input.room_uuid)
     .eq('participant_uuid', input.participant_uuid)
-    .maybeSingle()
+
+  if (input.room_uuid) {
+    query = query.eq('room_uuid', input.room_uuid)
+  }
+
+  const snap = await query.maybeSingle()
 
   if (snap.error || !snap.data) {
     return null
@@ -223,7 +227,7 @@ async function load_presence_participant(input: {
 
 async function hide_other_presence_rooms(input: {
   user_uuid: string
-  room_uuid: string
+  participant_uuid: string
 }) {
   const now = new Date().toISOString()
 
@@ -236,11 +240,11 @@ async function hide_other_presence_rooms(input: {
       updated_at: now,
     })
     .eq('user_uuid', input.user_uuid)
-    .neq('active_room_uuid', input.room_uuid)
+    .neq('participant_uuid', input.participant_uuid)
 }
 
 async function upsert_presence_state(input: {
-  room_uuid: string
+  room_uuid?: string | null
   participant_uuid: string
   visibility_state: 'visible' | 'hidden'
   last_channel?: participant_surface_channel | null
@@ -259,7 +263,7 @@ async function upsert_presence_state(input: {
   const debug_payload = {
     admin_user_uuid: user_uuid,
     admin_participant_uuid: input.participant_uuid,
-    room_uuid: input.room_uuid,
+    room_uuid: input.room_uuid ?? null,
     role: participant.role,
     source_channel: input.last_channel ?? null,
     last_channel: input.last_channel ?? null,
@@ -285,7 +289,8 @@ async function upsert_presence_state(input: {
         user_uuid,
         role: participant.role,
         source_channel: input.last_channel ?? null,
-        active_room_uuid: input.room_uuid,
+        active_room_uuid:
+          input.visibility_state === 'visible' ? input.room_uuid ?? null : null,
         active_area: input.active_area ?? null,
         visibility_state: input.visibility_state,
         app_visibility_state: input.visibility_state,
@@ -326,9 +331,28 @@ async function upsert_presence_state(input: {
   if (input.visibility_state === 'visible' && user_uuid) {
     await hide_other_presence_rooms({
       user_uuid,
-      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
     })
   }
+}
+
+export async function mark_app_presence(input: {
+  participant_uuid: string
+  active_room_uuid?: string | null
+  active_area?: string | null
+  visibility_state: 'visible' | 'hidden'
+  last_channel?: participant_surface_channel | null
+}) {
+  await upsert_presence_state({
+    room_uuid: input.active_room_uuid ?? null,
+    participant_uuid: input.participant_uuid,
+    visibility_state: input.visibility_state,
+    last_channel: input.last_channel ?? null,
+    active_area:
+      input.visibility_state === 'visible'
+        ? input.active_area ?? 'admin_app'
+        : null,
+  })
 }
 
 export async function mark_room_entered(input: {
