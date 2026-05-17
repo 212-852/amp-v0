@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { is_reception_state } from '@/lib/admin/reception/rules'
-import { public_actions_table_name } from '@/lib/actions/table'
+import { derive_presence_recent_within_ms } from '@/lib/chat/presence/rules'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
@@ -19,16 +19,26 @@ import {
 } from './discord'
 
 const admin_notification_phase = 'lib/notify/admin_push.ts'
+const admin_line_active_same_room_threshold_ms = 30_000
+
+type admin_active_room_state = {
+  admin_participant_uuid: string | null
+  active_room_uuid: string | null
+  visibility_state: string | null
+  last_seen_at: string | null
+  is_active_same_room: boolean
+}
 
 type admin_notification_candidate = {
   user_uuid: string
   role: string | null
   header_status: 'on' | 'off'
+  chat_reception_enabled: boolean
   preferences: notification_preferences
   has_push_subscription: boolean
   has_line_identity: boolean
   line_user_id: string | null
-  active_in_room: boolean
+  active_state: admin_active_room_state
 }
 
 type admin_push_route_input = {
@@ -58,6 +68,7 @@ type admin_debug_payload = {
   room_uuid?: string | null
   message_uuid?: string | null
   header_status?: string | null
+  chat_reception_enabled?: boolean | null
   pwa_enabled?: boolean | null
   line_enabled?: boolean | null
   has_push_subscription?: boolean | null
@@ -71,6 +82,10 @@ type admin_debug_payload = {
   should_auto_reply?: boolean | null
   auto_reply_skipped_reason?: string | null
   admin_active_in_same_room?: boolean | null
+  active_room_uuid?: string | null
+  visibility_state?: string | null
+  last_seen_at?: string | null
+  admin_participant_uuid?: string | null
   app_visibility_state?: string | null
   error_code?: string | null
   error_message?: string | null
@@ -78,11 +93,17 @@ type admin_debug_payload = {
 
 type admin_notification_debug_event =
   | 'admin_notification_rule_checked'
+  | 'admin_line_notification_rule_checked'
   | 'admin_notification_candidate_checked'
   | 'admin_notification_active_room_checked'
+  | 'admin_line_active_same_room_checked'
   | 'admin_notification_skipped_active_same_room'
+  | 'admin_line_notification_skipped_active_same_room'
   | 'admin_notification_skipped_offline'
   | 'admin_notification_skipped_header_off'
+  | 'admin_line_notification_skipped_header_off'
+  | 'admin_line_notification_skipped_chat_off'
+  | 'admin_line_notification_skipped_line_off'
   | 'admin_notification_method_resolved'
   | 'admin_push_send_started'
   | 'admin_push_send_succeeded'
@@ -106,59 +127,80 @@ async function emit_admin_notification_debug(
   })
 }
 
-async function load_active_admin_user_uuids_from_support_actions(
+function empty_admin_active_room_state(): admin_active_room_state {
+  return {
+    admin_participant_uuid: null,
+    active_room_uuid: null,
+    visibility_state: null,
+    last_seen_at: null,
+    is_active_same_room: false,
+  }
+}
+
+async function load_admin_active_room_state_by_user_uuid(
   room_uuid: string | null,
-): Promise<Set<string>> {
+  user_uuids: string[],
+): Promise<Map<string, admin_active_room_state>> {
   const clean_room_uuid = clean_uuid(room_uuid)
 
-  if (!clean_room_uuid) {
-    return new Set()
+  if (!clean_room_uuid || user_uuids.length === 0) {
+    return new Map()
   }
 
   const result = await supabase
-    .from(public_actions_table_name())
-    .select('action_type, actor_user_uuid, created_at')
+    .from('admin_presence')
+    .select(
+      'participant_uuid, room_uuid, admin_user_uuid, visibility_state, last_seen_at, updated_at',
+    )
     .eq('room_uuid', clean_room_uuid)
-    .in('action_type', ['support_started', 'support_left'])
-    .order('created_at', { ascending: true })
-    .limit(400)
+    .in('admin_user_uuid', user_uuids)
+    .order('updated_at', { ascending: false })
 
   if (result.error) {
-    return new Set()
+    return new Map()
   }
 
-  const active_by_user_uuid = new Map<string, boolean>()
+  const now = new Date()
+  const state_by_user_uuid = new Map<string, admin_active_room_state>()
 
   for (const row of result.data ?? []) {
     const user_uuid = clean_uuid(
-      typeof row.actor_user_uuid === 'string' ? row.actor_user_uuid : null,
+      typeof row.admin_user_uuid === 'string' ? row.admin_user_uuid : null,
     )
-    const action_type =
-      typeof row.action_type === 'string' ? row.action_type : null
+    const participant_uuid = clean_uuid(
+      typeof row.participant_uuid === 'string' ? row.participant_uuid : null,
+    )
+    const active_room_uuid = clean_uuid(
+      typeof row.room_uuid === 'string' ? row.room_uuid : null,
+    )
+    const visibility_state =
+      typeof row.visibility_state === 'string' ? row.visibility_state : null
+    const last_seen_at =
+      typeof row.last_seen_at === 'string' ? row.last_seen_at : null
 
-    if (!user_uuid) {
+    if (!user_uuid || state_by_user_uuid.has(user_uuid)) {
       continue
     }
 
-    if (action_type === 'support_started') {
-      active_by_user_uuid.set(user_uuid, true)
-      continue
-    }
-
-    if (action_type === 'support_left') {
-      active_by_user_uuid.set(user_uuid, false)
-    }
+    state_by_user_uuid.set(user_uuid, {
+      admin_participant_uuid: participant_uuid,
+      active_room_uuid,
+      visibility_state,
+      last_seen_at,
+      is_active_same_room:
+        active_room_uuid === clean_room_uuid &&
+        visibility_state === 'visible' &&
+        derive_presence_recent_within_ms({
+          last_seen_at,
+          is_typing: false,
+          typing_at: null,
+          active_within_ms: admin_line_active_same_room_threshold_ms,
+          now,
+        }),
+    })
   }
 
-  const active_user_uuids = new Set<string>()
-
-  for (const [user_uuid, active] of active_by_user_uuid.entries()) {
-    if (active) {
-      active_user_uuids.add(user_uuid)
-    }
-  }
-
-  return active_user_uuids
+  return state_by_user_uuid
 }
 
 function admin_notification_discord_content(input: admin_push_route_input) {
@@ -348,8 +390,8 @@ async function load_admin_notification_candidates(input: {
     }
   }
 
-  const active_user_uuids_in_room =
-    await load_active_admin_user_uuids_from_support_actions(room_uuid)
+  const active_state_by_user_uuid =
+    await load_admin_active_room_state_by_user_uuid(room_uuid, user_uuids)
 
   return user_rows.map((row) => {
     const line_user_id = line_user_id_by_uuid.get(row.user_uuid) ?? null
@@ -362,6 +404,11 @@ async function load_admin_notification_candidates(input: {
         role: row.role,
         reception_state: reception_state_by_uuid.get(row.user_uuid) ?? null,
       }),
+      chat_reception_enabled:
+        resolve_header_status({
+          role: row.role,
+          reception_state: reception_state_by_uuid.get(row.user_uuid) ?? null,
+        }) === 'on',
       preferences:
         preferences_by_uuid.get(row.user_uuid) ??
         normalize_notification_preferences(null),
@@ -370,7 +417,9 @@ async function load_admin_notification_candidates(input: {
       ),
       has_line_identity: Boolean(line_user_id),
       line_user_id,
-      active_in_room: active_user_uuids_in_room.has(row.user_uuid),
+      active_state:
+        active_state_by_user_uuid.get(row.user_uuid) ??
+        empty_admin_active_room_state(),
     }
   })
 }
@@ -418,19 +467,23 @@ export async function route_admin_push_notification(
     const pwa_enabled = candidate.preferences.pwa_push_enabled === true
     const line_enabled = candidate.preferences.line_enabled === true
     const both_methods_enabled = pwa_enabled && line_enabled
+    const active_state = candidate.active_state
 
     const base_debug: admin_debug_payload = {
       admin_user_uuid: candidate.user_uuid,
+      admin_participant_uuid: active_state.admin_participant_uuid,
       room_uuid: input.room_uuid,
       message_uuid: input.message_uuid,
       support_mode: input.support_mode ?? null,
       should_auto_reply: input.should_auto_reply ?? null,
       auto_reply_skipped_reason: input.auto_reply_skipped_reason ?? null,
-      admin_active_in_same_room: candidate.active_in_room,
-      app_visibility_state: candidate.active_in_room
-        ? 'active'
-        : 'background_or_closed',
+      admin_active_in_same_room: active_state.is_active_same_room,
+      active_room_uuid: active_state.active_room_uuid,
+      visibility_state: active_state.visibility_state,
+      last_seen_at: active_state.last_seen_at,
+      app_visibility_state: active_state.visibility_state,
       header_status: candidate.header_status,
+      chat_reception_enabled: candidate.chat_reception_enabled,
       pwa_enabled,
       line_enabled,
       has_push_subscription: candidate.has_push_subscription,
@@ -443,9 +496,17 @@ export async function route_admin_push_notification(
       'admin_notification_candidate_checked',
       base_debug,
     )
+    await emit_admin_notification_debug(
+      'admin_line_notification_rule_checked',
+      base_debug,
+    )
 
     await emit_admin_notification_debug(
       'admin_notification_active_room_checked',
+      base_debug,
+    )
+    await emit_admin_notification_debug(
+      'admin_line_active_same_room_checked',
       base_debug,
     )
 
@@ -458,11 +519,32 @@ export async function route_admin_push_notification(
           notification_skipped_reason: 'header_off',
         },
       )
+      await emit_admin_notification_debug(
+        'admin_line_notification_skipped_header_off',
+        {
+          ...base_debug,
+          skipped_reason: 'header_off',
+          notification_skipped_reason: 'header_off',
+        },
+      )
 
       continue
     }
 
-    if (candidate.active_in_room) {
+    if (!candidate.chat_reception_enabled) {
+      await emit_admin_notification_debug(
+        'admin_line_notification_skipped_chat_off',
+        {
+          ...base_debug,
+          skipped_reason: 'chat_reception_off',
+          notification_skipped_reason: 'chat_reception_off',
+        },
+      )
+
+      continue
+    }
+
+    if (active_state.is_active_same_room) {
       await emit_admin_notification_debug(
         'admin_notification_skipped_active_same_room',
         {
@@ -471,8 +553,27 @@ export async function route_admin_push_notification(
           notification_skipped_reason: 'active_same_room',
         },
       )
+      await emit_admin_notification_debug(
+        'admin_line_notification_skipped_active_same_room',
+        {
+          ...base_debug,
+          skipped_reason: 'active_same_room',
+          notification_skipped_reason: 'active_same_room',
+        },
+      )
 
       continue
+    }
+
+    if (!line_enabled) {
+      await emit_admin_notification_debug(
+        'admin_line_notification_skipped_line_off',
+        {
+          ...base_debug,
+          skipped_reason: 'line_off',
+          notification_skipped_reason: 'line_off',
+        },
+      )
     }
 
     if (!pwa_enabled && !line_enabled) {

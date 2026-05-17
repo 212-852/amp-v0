@@ -194,6 +194,37 @@ async function participant_user_uuid_for_debug(input: {
   return typeof u === 'string' && u.trim() ? u.trim() : null
 }
 
+async function upsert_admin_presence_state(input: {
+  room_uuid: string
+  participant_uuid: string
+  visibility_state: 'visible' | 'hidden'
+}) {
+  const admin_user_uuid = await participant_user_uuid_for_debug(input)
+  const now = new Date().toISOString()
+  const result = await supabase
+    .from('admin_presence')
+    .upsert(
+      {
+        participant_uuid: input.participant_uuid,
+        room_uuid: input.room_uuid,
+        admin_user_uuid,
+        visibility_state: input.visibility_state,
+        last_seen_at: now,
+        updated_at: now,
+      },
+      { onConflict: 'participant_uuid' },
+    )
+
+  if (result.error) {
+    console.error('[admin_presence] upsert_failed', {
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      visibility_state: input.visibility_state,
+      error: result.error.message,
+    })
+  }
+}
+
 export async function mark_room_entered(input: {
   room_uuid: string
   participant_uuid: string
@@ -210,6 +241,14 @@ export async function mark_room_entered(input: {
     participant_uuid: input.participant_uuid,
     patch,
   })
+
+  if (input.last_channel === 'admin') {
+    await upsert_admin_presence_state({
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      visibility_state: 'visible',
+    })
+  }
 }
 
 export async function mark_participant_last_channel(input: {
@@ -269,6 +308,12 @@ export async function mark_room_left(input: {
         },
       })
     }
+
+    await upsert_admin_presence_state({
+      room_uuid: input.room_uuid,
+      participant_uuid: input.participant_uuid,
+      visibility_state: 'hidden',
+    })
   } catch (error) {
     if (input.trace_admin_presence_leave_update) {
       await debug_event({
