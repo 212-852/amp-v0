@@ -215,8 +215,10 @@ export default function AdminReception({
       className="flex flex-col gap-2"
     >
       <AdminReceptionRoomListLive
+        admin_user_uuid={admin_user_uuid}
         initial_rooms={visible_rooms}
         limit={3}
+        mode="concierge"
         reception_state={reception_state}
       />
       <div className="flex justify-end pr-1">

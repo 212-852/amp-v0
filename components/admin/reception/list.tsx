@@ -383,7 +383,9 @@ export default function AdminReceptionList({
         </div>
       ) : (
         <AdminReceptionRoomListLive
+          admin_user_uuid={admin_user_uuid}
           initial_rooms={rooms}
+          mode={mode}
           reception_state={reception_state}
         />
       )}

@@ -376,6 +376,7 @@ export function resolve_debug_rule(input: {
   }
 
   const temporary_reception_visibility_events = new Set([
+    'reception_list_component_mounted',
     'reception_state_loaded',
     'reception_state_realtime_received',
     'reception_state_changed',
