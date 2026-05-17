@@ -16,7 +16,6 @@ type rooms_api_response = {
 export default function AdminReception() {
   const { admin_user_uuid, reception_state } = use_admin_reception()
   const [visible_rooms, set_visible_rooms] = useState<reception_room[]>([])
-  const can_show_reception_rooms = reception_state === 'open'
 
   const load_rooms = useCallback(async () => {
     const response = await fetch('/api/admin/reception/rooms?mode=concierge', {
@@ -51,10 +50,6 @@ export default function AdminReception() {
       set_visible_rooms([])
     })
   }, [load_rooms, reception_state])
-
-  if (reception_state !== 'open') {
-    return null
-  }
 
   return (
     <section

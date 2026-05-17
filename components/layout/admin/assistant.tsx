@@ -23,10 +23,7 @@ export default function AdminAssistant({
   void display_name
   const { reception_state } = use_admin_reception()
   const [is_open, set_is_open] = useState(false)
-
-  if (reception_state !== 'open') {
-    return null
-  }
+  const show_reception_unread_indicator = reception_state === 'open'
 
   return (
     <>
@@ -133,10 +130,12 @@ export default function AdminAssistant({
               >
                 Call
               </button>
-              <span
-                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"
-                aria-hidden
-              />
+              {show_reception_unread_indicator ? (
+                <span
+                  className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"
+                  aria-hidden
+                />
+              ) : null}
             </div>
           </div>
         </section>
