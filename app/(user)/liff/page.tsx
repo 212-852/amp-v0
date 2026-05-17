@@ -3,6 +3,7 @@
 import type { Liff } from '@line/liff'
 import { useEffect, useState } from 'react'
 
+import { build_liff_redirect_uri } from '@/lib/auth/liff/redirect_uri'
 import Loading from '@/components/shared/loading'
 
 async function read_liff_id_token(liff: Liff): Promise<string | null> {
@@ -76,7 +77,7 @@ export default function LiffPage() {
             body: JSON.stringify({ id_token }),
           })
         } else if (!liff.isLoggedIn()) {
-          liff.login()
+          liff.login({ redirectUri: build_liff_redirect_uri() })
           skip_loading_off = true
 
           return

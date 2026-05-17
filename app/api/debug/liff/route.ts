@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     )
   }
 
-  if (control.debug.liff_auth) {
+  if (event === 'liff_auth_failed' || control.debug.liff_auth) {
     await debug_event({
       category: 'liff',
       event,

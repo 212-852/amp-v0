@@ -60,6 +60,14 @@ export function resolve_debug_rule(input: {
     'output_reply_delivery_failed',
   ])
 
+  if (input.category === 'liff' && input.event === 'liff_auth_failed') {
+    return {
+      category: 'liff',
+      level: 'error',
+      channels: ['discord'],
+    }
+  }
+
   if (
     (input.category === 'chat_message' || input.category === 'user_message') &&
     message_send_diagnostic_events.has(input.event)

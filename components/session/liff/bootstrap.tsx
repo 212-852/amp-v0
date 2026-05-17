@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 import { is_line_in_app_browser } from '@/lib/auth/context'
+import {
+  build_liff_redirect_uri,
+  read_return_path_from_location,
+} from '@/lib/auth/liff/redirect_uri'
 import Loading from '@/components/shared/loading'
 
 type liff_debug_payload = Record<string, unknown>
@@ -70,6 +74,51 @@ async function emit_liff_debug(
   }
 }
 
+async function emit_liff_auth_failed(payload: liff_debug_payload) {
+  await emit_liff_debug('liff_auth_failed', payload)
+}
+
+async function read_session_snapshot() {
+  try {
+    const response = await fetch('/api/session', {
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      return {
+        session_restored: false,
+        user_uuid: null,
+        visitor_uuid: null,
+        role: null,
+        tier: null,
+      }
+    }
+
+    const data = (await response.json().catch(() => null)) as {
+      user_uuid?: string | null
+      visitor_uuid?: string | null
+      role?: string | null
+      tier?: string | null
+    } | null
+
+    return {
+      session_restored: Boolean(data?.user_uuid || data?.visitor_uuid),
+      user_uuid: data?.user_uuid ?? null,
+      visitor_uuid: data?.visitor_uuid ?? null,
+      role: data?.role ?? null,
+      tier: data?.tier ?? null,
+    }
+  } catch {
+    return {
+      session_restored: false,
+      user_uuid: null,
+      visitor_uuid: null,
+      role: null,
+      tier: null,
+    }
+  }
+}
+
 async function read_liff_id_token(liff: Liff): Promise<string | null> {
   try {
     const raw = liff.getIDToken()
@@ -106,7 +155,16 @@ async function read_liff_id_token(liff: Liff): Promise<string | null> {
 
 export default function LiffBootstrap() {
   const router = useRouter()
-  const [is_loading, set_is_loading] = useState(false)
+  const [is_loading, set_is_loading] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+
+    return (
+      is_line_in_app_browser(navigator.userAgent) &&
+      !should_skip_path(window.location.pathname)
+    )
+  })
   const [liff_error, set_liff_error] = useState<string | null>(null)
 
   useEffect(() => {
@@ -152,6 +210,25 @@ export default function LiffBootstrap() {
 
     global_started.__amp_liff_started = true
 
+    function build_auth_request_payload(input: {
+      line_user_id: string
+      display_name: string | null
+      picture_url: string | null
+      id_token?: string | null
+    }) {
+      return {
+        line_user_id: input.line_user_id,
+        display_name: input.display_name,
+        picture_url: input.picture_url,
+        source_channel: 'liff',
+        return_path: read_return_path_from_location(),
+        current_url: window.location.href,
+        pathname: window.location.pathname,
+        search: window.location.search,
+        ...(input.id_token ? { id_token: input.id_token } : {}),
+      }
+    }
+
     async function post_liff_session(payload: Record<string, unknown>) {
       return fetch('/api/auth/line/liff', {
         method: 'POST',
@@ -161,7 +238,10 @@ export default function LiffBootstrap() {
       })
     }
 
-    async function finish_auth_response(response: Response) {
+    async function finish_auth_response(
+      response: Response,
+      context: liff_debug_payload,
+    ) {
       const result = await response.json().catch((error) => {
         console.error('[liff] auth response parse failed', error)
 
@@ -178,10 +258,28 @@ export default function LiffBootstrap() {
       console.log('[liff] auth response status', response.status)
 
       if (!response.ok) {
-        await emit_liff_debug('liff_auth_api_failed', {
-          ...base_payload,
-          status: response.status,
-          result,
+        const session_snapshot = await read_session_snapshot()
+        const error_code =
+          result &&
+          typeof result === 'object' &&
+          'error_code' in result &&
+          typeof (result as { error_code?: string }).error_code === 'string'
+            ? (result as { error_code: string }).error_code
+            : `http_${response.status}`
+
+        await emit_liff_auth_failed({
+          ...context,
+          ...session_snapshot,
+          http_status: response.status,
+          error_code,
+          error_message:
+            result &&
+            typeof result === 'object' &&
+            'error' in result &&
+            typeof (result as { error?: string }).error === 'string'
+              ? (result as { error: string }).error
+              : `HTTP ${response.status}`,
+          reason: 'liff_auth_api_failed',
         })
 
         const msg =
@@ -207,12 +305,15 @@ export default function LiffBootstrap() {
         window.dispatchEvent(new Event('amp_session_changed'))
         router.refresh()
       } else {
-        await emit_liff_debug('liff_auth_api_failed', {
-          ...base_payload,
-          status: response.status,
-          result,
+        await emit_liff_auth_failed({
+          ...context,
+          http_status: response.status,
+          error_code: 'unexpected_result',
+          error_message: 'Unexpected LIFF auth API result',
           reason: 'unexpected_result',
+          result,
         })
+        set_liff_error('LIFF auth failed')
       }
 
       set_is_loading(false)
@@ -220,6 +321,22 @@ export default function LiffBootstrap() {
 
     async function run() {
       let liff_init_completed_ok = false
+      let liff_handle: Liff | null = null
+      let auth_context: liff_debug_payload = {
+        ...base_payload,
+        liff_id_exists: Boolean(liff_id),
+        liff_initialized: false,
+        is_liff_browser: is_line_browser,
+        is_in_client: false,
+        is_logged_in: false,
+        has_access_token: false,
+        line_user_id_exists: false,
+        line_profile_loaded: false,
+        return_path: read_return_path_from_location(),
+        current_url: href,
+        pathname,
+        search: window.location.search,
+      }
 
       try {
         set_is_loading(true)
@@ -255,6 +372,7 @@ export default function LiffBootstrap() {
           const mod = await import('@line/liff')
 
           liff = mod.default
+          liff_handle = liff
           await emit_liff_debug('liff_sdk_imported', base_payload)
 
           let sdk_version: string | null = null
@@ -365,6 +483,10 @@ export default function LiffBootstrap() {
 
           await emit_liff_debug('liff_init_completed', base_payload)
           liff_init_completed_ok = true
+          auth_context = {
+            ...auth_context,
+            liff_initialized: true,
+          }
         } catch (error) {
           if (init_timeout !== null) {
             window.clearTimeout(init_timeout)
@@ -384,6 +506,15 @@ export default function LiffBootstrap() {
             error: serialize_error(error),
           })
           console.error('[liff] init failed', error)
+          await emit_liff_auth_failed({
+            ...auth_context,
+            liff_initialized: false,
+            error_code: 'liff_init_failed',
+            error_message:
+              error instanceof Error ? error.message : 'LIFF init failed',
+            reason: 'liff_init_failed',
+            error: serialize_error(error),
+          })
           set_liff_error(
             error instanceof Error ? error.message : 'LIFF init failed',
           )
@@ -422,20 +553,39 @@ export default function LiffBootstrap() {
         )
 
         const is_logged_in = liff.isLoggedIn()
+        let has_access_token = false
+
+        try {
+          const access_token = liff.getAccessToken()
+          has_access_token =
+            typeof access_token === 'string' && access_token.length > 0
+        } catch {
+          has_access_token = false
+        }
+
+        auth_context = {
+          ...auth_context,
+          is_in_client,
+          is_logged_in,
+          has_access_token,
+        }
+
         await emit_liff_debug('liff_login_state_checked', {
           ...base_payload,
           is_in_client,
           is_logged_in,
+          has_access_token,
         })
 
-        if (!is_in_client && !is_logged_in) {
+        if (!is_logged_in) {
           console.log('[liff] login started', base_payload)
           await emit_liff_debug('liff_login_started', {
             ...base_payload,
             is_in_client,
             is_logged_in,
+            redirect_uri: build_liff_redirect_uri(),
           })
-          liff.login()
+          liff.login({ redirectUri: build_liff_redirect_uri() })
 
           return
         }
@@ -465,7 +615,26 @@ export default function LiffBootstrap() {
             error: serialize_error(error),
           })
 
-          throw error
+          await emit_liff_auth_failed({
+            ...auth_context,
+            line_profile_loaded: false,
+            error_code: 'liff_profile_fetch_failed',
+            error_message:
+              error instanceof Error ? error.message : 'Profile fetch failed',
+            reason: 'liff_profile_fetch_failed',
+            error: serialize_error(error),
+          })
+
+          set_liff_error('LIFF auth failed')
+          set_is_loading(false)
+
+          return
+        }
+
+        auth_context = {
+          ...auth_context,
+          line_user_id_exists: Boolean(profile.userId),
+          line_profile_loaded: true,
         }
 
         const id_token = await read_liff_id_token(liff)
@@ -509,18 +678,34 @@ export default function LiffBootstrap() {
         let response: Response
 
         try {
-          const payload: Record<string, unknown> = {
+          const primary_payload = build_auth_request_payload({
             line_user_id: profile.userId,
             display_name: profile.displayName ?? null,
             picture_url: profile.pictureUrl ?? null,
-            source_channel: 'liff',
-          }
+            id_token,
+          })
 
-          if (id_token) {
-            payload.id_token = id_token
-          }
+          response = await post_liff_session(primary_payload)
 
-          response = await post_liff_session(payload)
+          if (
+            !response.ok &&
+            id_token &&
+            (response.status === 401 || response.status === 400)
+          ) {
+            await emit_liff_debug('liff_auth_api_retry_without_id_token', {
+              ...auth_context,
+              line_user_id: profile.userId,
+              status: response.status,
+            })
+
+            response = await post_liff_session(
+              build_auth_request_payload({
+                line_user_id: profile.userId,
+                display_name: profile.displayName ?? null,
+                picture_url: profile.pictureUrl ?? null,
+              }),
+            )
+          }
         } catch (error) {
           await emit_liff_debug('liff_auth_api_failed', {
             ...base_payload,
@@ -528,19 +713,40 @@ export default function LiffBootstrap() {
             error: serialize_error(error),
           })
 
-          throw error
+          await emit_liff_auth_failed({
+            ...auth_context,
+            error_code: 'liff_auth_api_network_failed',
+            error_message:
+              error instanceof Error ? error.message : 'Network error',
+            reason: 'liff_auth_api_network_failed',
+            error: serialize_error(error),
+          })
+
+          set_liff_error('LIFF auth failed')
+          set_is_loading(false)
+
+          return
         }
 
-        await finish_auth_response(response)
+        await finish_auth_response(response, auth_context)
       } catch (error) {
         console.error('[liff] bootstrap failed', error)
         await emit_liff_debug('liff_bootstrap_failed', {
           ...base_payload,
           error: serialize_error(error),
         })
-        set_liff_error(
-          error instanceof Error ? error.message : 'LIFF bootstrap failed',
-        )
+        await emit_liff_auth_failed({
+          ...auth_context,
+          liff_initialized: liff_init_completed_ok,
+          is_in_client: liff_handle?.isInClient() ?? auth_context.is_in_client,
+          is_logged_in: liff_handle?.isLoggedIn() ?? auth_context.is_logged_in,
+          error_code: 'liff_bootstrap_failed',
+          error_message:
+            error instanceof Error ? error.message : 'LIFF bootstrap failed',
+          reason: 'liff_bootstrap_failed',
+          error: serialize_error(error),
+        })
+        set_liff_error('LIFF auth failed')
         set_is_loading(false)
       }
     }
