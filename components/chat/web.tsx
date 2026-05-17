@@ -216,44 +216,19 @@ function DriverRecruitmentCard({ bundle }: { bundle: driver_recruitment_bundle }
   const primary_cta = bundle.payload.ctas[0]
 
   return (
-    <article className="w-[292px] shrink-0 rounded-[24px] bg-[#11100f] px-0 pb-4 pt-4 shadow-[0_3px_18px_rgba(42,29,24,0.08)]">
+    <article className="w-[292px] shrink-0 rounded-[24px] bg-neutral-950 px-0 pb-4 pt-4 shadow-[0_3px_18px_rgba(0,0,0,0.2)]">
       <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {bundle.payload.cards.map((card) => (
           <section
             key={card.key}
-            className="flex h-[342px] w-[244px] shrink-0 snap-center flex-col overflow-hidden rounded-[24px] bg-white text-[#201714]"
+            className="flex h-[300px] w-[244px] shrink-0 snap-center flex-col justify-between rounded-[20px] border border-neutral-200 bg-white px-4 py-5 text-neutral-900"
           >
-            {card.image ? (
-              <Image
-                src={card.image.src}
-                alt={text_for(card.image.alt)}
-                width={488}
-                height={420}
-                className="h-[210px] w-full object-cover"
-              />
-            ) : null}
-            <div className="flex flex-1 flex-col px-4 py-4">
-              <h2 className="text-[18px] font-bold leading-tight text-[#201714]">
-                {text_for(card.title)}
-              </h2>
-              {card.subtitle ? (
-                <p className="mt-2 text-[13px] font-semibold leading-relaxed text-[#806750]">
-                  {text_for(card.subtitle)}
-                </p>
-              ) : null}
-              {card.items.length > 0 ? (
-                <ul className="mt-4 flex flex-col gap-2">
-                  {card.items.map((item) => (
-                    <li
-                      key={item}
-                      className="rounded-[14px] bg-[#f6f0e9] px-3 py-2 text-[12px] font-semibold leading-relaxed text-[#4a3c33]"
-                    >
-                      {text_for(item)}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
+            <h2 className="text-[17px] font-semibold leading-tight">
+              {text_for(card.title)}
+            </h2>
+            <p className="text-[13px] leading-relaxed text-neutral-600">
+              {text_for(card.body)}
+            </p>
           </section>
         ))}
       </div>
@@ -261,7 +236,7 @@ function DriverRecruitmentCard({ bundle }: { bundle: driver_recruitment_bundle }
         <div className="px-4 pt-1">
           <a
             href={primary_cta.href}
-            className="block w-full rounded-[18px] bg-[#06C755] px-4 py-3 text-center text-[14px] font-bold leading-[1.45] text-white shadow-[0_2px_8px_rgba(0,0,0,0.14)]"
+            className="block w-full rounded-[18px] bg-white px-4 py-3 text-center text-[14px] font-semibold leading-[1.45] text-neutral-950 shadow-[0_2px_8px_rgba(0,0,0,0.14)]"
           >
             {text_for(primary_cta.label)}
           </a>

@@ -592,7 +592,7 @@ export function build_driver_recruitment_bundle(input: {
   locale: chat_locale
 }): driver_recruitment_bundle {
   const cards = [...driver_recruitment_content.cards]
-  const section_cards = cards.filter((card) => card.key !== 'hero')
+  const page = driver_recruitment_content.page
 
   return {
     bundle_uuid: create_bundle_uuid(),
@@ -602,17 +602,17 @@ export function build_driver_recruitment_bundle(input: {
     locale: input.locale,
     content_key: 'recruitment.driver',
     payload: {
-      title: cards[0]?.title ?? 'ドライバー募集',
-      summary: cards[0]?.subtitle ?? 'ペットタクシーわんだにゃー',
+      title: page.title,
+      summary: page.subtitle,
       image: {
         src: driver_recruitment_content.image_path,
-        alt: cards[0]?.image?.alt ?? 'ドライバー募集',
+        alt: page.title,
       },
       cards,
-      sections: section_cards.map((card) => ({
+      sections: cards.map((card) => ({
         key: card.key,
         heading: card.title,
-        body: card.items.join('\n'),
+        body: card.body,
       })),
       ctas: [
         {

@@ -331,15 +331,11 @@ function build_driver_recruitment_bubbles(
       flex_text(card.title, { weight: 'bold', size: 'xl' }),
     ]
 
-    if (card.subtitle) {
-      body_contents.push(
-        flex_text(card.subtitle, { size: 'sm', color: '#666666' }),
-      )
-    }
-
-    for (const item of card.items) {
+    if (card.body.trim()) {
       body_contents.push(flex_separator())
-      body_contents.push(flex_text(item, { size: 'sm', color: '#4a3c33' }))
+      body_contents.push(
+        flex_text(card.body, { size: 'sm', color: '#666666' }),
+      )
     }
 
     const footer_contents = primary_cta
@@ -361,12 +357,6 @@ function build_driver_recruitment_bubbles(
         spacing: 'sm',
         contents: footer_contents,
       },
-    }
-
-    const image_url = card.image ? absolute_url(card.image.src) : null
-    const hero = bubble_hero(image_url)
-    if (hero) {
-      bubble.hero = hero
     }
 
     return bubble
