@@ -130,6 +130,7 @@ export function resolve_debug_rule(input: {
     'admin_reception_load_failed',
     'admin_reception_toggle_failed',
     'admin_reception_realtime_failed',
+    'reception_state_load_failed',
     'admin_availability_load_failed',
     'admin_availability_toggle_failed',
     'admin_availability_realtime_failed',
@@ -145,6 +146,7 @@ export function resolve_debug_rule(input: {
       input.event === 'admin_reception_load_failed' ||
       input.event === 'admin_reception_toggle_failed' ||
       input.event === 'admin_reception_realtime_failed' ||
+      input.event === 'reception_state_load_failed' ||
       input.event === 'admin_availability_load_failed' ||
       input.event === 'admin_availability_toggle_failed' ||
       input.event === 'admin_availability_realtime_failed'
@@ -361,7 +363,10 @@ export function resolve_debug_rule(input: {
   if (
     input.category === 'admin_chat' &&
     (input.event === 'admin_reception_realtime_failed' ||
-      input.event === 'admin_availability_realtime_failed')
+      input.event === 'admin_availability_realtime_failed' ||
+      input.event === 'reception_state_load_failed' ||
+      input.event === 'reception_state_realtime_failed' ||
+      input.event === 'chat_list_refetch_failed')
   ) {
     return {
       category: 'admin_chat',

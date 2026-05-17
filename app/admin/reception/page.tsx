@@ -1,7 +1,7 @@
-import Link from 'next/link'
-import { Search } from 'lucide-react'
-
-import AdminReceptionRoomListLive from '@/components/admin/reception/room_list_live'
+import AdminReceptionList from '@/components/admin/reception/list'
+import { require_admin_route_access } from '@/lib/auth/route'
+import { read_admin_reception } from '@/lib/admin/reception/action'
+import { debug_event } from '@/lib/debug'
 import {
   list_reception_rooms,
   type reception_room,
@@ -14,38 +14,22 @@ type AdminReceptionPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>
 }
 
-const tabs: Array<{ mode: reception_room_mode; label: string }> = [
-  { mode: 'concierge', label: 'コンシェルジュ' },
-  { mode: 'bot', label: 'ボット' },
-]
-
 function parse_mode(value: unknown): reception_room_mode {
   const raw = Array.isArray(value) ? value[0] : value
   return raw === 'bot' ? 'bot' : 'concierge'
 }
 
-function format_time(iso: string | null): string {
-  if (!iso) {
-    return ''
-  }
-
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-
-  return date.toLocaleString('ja-JP', {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
 async function load_rooms(
   mode: reception_room_mode,
+  state: 'open' | 'closed',
 ): Promise<{ ok: true; rooms: reception_room[] } | { ok: false; rooms: [] }> {
+  if (state !== 'open') {
+    return {
+      ok: true,
+      rooms: [],
+    }
+  }
+
   try {
     return {
       ok: true,
@@ -64,83 +48,52 @@ async function load_rooms(
   }
 }
 
+function serialize_error(error: unknown) {
+  return {
+    error_message: error instanceof Error ? error.message : String(error),
+    error_code:
+      error && typeof error === 'object' && 'code' in error
+        ? (error as { code?: unknown }).code ?? null
+        : null,
+  }
+}
+
+async function load_reception_state(
+  admin_user_uuid: string,
+): Promise<'open' | 'closed'> {
+  try {
+    const reception = await read_admin_reception(admin_user_uuid)
+    return reception.state
+  } catch (error) {
+    await debug_event({
+      category: 'admin_management',
+      event: 'reception_state_load_failed',
+      payload: {
+        admin_user_uuid,
+        ...serialize_error(error),
+      },
+    })
+
+    return 'closed'
+  }
+}
+
 export default async function AdminReceptionPage({
   searchParams,
 }: AdminReceptionPageProps) {
+  const access = await require_admin_route_access('/admin/reception')
   const params = await searchParams
   const selected_mode = parse_mode(params?.mode)
-  const result = await load_rooms(selected_mode)
-  const rooms = result.rooms
+  const reception_state = await load_reception_state(access.user_uuid)
+  const result = await load_rooms(selected_mode, reception_state)
 
   return (
-    <div className="flex flex-col gap-4">
-      <header>
-        <nav
-          aria-label="Breadcrumb"
-          className="flex items-center gap-1.5 text-[12px] font-medium text-neutral-500"
-        >
-          <Link href="/admin" className="transition-colors hover:text-black">
-            Home
-          </Link>
-          <span aria-hidden>{'>'}</span>
-          <span className="text-neutral-900">チャット一覧</span>
-        </nav>
-      </header>
-
-      <div className="grid grid-cols-2 gap-1 rounded-full bg-neutral-200/70 p-1">
-        {tabs.map((tab) => {
-          const is_selected = tab.mode === selected_mode
-
-          return (
-            <Link
-              key={tab.mode}
-              href={`/admin/reception?mode=${tab.mode}`}
-              className={`rounded-full px-3 py-2 text-center text-[12px] font-semibold transition-colors ${
-                is_selected
-                  ? 'bg-white text-black shadow-[0_1px_4px_rgba(0,0,0,0.08)]'
-                  : 'text-neutral-500 hover:text-black'
-              }`}
-              aria-current={is_selected ? 'page' : undefined}
-            >
-              {tab.label}
-            </Link>
-          )
-        })}
-      </div>
-
-      <section
-        aria-label="Reception search"
-        className="rounded-2xl border border-neutral-200 bg-white p-3 shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
-      >
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
-            strokeWidth={2}
-            aria-hidden
-          />
-          <input
-            type="search"
-            inputMode="search"
-            placeholder="名前・メッセージで検索"
-            readOnly
-            className="block w-full rounded-full border border-neutral-200 bg-white py-2 pl-9 pr-3 text-[13px] text-black placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900"
-          />
-        </div>
-      </section>
-
-      {!result.ok ? (
-        <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
-          チャット一覧を読み込めませんでした
-        </div>
-      ) : rooms.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
-          {selected_mode === 'concierge'
-            ? 'コンシェルジュ案件はまだありません'
-            : 'ボット対応中のルームはまだありません'}
-        </div>
-      ) : (
-        <AdminReceptionRoomListLive initial_rooms={rooms} />
-      )}
-    </div>
+    <AdminReceptionList
+      admin_user_uuid={access.user_uuid}
+      initial_state={reception_state}
+      initial_rooms={result.rooms}
+      mode={selected_mode}
+      load_ok={result.ok}
+    />
   )
 }
