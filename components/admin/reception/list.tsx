@@ -293,7 +293,10 @@ export default function AdminReceptionList({
             : 'ボット対応中のルームはまだありません'}
         </div>
       ) : (
-        <AdminReceptionRoomListLive initial_rooms={rooms} />
+        <AdminReceptionRoomListLive
+          initial_rooms={rooms}
+          reception_state={reception_state}
+        />
       )}
     </div>
   )

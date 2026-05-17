@@ -16,6 +16,7 @@ import {
   type room_card_summary_type,
   type reception_room,
 } from '@/lib/admin/reception/display'
+import type { reception_state } from '@/lib/admin/reception/rules'
 import {
   merge_admin_support_staff_from_presence,
   reception_room_refresh_admin_support_strings,
@@ -48,6 +49,7 @@ import { handle_chat_message_toast } from '@/lib/output/toast'
 type admin_reception_room_list_live_props = {
   initial_rooms: reception_room[]
   limit?: number
+  reception_state?: reception_state
 }
 
 function format_time(iso: string | null): string {
@@ -160,6 +162,7 @@ async function fetch_admin_room_card(room_uuid: string) {
 export default function AdminReceptionRoomListLive({
   initial_rooms,
   limit,
+  reception_state = 'open',
 }: admin_reception_room_list_live_props) {
   const [rooms, set_rooms] = useState(initial_rooms)
   const { session } = use_session_profile()
@@ -196,6 +199,16 @@ export default function AdminReceptionRoomListLive({
     typeof limit === 'number' ? rooms.slice(0, Math.max(0, limit)) : rooms
 
   useEffect(() => {
+    if (reception_state !== 'open') {
+      set_rooms([])
+    }
+  }, [reception_state])
+
+  useEffect(() => {
+    if (reception_state !== 'open') {
+      return
+    }
+
     if (session?.role !== 'admin') {
       return
     }
@@ -263,9 +276,13 @@ export default function AdminReceptionRoomListLive({
     return () => {
       window.clearInterval(tick)
     }
-  }, [room_key, session?.role])
+  }, [reception_state, room_key, session?.role])
 
   useEffect(() => {
+    if (reception_state !== 'open') {
+      return
+    }
+
     if (session?.role !== 'admin') {
       return
     }
@@ -1420,7 +1437,17 @@ export default function AdminReceptionRoomListLive({
         void supabase.removeChannel(rooms_unread_channel)
       }
     }
-  }, [room_key, session?.role, session?.tier, session?.user_uuid])
+  }, [
+    reception_state,
+    room_key,
+    session?.role,
+    session?.tier,
+    session?.user_uuid,
+  ])
+
+  if (reception_state !== 'open') {
+    return null
+  }
 
   return (
     <>
