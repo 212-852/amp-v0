@@ -301,10 +301,16 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
       }).catch(() => {})
     }
 
-    const heartbeat = window.setInterval(() => {
+    const post_visible_heartbeat = () => {
       if (document.visibilityState === 'visible') {
         post_presence('admin_support_heartbeat')
       }
+    }
+
+    post_visible_heartbeat()
+
+    const heartbeat = window.setInterval(() => {
+      post_visible_heartbeat()
     }, 20_000)
 
     const on_visibility_change = () => {
@@ -314,6 +320,7 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
       }
 
       post_presence('admin_support_recovered')
+      post_visible_heartbeat()
     }
 
     const on_page_hide = () => {

@@ -194,6 +194,22 @@ async function participant_user_uuid_for_debug(input: {
   return typeof u === 'string' && u.trim() ? u.trim() : null
 }
 
+async function hide_other_admin_presence_rooms(input: {
+  admin_user_uuid: string
+  room_uuid: string
+}) {
+  const now = new Date().toISOString()
+
+  await supabase
+    .from('admin_presence')
+    .update({
+      visibility_state: 'hidden',
+      updated_at: now,
+    })
+    .eq('admin_user_uuid', input.admin_user_uuid)
+    .neq('room_uuid', input.room_uuid)
+}
+
 async function upsert_admin_presence_state(input: {
   room_uuid: string
   participant_uuid: string
@@ -221,6 +237,15 @@ async function upsert_admin_presence_state(input: {
       participant_uuid: input.participant_uuid,
       visibility_state: input.visibility_state,
       error: result.error.message,
+    })
+
+    return
+  }
+
+  if (input.visibility_state === 'visible' && admin_user_uuid) {
+    await hide_other_admin_presence_rooms({
+      admin_user_uuid,
+      room_uuid: input.room_uuid,
     })
   }
 }

@@ -28,6 +28,7 @@ type admin_active_room_state = {
   visibility_state: string | null
   last_seen_at: string | null
   is_active_same_room: boolean
+  active_same_room_reason: string
 }
 
 type admin_notification_candidate = {
@@ -87,6 +88,7 @@ type admin_debug_payload = {
   active_room_uuid?: string | null
   visibility_state?: string | null
   last_seen_at?: string | null
+  active_same_room_reason?: string | null
   admin_participant_uuid?: string | null
   app_visibility_state?: string | null
   error_code?: string | null
@@ -150,6 +152,57 @@ function format_selected_method(methods: Array<'push' | 'line'>): string {
   return methods.join('->') || 'none'
 }
 
+function resolve_active_same_room_reason(input: {
+  target_room_uuid: string
+  active_room_uuid: string | null
+  visibility_state: string | null
+  last_seen_at: string | null
+  now?: Date
+}): {
+  is_active_same_room: boolean
+  active_same_room_reason: string
+} {
+  if (input.active_room_uuid !== input.target_room_uuid) {
+    return {
+      is_active_same_room: false,
+      active_same_room_reason:
+        input.active_room_uuid === null
+          ? 'different_screen_or_closed'
+          : 'different_screen',
+    }
+  }
+
+  if (input.visibility_state !== 'visible') {
+    return {
+      is_active_same_room: false,
+      active_same_room_reason:
+        input.visibility_state === 'hidden'
+          ? 'background_or_closed'
+          : 'not_visible',
+    }
+  }
+
+  const recent = derive_presence_recent_within_ms({
+    last_seen_at: input.last_seen_at,
+    is_typing: false,
+    typing_at: null,
+    active_within_ms: admin_line_active_same_room_threshold_ms,
+    now: input.now,
+  })
+
+  if (!recent) {
+    return {
+      is_active_same_room: false,
+      active_same_room_reason: 'stale_last_seen',
+    }
+  }
+
+  return {
+    is_active_same_room: true,
+    active_same_room_reason: 'same_room_visible',
+  }
+}
+
 function resolve_is_active_same_room(input: {
   target_room_uuid: string
   active_room_uuid: string | null
@@ -157,21 +210,7 @@ function resolve_is_active_same_room(input: {
   last_seen_at: string | null
   now?: Date
 }): boolean {
-  if (input.active_room_uuid !== input.target_room_uuid) {
-    return false
-  }
-
-  if (input.visibility_state !== 'visible') {
-    return false
-  }
-
-  return derive_presence_recent_within_ms({
-    last_seen_at: input.last_seen_at,
-    is_typing: false,
-    typing_at: null,
-    active_within_ms: admin_line_active_same_room_threshold_ms,
-    now: input.now,
-  })
+  return resolve_active_same_room_reason(input).is_active_same_room
 }
 
 function empty_admin_active_room_state(): admin_active_room_state {
@@ -181,6 +220,7 @@ function empty_admin_active_room_state(): admin_active_room_state {
     visibility_state: null,
     last_seen_at: null,
     is_active_same_room: false,
+    active_same_room_reason: 'different_screen_or_closed',
   }
 }
 
@@ -241,18 +281,21 @@ async function load_admin_active_room_state_by_user_uuid(
       continue
     }
 
+    const active_same_room = resolve_active_same_room_reason({
+      target_room_uuid: clean_room_uuid,
+      active_room_uuid,
+      visibility_state,
+      last_seen_at,
+      now,
+    })
+
     state_by_user_uuid.set(user_uuid, {
       admin_participant_uuid: participant_uuid,
       active_room_uuid,
       visibility_state,
       last_seen_at,
-      is_active_same_room: resolve_is_active_same_room({
-        target_room_uuid: clean_room_uuid,
-        active_room_uuid,
-        visibility_state,
-        last_seen_at,
-        now,
-      }),
+      is_active_same_room: active_same_room.is_active_same_room,
+      active_same_room_reason: active_same_room.active_same_room_reason,
     })
   }
 
@@ -536,6 +579,7 @@ export async function route_admin_push_notification(
       active_room_uuid: active_state.active_room_uuid,
       visibility_state: active_state.visibility_state,
       last_seen_at: active_state.last_seen_at,
+      active_same_room_reason: active_state.active_same_room_reason,
       app_visibility_state: active_state.visibility_state,
       header_status: candidate.header_status,
       chat_reception_enabled: candidate.chat_reception_enabled,
@@ -620,8 +664,8 @@ export async function route_admin_push_notification(
         'admin_notification_skipped_active_same_room',
         {
           ...base_debug,
-          skipped_reason: 'active_same_room',
-          notification_skipped_reason: 'active_same_room',
+          skipped_reason: 'active_same_room_visible',
+          notification_skipped_reason: 'active_same_room_visible',
         },
       )
       await emit_admin_notification_debug(
