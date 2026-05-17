@@ -204,6 +204,7 @@ async function hide_other_admin_presence_rooms(input: {
     .from('admin_presence')
     .update({
       visibility_state: 'hidden',
+      realtime_active: false,
       updated_at: now,
     })
     .eq('admin_user_uuid', input.admin_user_uuid)
@@ -217,6 +218,7 @@ async function upsert_admin_presence_state(input: {
 }) {
   const admin_user_uuid = await participant_user_uuid_for_debug(input)
   const now = new Date().toISOString()
+  const realtime_active = input.visibility_state === 'visible'
   const result = await supabase
     .from('admin_presence')
     .upsert(
@@ -225,6 +227,7 @@ async function upsert_admin_presence_state(input: {
         room_uuid: input.room_uuid,
         admin_user_uuid,
         visibility_state: input.visibility_state,
+        realtime_active,
         last_seen_at: now,
         updated_at: now,
       },

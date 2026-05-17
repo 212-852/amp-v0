@@ -801,6 +801,8 @@ export function resolve_debug_rule(input: {
     'admin_notification_candidate_checked',
     'admin_notification_active_room_checked',
     'admin_notification_active_state_checked',
+    'admin_notification_background_detected',
+    'admin_notification_closed_detected',
     'admin_line_active_same_room_checked',
     'admin_notification_skipped_active_same_room',
     'admin_line_notification_skipped_active_same_room',

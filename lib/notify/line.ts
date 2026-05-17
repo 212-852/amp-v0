@@ -13,7 +13,49 @@ function line_flex_new_chat_message(input: {
   title: string
   body: string
   open_url: string
+  cta_label?: string
 }): line_reply_message {
+  const cta_label =
+    typeof input.cta_label === 'string' && input.cta_label.trim().length > 0
+      ? input.cta_label.trim()
+      : '\u30c1\u30e3\u30c3\u30c8\u3092\u958b\u304f'
+
+  const body_contents: Array<Record<string, unknown>> = [
+    {
+      type: 'text',
+      text: input.title,
+      weight: 'bold',
+      size: 'lg',
+      wrap: true,
+    },
+  ]
+
+  if (input.body.trim().length > 0) {
+    body_contents.push({
+      type: 'text',
+      text: input.body,
+      size: 'sm',
+      wrap: true,
+    })
+  }
+
+  body_contents.push(
+    {
+      type: 'separator',
+      margin: 'md',
+    },
+    {
+      type: 'button',
+      style: 'primary',
+      height: 'sm',
+      action: {
+        type: 'uri',
+        label: cta_label,
+        uri: input.open_url,
+      },
+    },
+  )
+
   return {
     type: 'flex',
     altText: input.title,
@@ -24,31 +66,7 @@ function line_flex_new_chat_message(input: {
         type: 'box',
         layout: 'vertical',
         spacing: 'md',
-        contents: [
-          {
-            type: 'text',
-            text: input.title,
-            weight: 'bold',
-            size: 'lg',
-            wrap: true,
-          },
-          {
-            type: 'text',
-            text: input.body,
-            size: 'sm',
-            wrap: true,
-          },
-          {
-            type: 'button',
-            style: 'primary',
-            height: 'sm',
-            action: {
-              type: 'uri',
-              label: '\u30c1\u30e3\u30c3\u30c8\u3092\u958b\u304f',
-              uri: input.open_url,
-            },
-          },
-        ],
+        contents: body_contents,
       },
     },
   }
@@ -93,6 +111,7 @@ export type line_push_notify_input = {
   open_url?: string | null
   title?: string | null
   body?: string | null
+  cta_label?: string | null
   should_include_body?: boolean
   selected_route?: string | null
 }
@@ -157,7 +176,14 @@ export async function send_line_push_notify(
       },
     })
 
-    messages = [line_flex_new_chat_message({ title, body, open_url })]
+    messages = [
+      line_flex_new_chat_message({
+        title,
+        body,
+        open_url,
+        cta_label: input.cta_label ?? undefined,
+      }),
+    ]
 
     await debug_event({
       category: 'pwa',

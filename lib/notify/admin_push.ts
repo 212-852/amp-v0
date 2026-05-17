@@ -10,6 +10,11 @@ import {
   normalize_notification_preferences,
   type notification_preferences,
 } from '@/lib/notification/rules'
+import { normalize_locale, type locale_key } from '@/lib/locale/action'
+import {
+  resolve_admin_line_notification_copy,
+} from '@/lib/notify/admin_line_card'
+import { read_requester_display_name } from '@/lib/notify/recipients'
 import { resolve_push_subscription_enabled_for_notify } from '@/lib/notify/push_gate'
 
 import { send_push_notify } from './push'
@@ -20,13 +25,16 @@ import {
 } from './discord'
 
 const admin_notification_phase = 'lib/notify/admin_push.ts'
-const admin_line_active_same_room_threshold_ms = 25_000
+const admin_line_active_same_room_threshold_ms = 30_000
 
 type admin_active_room_state = {
   admin_participant_uuid: string | null
   active_room_uuid: string | null
   visibility_state: string | null
   last_seen_at: string | null
+  realtime_active: boolean
+  has_presence_row: boolean
+  participant_recent: boolean
   is_active_same_room: boolean
   active_same_room_reason: string
 }
@@ -91,6 +99,9 @@ type admin_debug_payload = {
   active_same_room_reason?: string | null
   admin_participant_uuid?: string | null
   app_visibility_state?: string | null
+  realtime_active?: boolean | null
+  display_name?: string | null
+  latest_message_preview?: string | null
   error_code?: string | null
   error_message?: string | null
 }
@@ -119,6 +130,8 @@ type admin_notification_debug_event =
   | 'admin_line_send_started'
   | 'admin_line_send_succeeded'
   | 'admin_line_send_failed'
+  | 'admin_notification_background_detected'
+  | 'admin_notification_closed_detected'
   | 'admin_discord_fallback_started'
 
 async function emit_admin_notification_debug(
@@ -157,6 +170,9 @@ function resolve_active_same_room_reason(input: {
   active_room_uuid: string | null
   visibility_state: string | null
   last_seen_at: string | null
+  realtime_active: boolean
+  has_presence_row: boolean
+  participant_recent: boolean
   now?: Date
 }): {
   is_active_same_room: boolean
@@ -172,13 +188,10 @@ function resolve_active_same_room_reason(input: {
     }
   }
 
-  if (input.visibility_state !== 'visible') {
+  if (input.visibility_state === 'hidden') {
     return {
       is_active_same_room: false,
-      active_same_room_reason:
-        input.visibility_state === 'hidden'
-          ? 'background_or_closed'
-          : 'not_visible',
+      active_same_room_reason: 'background_or_closed',
     }
   }
 
@@ -190,6 +203,24 @@ function resolve_active_same_room_reason(input: {
     now: input.now,
   })
 
+  if (
+    input.visibility_state === 'visible' &&
+    recent &&
+    input.realtime_active
+  ) {
+    return {
+      is_active_same_room: true,
+      active_same_room_reason: 'same_room_visible',
+    }
+  }
+
+  if (!input.has_presence_row && !input.participant_recent) {
+    return {
+      is_active_same_room: false,
+      active_same_room_reason: 'different_screen_or_closed',
+    }
+  }
+
   if (!recent) {
     return {
       is_active_same_room: false,
@@ -197,20 +228,17 @@ function resolve_active_same_room_reason(input: {
     }
   }
 
-  return {
-    is_active_same_room: true,
-    active_same_room_reason: 'same_room_visible',
+  if (!input.realtime_active) {
+    return {
+      is_active_same_room: false,
+      active_same_room_reason: 'realtime_inactive',
+    }
   }
-}
 
-function resolve_is_active_same_room(input: {
-  target_room_uuid: string
-  active_room_uuid: string | null
-  visibility_state: string | null
-  last_seen_at: string | null
-  now?: Date
-}): boolean {
-  return resolve_active_same_room_reason(input).is_active_same_room
+  return {
+    is_active_same_room: false,
+    active_same_room_reason: 'not_visible',
+  }
 }
 
 function empty_admin_active_room_state(): admin_active_room_state {
@@ -219,9 +247,93 @@ function empty_admin_active_room_state(): admin_active_room_state {
     active_room_uuid: null,
     visibility_state: null,
     last_seen_at: null,
+    realtime_active: false,
+    has_presence_row: false,
+    participant_recent: false,
     is_active_same_room: false,
     active_same_room_reason: 'different_screen_or_closed',
   }
+}
+
+async function load_participant_recent_by_user_uuid(input: {
+  room_uuid: string
+  user_uuids: string[]
+}): Promise<Map<string, boolean>> {
+  const clean_room_uuid = clean_uuid(input.room_uuid)
+
+  if (!clean_room_uuid || input.user_uuids.length === 0) {
+    return new Map()
+  }
+
+  const result = await supabase
+    .from('participants')
+    .select('user_uuid, last_seen_at, is_typing, typing_at')
+    .eq('room_uuid', clean_room_uuid)
+    .in('user_uuid', input.user_uuids)
+    .in('role', ['admin', 'concierge'])
+
+  if (result.error) {
+    return new Map()
+  }
+
+  const now = new Date()
+  const recent_by_user_uuid = new Map<string, boolean>()
+
+  for (const row of result.data ?? []) {
+    const user_uuid = clean_uuid(
+      typeof row.user_uuid === 'string' ? row.user_uuid : null,
+    )
+
+    if (!user_uuid || recent_by_user_uuid.has(user_uuid)) {
+      continue
+    }
+
+    recent_by_user_uuid.set(
+      user_uuid,
+      derive_presence_recent_within_ms({
+        last_seen_at:
+          typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+        is_typing: row.is_typing === true,
+        typing_at: typeof row.typing_at === 'string' ? row.typing_at : null,
+        active_within_ms: admin_line_active_same_room_threshold_ms,
+        now,
+      }),
+    )
+  }
+
+  return recent_by_user_uuid
+}
+
+async function load_admin_locale_by_user_uuid(
+  user_uuids: string[],
+): Promise<Map<string, locale_key>> {
+  if (user_uuids.length === 0) {
+    return new Map()
+  }
+
+  const result = await supabase
+    .from('users')
+    .select('user_uuid, locale')
+    .in('user_uuid', user_uuids)
+
+  if (result.error) {
+    return new Map()
+  }
+
+  const locale_by_user_uuid = new Map<string, locale_key>()
+
+  for (const row of result.data ?? []) {
+    if (typeof row.user_uuid !== 'string' || row.user_uuid.length === 0) {
+      continue
+    }
+
+    locale_by_user_uuid.set(
+      row.user_uuid,
+      normalize_locale(typeof row.locale === 'string' ? row.locale : null),
+    )
+  }
+
+  return locale_by_user_uuid
 }
 
 async function load_admin_active_room_state_by_user_uuid(
@@ -234,14 +346,20 @@ async function load_admin_active_room_state_by_user_uuid(
     return new Map()
   }
 
-  const result = await supabase
-    .from('admin_presence')
-    .select(
-      'participant_uuid, room_uuid, admin_user_uuid, visibility_state, last_seen_at, updated_at',
-    )
-    .eq('room_uuid', clean_room_uuid)
-    .in('admin_user_uuid', user_uuids)
-    .order('updated_at', { ascending: false })
+  const [result, participant_recent_by_user_uuid] = await Promise.all([
+    supabase
+      .from('admin_presence')
+      .select(
+        'participant_uuid, room_uuid, admin_user_uuid, visibility_state, last_seen_at, realtime_active, updated_at',
+      )
+      .eq('room_uuid', clean_room_uuid)
+      .in('admin_user_uuid', user_uuids)
+      .order('updated_at', { ascending: false }),
+    load_participant_recent_by_user_uuid({
+      room_uuid: clean_room_uuid,
+      user_uuids,
+    }),
+  ])
 
   if (result.error) {
     await debug_event({
@@ -276,6 +394,7 @@ async function load_admin_active_room_state_by_user_uuid(
       typeof row.visibility_state === 'string' ? row.visibility_state : null
     const last_seen_at =
       typeof row.last_seen_at === 'string' ? row.last_seen_at : null
+    const realtime_active = row.realtime_active === true
 
     if (!user_uuid || state_by_user_uuid.has(user_uuid)) {
       continue
@@ -286,6 +405,9 @@ async function load_admin_active_room_state_by_user_uuid(
       active_room_uuid,
       visibility_state,
       last_seen_at,
+      realtime_active,
+      has_presence_row: true,
+      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
       now,
     })
 
@@ -294,6 +416,38 @@ async function load_admin_active_room_state_by_user_uuid(
       active_room_uuid,
       visibility_state,
       last_seen_at,
+      realtime_active,
+      has_presence_row: true,
+      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
+      is_active_same_room: active_same_room.is_active_same_room,
+      active_same_room_reason: active_same_room.active_same_room_reason,
+    })
+  }
+
+  for (const user_uuid of user_uuids) {
+    if (state_by_user_uuid.has(user_uuid)) {
+      continue
+    }
+
+    const active_same_room = resolve_active_same_room_reason({
+      target_room_uuid: clean_room_uuid,
+      active_room_uuid: null,
+      visibility_state: null,
+      last_seen_at: null,
+      realtime_active: false,
+      has_presence_row: false,
+      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
+      now,
+    })
+
+    state_by_user_uuid.set(user_uuid, {
+      admin_participant_uuid: null,
+      active_room_uuid: null,
+      visibility_state: null,
+      last_seen_at: null,
+      realtime_active: false,
+      has_presence_row: false,
+      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
       is_active_same_room: active_same_room.is_active_same_room,
       active_same_room_reason: active_same_room.active_same_room_reason,
     })
@@ -527,6 +681,14 @@ export async function route_admin_push_notification(
   input: admin_push_route_input,
 ): Promise<admin_push_route_result> {
   const push_url = resolve_admin_notification_open_url(input.room_uuid)
+  const raw_sender_display_name = await read_requester_display_name(
+    input.actor_user_uuid,
+  )
+  const sender_display_name =
+    raw_sender_display_name.trim() &&
+    raw_sender_display_name !== '\u30e6\u30fc\u30b6\u30fc'
+      ? raw_sender_display_name
+      : null
 
   await emit_admin_notification_debug('admin_notification_rule_checked', {
     room_uuid: input.room_uuid,
@@ -540,12 +702,16 @@ export async function route_admin_push_notification(
   })
 
   let candidates: admin_notification_candidate[] = []
+  let admin_locale_by_user_uuid = new Map<string, locale_key>()
 
   try {
     candidates = await load_admin_notification_candidates({
       room_uuid: input.room_uuid,
       exclude_user_uuid: input.actor_user_uuid,
     })
+    admin_locale_by_user_uuid = await load_admin_locale_by_user_uuid(
+      candidates.map((candidate) => candidate.user_uuid),
+    )
   } catch (error) {
     return {
       outcome: 'failed',
@@ -565,6 +731,12 @@ export async function route_admin_push_notification(
     const line_enabled = candidate.preferences.line_enabled === true
     const both_methods_enabled = pwa_enabled && line_enabled
     const active_state = candidate.active_state
+    const admin_locale = admin_locale_by_user_uuid.get(candidate.user_uuid) ?? 'ja'
+    const line_copy = resolve_admin_line_notification_copy({
+      locale: admin_locale,
+      sender_display_name,
+      message_text: input.message,
+    })
 
     const base_debug: admin_debug_payload = {
       admin_user_uuid: candidate.user_uuid,
@@ -580,6 +752,9 @@ export async function route_admin_push_notification(
       visibility_state: active_state.visibility_state,
       last_seen_at: active_state.last_seen_at,
       active_same_room_reason: active_state.active_same_room_reason,
+      realtime_active: active_state.realtime_active,
+      display_name: line_copy.display_name,
+      latest_message_preview: line_copy.latest_message_preview,
       app_visibility_state: active_state.visibility_state,
       header_status: candidate.header_status,
       chat_reception_enabled: candidate.chat_reception_enabled,
@@ -616,6 +791,23 @@ export async function route_admin_push_notification(
       'admin_line_active_same_room_checked',
       base_debug,
     )
+
+    if (active_state.active_same_room_reason === 'background_or_closed') {
+      await emit_admin_notification_debug(
+        'admin_notification_background_detected',
+        base_debug,
+      )
+    }
+
+    if (
+      active_state.active_same_room_reason === 'different_screen_or_closed' ||
+      active_state.active_same_room_reason === 'stale_last_seen'
+    ) {
+      await emit_admin_notification_debug('admin_notification_closed_detected', {
+        ...base_debug,
+        skipped_reason: active_state.active_same_room_reason,
+      })
+    }
 
     if (candidate.header_status === 'off') {
       await emit_admin_notification_debug(
@@ -758,8 +950,8 @@ export async function route_admin_push_notification(
 
         const push = await send_push_notify({
           user_uuid: candidate.user_uuid,
-          title: input.title,
-          message: input.message,
+          title: line_copy.title,
+          message: line_copy.latest_message_preview,
           room_uuid: input.room_uuid,
           message_uuid: input.message_uuid,
           kind: 'chat',
@@ -812,9 +1004,10 @@ export async function route_admin_push_notification(
         try {
           const line_result = await send_line_push_notify({
             line_user_id: candidate.line_user_id,
-            message: input.message,
-            title: input.title,
-            body: input.message,
+            message: line_copy.latest_message_preview,
+            title: line_copy.title,
+            body: line_copy.body,
+            cta_label: line_copy.cta_label,
             open_url: push_url,
             user_uuid: candidate.user_uuid,
             room_uuid: input.room_uuid,
