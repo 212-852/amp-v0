@@ -375,6 +375,26 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const temporary_reception_visibility_events = new Set([
+    'reception_state_loaded',
+    'reception_state_realtime_received',
+    'reception_state_changed',
+    'reception_render_gate_checked',
+    'reception_rooms_cleared',
+    'reception_rooms_refetched',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    temporary_reception_visibility_events.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: ['discord'],
+    }
+  }
+
   if (
     input.category === 'admin_chat' &&
     input.event === 'support_started_notify_discord_id_missing'

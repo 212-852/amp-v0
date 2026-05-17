@@ -31,6 +31,28 @@ const tabs: Array<{ mode: reception_room_mode; label: string }> = [
   { mode: 'bot', label: 'ボット' },
 ]
 
+function debug_reception_visibility(input: {
+  event: string
+  admin_user_uuid: string
+  reception_state: reception_list_state
+  previous_state: reception_list_state | null
+  next_state: reception_list_state | null
+  room_count: number
+  source: 'initial_load' | 'realtime' | 'toggle' | 'render'
+}) {
+  send_admin_chat_debug({
+    event: input.event,
+    admin_user_uuid: input.admin_user_uuid,
+    reception_state: input.reception_state,
+    previous_state: input.previous_state,
+    next_state: input.next_state,
+    room_count: input.room_count,
+    should_render_rooms: input.reception_state === 'open',
+    source_channel: input.source,
+    phase: 'admin_reception_list_visibility',
+  })
+}
+
 export default function AdminReceptionList({
   admin_user_uuid,
   initial_state,
@@ -42,6 +64,19 @@ export default function AdminReceptionList({
     useState<reception_list_state>('loading')
   const [rooms, set_rooms] = useState<reception_room[]>([])
   const [rooms_load_ok, set_rooms_load_ok] = useState(load_ok)
+  const should_render_rooms = reception_state === 'open'
+
+  useEffect(() => {
+    debug_reception_visibility({
+      event: 'reception_render_gate_checked',
+      admin_user_uuid,
+      reception_state,
+      previous_state: null,
+      next_state: reception_state,
+      room_count: rooms.length,
+      source: 'render',
+    })
+  }, [admin_user_uuid, reception_state, rooms.length])
 
   useEffect(() => {
     set_reception_state('loading')
@@ -78,15 +113,45 @@ export default function AdminReceptionList({
     set_reception_state(next_state)
     set_rooms(next_state === 'open' ? payload.rooms : [])
     set_rooms_load_ok(true)
+    debug_reception_visibility({
+      event: 'reception_rooms_refetched',
+      admin_user_uuid,
+      reception_state: next_state,
+      previous_state: reception_state,
+      next_state,
+      room_count: next_state === 'open' ? payload.rooms.length : 0,
+      source: 'realtime',
+    })
   }, [mode])
 
   const apply_reception_state = useCallback(
     (next_state: reception_state, options?: { refetch?: boolean }) => {
+      const previous_state = reception_state
+
       set_reception_state(next_state)
+
+      debug_reception_visibility({
+        event: 'reception_state_changed',
+        admin_user_uuid,
+        reception_state: next_state,
+        previous_state,
+        next_state,
+        room_count: next_state === 'open' ? rooms.length : 0,
+        source: options?.refetch ? 'realtime' : 'initial_load',
+      })
 
       if (next_state !== 'open') {
         set_rooms([])
         set_rooms_load_ok(true)
+        debug_reception_visibility({
+          event: 'reception_rooms_cleared',
+          admin_user_uuid,
+          reception_state: next_state,
+          previous_state,
+          next_state,
+          room_count: 0,
+          source: options?.refetch ? 'realtime' : 'initial_load',
+        })
         return
       }
 
@@ -109,7 +174,7 @@ export default function AdminReceptionList({
       set_rooms(initial_rooms)
       set_rooms_load_ok(load_ok)
     },
-    [admin_user_uuid, initial_rooms, load_ok, refetch_rooms],
+    [admin_user_uuid, initial_rooms, load_ok, reception_state, refetch_rooms, rooms.length],
   )
 
   useEffect(() => {
@@ -159,6 +224,15 @@ export default function AdminReceptionList({
 
       const row = result.data as { state?: unknown } | null
       const next_state = normalize_reception_state(row?.state) ?? 'closed'
+      debug_reception_visibility({
+        event: 'reception_state_loaded',
+        admin_user_uuid,
+        reception_state: next_state,
+        previous_state: reception_state,
+        next_state,
+        room_count: next_state === 'open' ? initial_rooms.length : 0,
+        source: 'initial_load',
+      })
       apply_reception_state(next_state)
     })()
 
@@ -169,6 +243,15 @@ export default function AdminReceptionList({
         return
       }
 
+      debug_reception_visibility({
+        event: 'reception_state_realtime_received',
+        admin_user_uuid,
+        reception_state: next_state,
+        previous_state: reception_state,
+        next_state,
+        room_count: next_state === 'open' ? rooms.length : 0,
+        source: 'realtime',
+      })
       apply_reception_state(next_state, { refetch: next_state === 'open' })
     }
 
@@ -216,7 +299,13 @@ export default function AdminReceptionList({
       cancelled = true
       void supabase.removeChannel(channel)
     }
-  }, [admin_user_uuid, apply_reception_state])
+  }, [
+    admin_user_uuid,
+    apply_reception_state,
+    initial_rooms.length,
+    reception_state,
+    rooms.length,
+  ])
 
   return (
     <div className="flex flex-col gap-4">
@@ -278,7 +367,7 @@ export default function AdminReceptionList({
         <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
           ...
         </div>
-      ) : reception_state !== 'open' ? (
+      ) : !should_render_rooms ? (
         <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
           Chat reception is OFF
         </div>

@@ -10,6 +10,7 @@ export function send_admin_chat_debug(input: {
   active_room_uuid?: string | null
   admin_user_uuid?: string | null
   admin_participant_uuid?: string | null
+  source_channel?: string | null
   component_file?: string | null
   support_lifecycle_owner?: string | null
   pathname?: string | null
@@ -40,6 +41,11 @@ export function send_admin_chat_debug(input: {
   item_key?: string | null
   event_type?: string | null
   reason?: string | null
+  reception_state?: string | null
+  previous_state?: string | null
+  next_state?: string | null
+  room_count?: number | null
+  should_render_rooms?: boolean | null
 }) {
   const pathname =
     input.pathname ??
@@ -57,6 +63,7 @@ export function send_admin_chat_debug(input: {
       active_room_uuid: input.active_room_uuid ?? input.room_uuid ?? null,
       admin_user_uuid: input.admin_user_uuid ?? null,
       admin_participant_uuid: input.admin_participant_uuid ?? null,
+      source_channel: input.source_channel ?? 'admin',
       component_file: input.component_file ?? null,
       support_lifecycle_owner: input.support_lifecycle_owner ?? null,
       pathname,
@@ -92,6 +99,15 @@ export function send_admin_chat_debug(input: {
       item_key: input.item_key ?? input.ignored_reason ?? null,
       event_type: input.event_type ?? null,
       reason: input.reason ?? null,
+      reception_state: input.reception_state ?? null,
+      previous_state: input.previous_state ?? null,
+      next_state: input.next_state ?? null,
+      room_count:
+        typeof input.room_count === 'number' ? input.room_count : null,
+      should_render_rooms:
+        typeof input.should_render_rooms === 'boolean'
+          ? input.should_render_rooms
+          : null,
     }),
   }).catch(() => {})
 }

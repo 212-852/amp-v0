@@ -119,6 +119,11 @@ type chat_debug_body = {
   pathname?: unknown
   action_type?: unknown
   owner?: unknown
+  reception_state?: unknown
+  previous_state?: unknown
+  next_state?: unknown
+  room_count?: unknown
+  should_render_rooms?: unknown
 }
 
 function string_or_null(value: unknown): string | null {
@@ -290,6 +295,11 @@ export async function POST(request: Request) {
       pathname: string_or_null(body?.pathname),
       action_type: string_or_null(body?.action_type),
       owner: string_or_null(body?.owner),
+      reception_state: string_or_null(body?.reception_state),
+      previous_state: string_or_null(body?.previous_state),
+      next_state: string_or_null(body?.next_state),
+      room_count: number_or_null(body?.room_count),
+      should_render_rooms: boolean_or_null(body?.should_render_rooms),
     },
   })
 
