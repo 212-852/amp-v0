@@ -62,8 +62,28 @@ function allow_discord_debug_category(category: string, event?: string) {
     return false
   }
 
+  const line_webhook_always_discord = new Set([
+    'line_webhook_received',
+    'line_webhook_fallback_returned',
+    'line_webhook_phase_started',
+    'line_webhook_phase_succeeded',
+    'line_webhook_phase_failed',
+  ])
+
+  if (
+    category === 'line_webhook' &&
+    event &&
+    line_webhook_always_discord.has(event)
+  ) {
+    return true
+  }
+
   if (category === 'line_webhook' && !control.debug.line_webhook) {
     return false
+  }
+
+  if (category === 'recruitment' && event === 'recruitment_intent_checked') {
+    return true
   }
 
   if (category === 'line' && !control.debug.line) {

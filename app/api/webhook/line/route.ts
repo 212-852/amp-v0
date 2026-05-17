@@ -3,16 +3,22 @@ import { NextResponse } from 'next/server'
 
 import { resolve_auth_access } from '@/lib/auth/access'
 import { resolve_initial_chat } from '@/lib/chat/action'
-import { debug_event } from '@/lib/debug'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import {
   resolve_dispatch_locale,
   resolve_line_dispatch_identity,
 } from '@/lib/dispatch/context'
-import { normalize_recruitment_text } from '@/lib/recruitment/rules'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging/profile'
+import {
+  line_webhook_debug,
+  line_webhook_fallback_returned,
+  line_webhook_phase_failed,
+  line_webhook_phase_started,
+  line_webhook_phase_succeeded,
+  type line_webhook_context,
+} from '@/lib/line/webhook/debug'
 import { notify_new_user_created } from '@/lib/notify/user/created'
-import { deliver_line_text_reply } from '@/lib/output/line'
+import { detect_driver_recruitment_intent } from '@/lib/recruitment/rules'
 
 type line_webhook_event = {
   type?: string
@@ -48,14 +54,23 @@ function verify_line_signature(body: string, signature: string | null) {
   const channel_secret = process.env.LINE_MESSAGING_CHANNEL_SECRET
 
   if (!channel_secret || !signature) {
-    return false
+    return {
+      ok: false,
+      reason: !channel_secret
+        ? 'missing_line_messaging_channel_secret'
+        : 'missing_x_line_signature',
+    }
   }
 
   const hash = createHmac('sha256', channel_secret)
     .update(body)
     .digest('base64')
 
-  return hash === signature
+  if (hash !== signature) {
+    return { ok: false, reason: 'invalid_signature' }
+  }
+
+  return { ok: true, reason: null }
 }
 
 function get_allowed_user_ids() {
@@ -104,29 +119,65 @@ function serialize_error(error: unknown) {
   }
 }
 
-async function reply_line_webhook_error(input: {
-  reply_token?: string | null
-}) {
-  try {
-    await deliver_line_text_reply({
-      reply_token: input.reply_token,
-      text: 'LINE chat is temporarily unavailable. Please try again later.',
-    })
-  } catch (reply_error) {
-    console.error('[line_reply_failed]', {
-      error: serialize_error(reply_error),
-    })
+function event_context(event: line_webhook_event): line_webhook_context {
+  return {
+    line_user_id: event.source?.userId ?? null,
+    reply_token: event.replyToken ?? null,
+    message_text:
+      typeof event.message?.text === 'string' ? event.message.text : null,
+    message_id: event.message?.id ?? null,
+    event_type: event.type ?? null,
   }
 }
 
 export async function POST(request: Request) {
   const signature = request.headers.get('x-line-signature')
-  const body_text = await request.text()
 
-  if (!verify_line_signature(body_text, signature)) {
-    console.error('[line_webhook_signature_failed]', {
-      ok: false,
-      error: signature ? 'invalid_signature' : 'missing_signature',
+  await line_webhook_debug('line_webhook_received', {
+    method: request.method,
+    url: request.url,
+    headers_exist: true,
+    x_line_signature_exists: Boolean(signature),
+    body_length: null,
+    timestamp: new Date().toISOString(),
+  })
+
+  let body_text = ''
+
+  try {
+    await line_webhook_phase_started('raw_body_read')
+    body_text = await request.text()
+    await line_webhook_phase_succeeded('raw_body_read', {}, {
+      body_length: body_text.length,
+    })
+  } catch (error) {
+    await line_webhook_phase_failed('raw_body_read', {
+      reason: 'request_text_read_failed',
+      error,
+    })
+
+    return NextResponse.json(
+      { error: 'Failed to read body' },
+      { status: 400 },
+    )
+  }
+
+  await line_webhook_debug('line_webhook_received', {
+    method: request.method,
+    url: request.url,
+    headers_exist: true,
+    x_line_signature_exists: Boolean(signature),
+    body_length: body_text.length,
+    timestamp: new Date().toISOString(),
+  })
+
+  await line_webhook_phase_started('signature_verify')
+
+  const signature_result = verify_line_signature(body_text, signature)
+
+  if (!signature_result.ok) {
+    await line_webhook_phase_failed('signature_verify', {
+      reason: signature_result.reason ?? 'signature_verify_failed',
     })
 
     return NextResponse.json(
@@ -135,11 +186,22 @@ export async function POST(request: Request) {
     )
   }
 
+  await line_webhook_phase_succeeded('signature_verify')
+
   let body: line_webhook_body
 
   try {
+    await line_webhook_phase_started('event_parse')
     body = JSON.parse(body_text) as line_webhook_body
-  } catch {
+    await line_webhook_phase_succeeded('event_parse', {}, {
+      event_count: body.events?.length ?? 0,
+    })
+  } catch (error) {
+    await line_webhook_phase_failed('event_parse', {
+      reason: 'invalid_json',
+      error,
+    })
+
     return NextResponse.json(
       { error: 'Invalid JSON' },
       { status: 400 },
@@ -149,6 +211,7 @@ export async function POST(request: Request) {
   const events = body.events ?? []
 
   for (const event of events) {
+    const context = event_context(event)
     const line_user_id = event.source?.userId
 
     if (event.deliveryContext?.isRedelivery === true) {
@@ -177,10 +240,21 @@ export async function POST(request: Request) {
 
     try {
       if (!is_allowed_line_user(line_user_id)) {
+        await line_webhook_debug('line_webhook_phase_failed', {
+          phase: 'line_user_resolve',
+          reason: 'test_mode_user_not_allowed',
+          line_user_id_exists: Boolean(line_user_id),
+          reply_token_exists: Boolean(event.replyToken),
+          message_text: event.message.text,
+        })
         continue
       }
 
       if (!line_user_id) {
+        await line_webhook_phase_failed('line_user_resolve', {
+          reason: 'missing_line_user_id',
+          context,
+        })
         continue
       }
 
@@ -195,52 +269,55 @@ export async function POST(request: Request) {
           event.deliveryContext?.isRedelivery ?? null,
       }
 
-      try {
-        await debug_event({
-          category: 'pwa',
-          event: 'line_message_received',
-          payload: {
-            room_uuid: null,
-            participant_uuid: null,
-            user_uuid: null,
-            line_user_id_exists: Boolean(line_user_id),
-            message_uuid: event.message.id,
-            source_channel: 'line',
-            error_code: null,
-            error_message: null,
-          },
-        })
-      } catch {
-        /* observability only */
-      }
+      await line_webhook_phase_started('intent_check', context)
 
-      const dispatch_context = await resolve_line_dispatch_identity({
-        line_user_id,
+      detect_driver_recruitment_intent(event.message.text, {
+        source_channel: 'line',
       })
 
+      await line_webhook_phase_succeeded('intent_check', context)
+
+      await line_webhook_phase_started('line_user_resolve', context)
+
+      let dispatch_context: Awaited<
+        ReturnType<typeof resolve_line_dispatch_identity>
+      >
+
       try {
-        await debug_event({
-          category: 'recruitment',
-          event: 'line_message_context_checked',
-          payload: {
-            source_channel: 'line',
-            line_user_id_exists: Boolean(line_user_id),
-            room_uuid:
-              dispatch_context.room_result?.ok === true
-                ? dispatch_context.room_result.room.room_uuid
-                : null,
-            participant_uuid:
-              dispatch_context.room_result?.ok === true
-                ? dispatch_context.room_result.room.participant_uuid
-                : null,
-            user_uuid: dispatch_context.user_uuid,
-            message_text: event.message.text,
-            normalized_text: normalize_recruitment_text(event.message.text),
-          },
+        dispatch_context = await resolve_line_dispatch_identity({
+          line_user_id,
         })
-      } catch {
-        /* observability only */
+      } catch (dispatch_error) {
+        await line_webhook_phase_failed('line_user_resolve', {
+          reason: 'resolve_line_dispatch_identity_failed',
+          error: dispatch_error,
+          context,
+        })
+
+        throw dispatch_error
       }
+
+      const resolved_context: line_webhook_context = {
+        ...context,
+        room_uuid:
+          dispatch_context.room_result?.ok === true
+            ? dispatch_context.room_result.room.room_uuid
+            : null,
+        participant_uuid:
+          dispatch_context.room_result?.ok === true
+            ? dispatch_context.room_result.room.participant_uuid
+            : null,
+        user_uuid: dispatch_context.user_uuid,
+        visitor_uuid:
+          dispatch_context.visitor_uuid ??
+          (dispatch_context.room_result?.ok === true
+            ? dispatch_context.room_result.room.visitor_uuid
+            : null),
+      }
+
+      await line_webhook_phase_succeeded('line_user_resolve', resolved_context)
+
+      await line_webhook_phase_started('room_resolve', resolved_context)
 
       if (dispatch_context.user_uuid) {
         const resolved_locale = await resolve_dispatch_locale({
@@ -250,18 +327,36 @@ export async function POST(request: Request) {
           line_user_id,
         })
 
-        await resolve_initial_chat({
-          visitor_uuid:
-            clean_uuid(dispatch_context.visitor_uuid) ??
-            clean_uuid(dispatch_context.room_result?.room.visitor_uuid) ??
-            null,
-          user_uuid: clean_uuid(dispatch_context.user_uuid),
-          channel: 'line',
-          locale: resolved_locale.locale,
-          line_reply_token: event.replyToken ?? null,
-          line_user_id,
-          incoming_line_text,
+        await line_webhook_phase_started('recruitment_bundle_build', {
+          ...resolved_context,
         })
+
+        try {
+          await resolve_initial_chat({
+            visitor_uuid:
+              clean_uuid(dispatch_context.visitor_uuid) ??
+              clean_uuid(dispatch_context.room_result?.room.visitor_uuid) ??
+              null,
+            user_uuid: clean_uuid(dispatch_context.user_uuid),
+            channel: 'line',
+            locale: resolved_locale.locale,
+            line_reply_token: event.replyToken ?? null,
+            line_user_id,
+            incoming_line_text,
+          })
+
+          await line_webhook_phase_succeeded('output_line_send', resolved_context)
+        } catch (chat_error) {
+          await line_webhook_phase_failed('recruitment_bundle_build', {
+            reason: 'resolve_initial_chat_failed',
+            error: chat_error,
+            context: resolved_context,
+          })
+
+          throw chat_error
+        }
+
+        await line_webhook_phase_succeeded('room_resolve', resolved_context)
 
         continue
       }
@@ -287,13 +382,19 @@ export async function POST(request: Request) {
           image_url: line_image_url,
         })
       } catch (identity_error) {
-        console.error('[line_identity_create_failed]', {
-          line_user_id,
-          locale: profile_locale.locale,
-          error: serialize_error(identity_error),
+        await line_webhook_phase_failed('line_user_resolve', {
+          reason: 'resolve_auth_access_failed',
+          error: identity_error,
+          context: resolved_context,
         })
 
         throw identity_error
+      }
+
+      const access_context: line_webhook_context = {
+        ...resolved_context,
+        user_uuid: access.user_uuid,
+        visitor_uuid: access.visitor_uuid,
       }
 
       if (access.is_new_user) {
@@ -308,11 +409,10 @@ export async function POST(request: Request) {
             is_new_visitor: access.is_new_visitor,
           })
         } catch (notify_error) {
-          console.error('[new_user_notify_failed]', {
-            line_user_id,
-            user_uuid: access.user_uuid,
-            visitor_uuid: access.visitor_uuid,
-            error: serialize_error(notify_error),
+          await line_webhook_phase_failed('line_user_resolve', {
+            reason: 'new_user_notify_failed',
+            error: notify_error,
+            context: access_context,
           })
         }
       }
@@ -326,27 +426,45 @@ export async function POST(request: Request) {
         line_user_id,
       })
 
-      await resolve_initial_chat({
-        visitor_uuid: clean_uuid(access.visitor_uuid),
-        user_uuid: clean_uuid(access.user_uuid),
-        channel: 'line',
-        locale: resolved_locale.locale,
-        line_reply_token: event.replyToken ?? null,
-        line_user_id,
-        incoming_line_text,
-      })
-    } catch (error) {
-      if (event.replyToken) {
-        await reply_line_webhook_error({
-          reply_token: event.replyToken,
+      await line_webhook_phase_started('recruitment_bundle_build', access_context)
+
+      try {
+        await resolve_initial_chat({
+          visitor_uuid: clean_uuid(access.visitor_uuid),
+          user_uuid: clean_uuid(access.user_uuid),
+          channel: 'line',
+          locale: resolved_locale.locale,
+          line_reply_token: event.replyToken ?? null,
+          line_user_id,
+          incoming_line_text,
         })
+
+        await line_webhook_phase_succeeded('output_line_send', access_context)
+        await line_webhook_phase_succeeded('room_resolve', access_context)
+      } catch (chat_error) {
+        await line_webhook_phase_failed('recruitment_bundle_build', {
+          reason: 'resolve_initial_chat_failed',
+          error: chat_error,
+          context: access_context,
+        })
+
+        throw chat_error
       }
+    } catch (error) {
+      const context = event_context(event)
 
       console.error('[line_webhook_handler_failed]', {
         line_user_id: line_user_id ?? null,
         event_type: event.type ?? null,
         message_id: event.message?.id ?? null,
         error: serialize_error(error),
+      })
+
+      await line_webhook_fallback_returned({
+        phase: 'event_handler',
+        reason: 'event_handler_exception',
+        error,
+        context,
       })
     }
   }

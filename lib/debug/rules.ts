@@ -68,6 +68,42 @@ export function resolve_debug_rule(input: {
     }
   }
 
+  const line_webhook_discord_events = new Set([
+    'line_webhook_received',
+    'line_webhook_fallback_returned',
+    'line_webhook_phase_started',
+    'line_webhook_phase_succeeded',
+    'line_webhook_phase_failed',
+  ])
+
+  if (
+    input.category === 'line_webhook' &&
+    line_webhook_discord_events.has(input.event)
+  ) {
+    const is_error =
+      input.event === 'line_webhook_fallback_returned' ||
+      input.event === 'line_webhook_phase_failed'
+
+    return {
+      category: 'line_webhook',
+      level: is_error ? 'error' : 'info',
+      channels: ['discord'],
+    }
+  }
+
+  if (
+    input.category === 'recruitment' &&
+    input.event === 'recruitment_intent_checked'
+  ) {
+    const should_reply = input.payload?.should_reply === true
+
+    return {
+      category: 'recruitment',
+      level: should_reply ? 'info' : 'info',
+      channels: should_reply ? ['discord'] : [],
+    }
+  }
+
   if (
     (input.category === 'chat_message' || input.category === 'user_message') &&
     message_send_diagnostic_events.has(input.event)
