@@ -298,6 +298,7 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
           participant_uuid,
           action,
           last_channel: resolve_client_presence_source_channel(),
+          active_area: 'admin_reception_room',
         }),
       }).catch(() => {})
     }

@@ -1812,6 +1812,7 @@ export function sync_chat_typing_presence(input: {
   participant_uuid: string
   is_typing: boolean
   source_channel?: string | null
+  active_area?: string | null
   typing_phase?: 'start' | 'heartbeat'
 }) {
   void fetch('/api/chat/presence', {
@@ -1824,6 +1825,7 @@ export function sync_chat_typing_presence(input: {
       participant_uuid: input.participant_uuid,
       action: input.is_typing ? 'typing_start' : 'typing_stop',
       last_channel: input.source_channel ?? undefined,
+      active_area: input.active_area ?? 'chat_room',
       ...(input.is_typing && input.typing_phase
         ? { typing_phase: input.typing_phase }
         : {}),

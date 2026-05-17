@@ -43,6 +43,7 @@ function post_presence(input: {
   participant_uuid: string
   action: 'enter' | 'leave'
   last_channel?: 'web' | 'liff' | 'pwa' | 'line'
+  active_area?: string
 }) {
   void fetch('/api/chat/presence', {
     method: 'POST',
@@ -701,6 +702,7 @@ export function WebChat({
       participant_uuid,
       action: 'enter',
       last_channel: session?.source_channel ?? 'web',
+      active_area: 'chat_room',
     })
 
     return () => {

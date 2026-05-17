@@ -19,6 +19,7 @@ type presence_request_body = {
   participant_uuid?: unknown
   action?: unknown
   last_channel?: unknown
+  active_area?: unknown
   typing_phase?: unknown
   leave_reason?: unknown
   previous_active_room_uuid?: unknown
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
     room_uuid: body?.room_uuid,
     participant_uuid: body?.participant_uuid,
     last_channel: last_channel_raw,
+    active_area: body?.active_area,
   })
 
   if (!context.ok) {
@@ -95,6 +97,7 @@ export async function POST(request: Request) {
         room_uuid,
         participant_uuid,
         last_channel: context.last_channel ?? undefined,
+        active_area: context.active_area ?? 'chat_room',
       })
     } else if (body?.action === 'leave') {
       await mark_room_left({
@@ -122,12 +125,14 @@ export async function POST(request: Request) {
         room_uuid,
         participant_uuid,
         last_channel: context.last_channel ?? 'web',
+        active_area: context.active_area ?? 'admin_reception_room',
       })
     } else if (body?.action === 'admin_support_heartbeat') {
       await mark_admin_support_heartbeat({
         room_uuid,
         participant_uuid,
         last_channel: context.last_channel ?? 'web',
+        active_area: context.active_area ?? 'admin_reception_room',
       })
     } else if (body?.action === 'admin_support_leave') {
       const left = await leave_support_room({
@@ -185,6 +190,7 @@ export async function POST(request: Request) {
         room_uuid,
         participant_uuid,
         last_channel: context.last_channel ?? 'web',
+        active_area: context.active_area ?? 'admin_reception_room',
       })
     } else {
       return NextResponse.json(

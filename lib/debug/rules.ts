@@ -808,6 +808,7 @@ export function resolve_debug_rule(input: {
     'admin_notification_closed_detected',
     'admin_line_active_same_room_checked',
     'admin_notification_skipped_active_same_room',
+    'admin_notification_skipped_active_in_app',
     'admin_line_notification_skipped_active_same_room',
     'admin_notification_skipped_offline',
     'admin_notification_skipped_header_off',

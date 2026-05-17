@@ -244,6 +244,7 @@ async function upsert_presence_state(input: {
   participant_uuid: string
   visibility_state: 'visible' | 'hidden'
   last_channel?: participant_surface_channel | null
+  active_area?: string | null
 }) {
   const participant = await load_presence_participant(input)
 
@@ -263,6 +264,7 @@ async function upsert_presence_state(input: {
     source_channel: input.last_channel ?? null,
     last_channel: input.last_channel ?? null,
     active_room_uuid: input.visibility_state === 'visible' ? input.room_uuid : null,
+    active_area: input.active_area ?? null,
     visibility_state: input.visibility_state,
     last_seen_at: now,
     error_code: null as string | null,
@@ -284,6 +286,7 @@ async function upsert_presence_state(input: {
         role: participant.role,
         source_channel: input.last_channel ?? null,
         active_room_uuid: input.room_uuid,
+        active_area: input.active_area ?? null,
         visibility_state: input.visibility_state,
         app_visibility_state: input.visibility_state,
         is_active,
@@ -332,6 +335,7 @@ export async function mark_room_entered(input: {
   room_uuid: string
   participant_uuid: string
   last_channel?: participant_surface_channel | null
+  active_area?: string | null
   track_presence?: boolean
 }) {
   const patch: Record<string, unknown> = {}
@@ -352,6 +356,7 @@ export async function mark_room_entered(input: {
       participant_uuid: input.participant_uuid,
       visibility_state: 'visible',
       last_channel: input.last_channel ?? null,
+      active_area: input.active_area ?? 'chat_room',
     })
   }
 }
@@ -419,6 +424,7 @@ export async function mark_room_left(input: {
       participant_uuid: input.participant_uuid,
       visibility_state: 'hidden',
       last_channel: null,
+      active_area: null,
     })
   } catch (error) {
     if (input.trace_admin_presence_leave_update) {
@@ -623,11 +629,13 @@ export async function mark_admin_support_join(input: {
   room_uuid: string
   participant_uuid: string
   last_channel?: participant_surface_channel | null
+  active_area?: string | null
 }) {
   await mark_room_entered({
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
     last_channel: input.last_channel ?? 'web',
+    active_area: input.active_area ?? 'admin_reception_room',
     track_presence: true,
   })
   const room_pick = await supabase
@@ -672,6 +680,7 @@ export async function mark_admin_support_heartbeat(input: {
   room_uuid: string
   participant_uuid: string
   last_channel?: participant_surface_channel | null
+  active_area?: string | null
 }) {
   const before = await load_participant_admin_support_event_payload(input)
   const before_recent = before
@@ -686,6 +695,7 @@ export async function mark_admin_support_heartbeat(input: {
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
     last_channel: input.last_channel ?? 'web',
+    active_area: input.active_area ?? 'admin_reception_room',
     track_presence: true,
   })
   const snap = await load_participant_admin_support_event_payload(input)
@@ -776,11 +786,13 @@ export async function mark_admin_support_recovered_notice(input: {
   room_uuid: string
   participant_uuid: string
   last_channel?: participant_surface_channel | null
+  active_area?: string | null
 }) {
   await mark_room_entered({
     room_uuid: input.room_uuid,
     participant_uuid: input.participant_uuid,
     last_channel: input.last_channel ?? 'web',
+    active_area: input.active_area ?? 'admin_reception_room',
     track_presence: true,
   })
   const snap = await load_participant_admin_support_event_payload(input)

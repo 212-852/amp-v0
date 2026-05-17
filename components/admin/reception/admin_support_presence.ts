@@ -82,6 +82,7 @@ async function post_admin_support_presence(input: {
       participant_uuid: input.participant_uuid,
       action: input.action,
       last_channel: resolve_client_presence_source_channel(),
+      active_area: 'admin_reception_room',
       leave_reason: input.leave_reason,
       previous_active_room_uuid: input.room_uuid,
       next_active_room_uuid: null,
@@ -420,6 +421,7 @@ export function use_admin_reception_support_presence(input: {
               participant_uuid,
               action: 'admin_support_recovered',
               last_channel: resolve_client_presence_source_channel(),
+              active_area: 'admin_reception_room',
               support_session_key: support_session_key_ref.current,
             }),
           }).catch(() => {})

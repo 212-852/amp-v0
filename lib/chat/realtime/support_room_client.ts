@@ -185,6 +185,7 @@ export async function call_leave_support_room(input: {
       participant_uuid: input.participant_uuid,
       action: input.action ?? 'admin_support_leave',
       last_channel: resolve_client_presence_source_channel(),
+      active_area: 'admin_reception_room',
       leave_reason: input.leave_reason,
       previous_active_room_uuid: input.room_uuid,
       next_active_room_uuid: null,

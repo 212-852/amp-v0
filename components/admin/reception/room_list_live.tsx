@@ -292,6 +292,7 @@ export default function AdminReceptionRoomListLive({
                 room_uuid,
                 action: 'admin_support_timeout_check',
                 last_channel: resolve_client_presence_source_channel(),
+                active_area: 'admin_reception_list',
               }),
             }).catch(() => {})
           }

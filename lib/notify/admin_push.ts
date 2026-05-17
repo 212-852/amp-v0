@@ -30,13 +30,15 @@ const admin_line_active_same_room_threshold_ms = 30_000
 type admin_active_room_state = {
   admin_participant_uuid: string | null
   active_room_uuid: string | null
+  active_area: string | null
   visibility_state: string | null
   last_seen_at: string | null
   is_active: boolean
   has_presence_row: boolean
   participant_recent: boolean
+  is_active_in_app: boolean
   is_active_same_room: boolean
-  active_same_room_reason: string
+  active_state_reason: string
 }
 
 type admin_notification_candidate = {
@@ -94,9 +96,12 @@ type admin_debug_payload = {
   auto_reply_skipped_reason?: string | null
   admin_active_in_same_room?: boolean | null
   active_room_uuid?: string | null
+  active_area?: string | null
   visibility_state?: string | null
   last_seen_at?: string | null
   active_same_room_reason?: string | null
+  active_state_reason?: string | null
+  is_active_in_app?: boolean | null
   admin_participant_uuid?: string | null
   app_visibility_state?: string | null
   is_active?: boolean | null
@@ -114,6 +119,7 @@ type admin_notification_debug_event =
   | 'admin_notification_active_state_checked'
   | 'admin_line_active_same_room_checked'
   | 'admin_notification_skipped_active_same_room'
+  | 'admin_notification_skipped_active_in_app'
   | 'admin_line_notification_skipped_active_same_room'
   | 'admin_notification_skipped_offline'
   | 'admin_notification_skipped_header_off'
@@ -165,7 +171,7 @@ function format_selected_method(methods: Array<'push' | 'line'>): string {
   return methods.join('->') || 'none'
 }
 
-function resolve_active_same_room_reason(input: {
+function resolve_active_app_state(input: {
   target_room_uuid: string
   active_room_uuid: string | null
   visibility_state: string | null
@@ -175,23 +181,23 @@ function resolve_active_same_room_reason(input: {
   participant_recent: boolean
   now?: Date
 }): {
+  is_active_in_app: boolean
   is_active_same_room: boolean
-  active_same_room_reason: string
+  active_state_reason: string
 } {
-  if (input.active_room_uuid !== input.target_room_uuid) {
+  if (!input.has_presence_row && !input.participant_recent) {
     return {
+      is_active_in_app: false,
       is_active_same_room: false,
-      active_same_room_reason:
-        input.active_room_uuid === null
-          ? 'different_screen_or_closed'
-          : 'different_screen',
+      active_state_reason: 'presence_missing_or_closed',
     }
   }
 
   if (input.visibility_state === 'hidden') {
     return {
+      is_active_in_app: false,
       is_active_same_room: false,
-      active_same_room_reason: 'background_or_closed',
+      active_state_reason: 'background_or_closed',
     }
   }
 
@@ -203,41 +209,40 @@ function resolve_active_same_room_reason(input: {
     now: input.now,
   })
 
-  if (
-    input.visibility_state === 'visible' &&
-    recent &&
-    input.is_active
-  ) {
-    return {
-      is_active_same_room: true,
-      active_same_room_reason: 'same_room_visible',
-    }
-  }
+  if (input.visibility_state === 'visible' && recent && input.is_active) {
+    const is_active_same_room = input.active_room_uuid === input.target_room_uuid
 
-  if (!input.has_presence_row && !input.participant_recent) {
     return {
-      is_active_same_room: false,
-      active_same_room_reason: 'different_screen_or_closed',
+      is_active_in_app: true,
+      is_active_same_room,
+      active_state_reason: is_active_same_room
+        ? 'same_room_visible'
+        : input.active_room_uuid
+          ? 'active_different_room'
+          : 'active_different_area',
     }
   }
 
   if (!recent) {
     return {
+      is_active_in_app: false,
       is_active_same_room: false,
-      active_same_room_reason: 'stale_last_seen',
+      active_state_reason: 'stale_last_seen',
     }
   }
 
   if (!input.is_active) {
     return {
+      is_active_in_app: false,
       is_active_same_room: false,
-      active_same_room_reason: 'realtime_inactive',
+      active_state_reason: 'realtime_inactive',
     }
   }
 
   return {
+    is_active_in_app: false,
     is_active_same_room: false,
-    active_same_room_reason: 'not_visible',
+    active_state_reason: 'not_visible',
   }
 }
 
@@ -245,13 +250,15 @@ function empty_admin_active_room_state(): admin_active_room_state {
   return {
     admin_participant_uuid: null,
     active_room_uuid: null,
+    active_area: null,
     visibility_state: null,
     last_seen_at: null,
     is_active: false,
     has_presence_row: false,
     participant_recent: false,
+    is_active_in_app: false,
     is_active_same_room: false,
-    active_same_room_reason: 'different_screen_or_closed',
+    active_state_reason: 'presence_missing_or_closed',
   }
 }
 
@@ -350,7 +357,7 @@ async function load_admin_active_room_state_by_user_uuid(
     supabase
       .from('presence')
       .select(
-        'participant_uuid, active_room_uuid, user_uuid, visibility_state, app_visibility_state, last_seen_at, is_active, updated_at',
+        'participant_uuid, active_room_uuid, active_area, user_uuid, visibility_state, app_visibility_state, last_seen_at, is_active, updated_at',
       )
       .in('user_uuid', user_uuids)
       .order('updated_at', { ascending: false }),
@@ -389,17 +396,21 @@ async function load_admin_active_room_state_by_user_uuid(
     const active_room_uuid = clean_uuid(
       typeof row.active_room_uuid === 'string' ? row.active_room_uuid : null,
     )
+    const active_area =
+      typeof row.active_area === 'string' && row.active_area.trim()
+        ? row.active_area.trim()
+        : null
     const visibility_state =
       typeof row.visibility_state === 'string' ? row.visibility_state : null
     const last_seen_at =
       typeof row.last_seen_at === 'string' ? row.last_seen_at : null
     const is_active = row.is_active === true
 
-    if (!user_uuid || state_by_user_uuid.has(user_uuid)) {
+    if (!user_uuid) {
       continue
     }
 
-    const active_same_room = resolve_active_same_room_reason({
+    const active_state = resolve_active_app_state({
       target_room_uuid: clean_room_uuid,
       active_room_uuid,
       visibility_state,
@@ -410,17 +421,24 @@ async function load_admin_active_room_state_by_user_uuid(
       now,
     })
 
-    state_by_user_uuid.set(user_uuid, {
+    const next_state: admin_active_room_state = {
       admin_participant_uuid: participant_uuid,
       active_room_uuid,
+      active_area,
       visibility_state,
       last_seen_at,
       is_active,
       has_presence_row: true,
       participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
-      is_active_same_room: active_same_room.is_active_same_room,
-      active_same_room_reason: active_same_room.active_same_room_reason,
-    })
+      is_active_in_app: active_state.is_active_in_app,
+      is_active_same_room: active_state.is_active_same_room,
+      active_state_reason: active_state.active_state_reason,
+    }
+    const current_state = state_by_user_uuid.get(user_uuid)
+
+    if (!current_state || (!current_state.is_active_in_app && next_state.is_active_in_app)) {
+      state_by_user_uuid.set(user_uuid, next_state)
+    }
   }
 
   for (const user_uuid of user_uuids) {
@@ -428,7 +446,7 @@ async function load_admin_active_room_state_by_user_uuid(
       continue
     }
 
-    const active_same_room = resolve_active_same_room_reason({
+    const active_state = resolve_active_app_state({
       target_room_uuid: clean_room_uuid,
       active_room_uuid: null,
       visibility_state: null,
@@ -442,13 +460,15 @@ async function load_admin_active_room_state_by_user_uuid(
     state_by_user_uuid.set(user_uuid, {
       admin_participant_uuid: null,
       active_room_uuid: null,
+      active_area: null,
       visibility_state: null,
       last_seen_at: null,
       is_active: false,
       has_presence_row: false,
       participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
-      is_active_same_room: active_same_room.is_active_same_room,
-      active_same_room_reason: active_same_room.active_same_room_reason,
+      is_active_in_app: active_state.is_active_in_app,
+      is_active_same_room: active_state.is_active_same_room,
+      active_state_reason: active_state.active_state_reason,
     })
   }
 
@@ -747,10 +767,13 @@ export async function route_admin_push_notification(
       auto_reply_skipped_reason: input.auto_reply_skipped_reason ?? null,
       admin_active_in_same_room: active_state.is_active_same_room,
       is_active_same_room: active_state.is_active_same_room,
+      is_active_in_app: active_state.is_active_in_app,
       active_room_uuid: active_state.active_room_uuid,
+      active_area: active_state.active_area,
       visibility_state: active_state.visibility_state,
       last_seen_at: active_state.last_seen_at,
-      active_same_room_reason: active_state.active_same_room_reason,
+      active_same_room_reason: active_state.active_state_reason,
+      active_state_reason: active_state.active_state_reason,
       is_active: active_state.is_active,
       display_name: line_copy.display_name,
       latest_message_preview: line_copy.latest_message_preview,
@@ -791,7 +814,7 @@ export async function route_admin_push_notification(
       base_debug,
     )
 
-    if (active_state.active_same_room_reason === 'background_or_closed') {
+    if (active_state.active_state_reason === 'background_or_closed') {
       await emit_admin_notification_debug(
         'admin_notification_background_detected',
         base_debug,
@@ -799,12 +822,12 @@ export async function route_admin_push_notification(
     }
 
     if (
-      active_state.active_same_room_reason === 'different_screen_or_closed' ||
-      active_state.active_same_room_reason === 'stale_last_seen'
+      active_state.active_state_reason === 'presence_missing_or_closed' ||
+      active_state.active_state_reason === 'stale_last_seen'
     ) {
       await emit_admin_notification_debug('admin_notification_closed_detected', {
         ...base_debug,
-        skipped_reason: active_state.active_same_room_reason,
+        skipped_reason: active_state.active_state_reason,
       })
     }
 
@@ -865,6 +888,19 @@ export async function route_admin_push_notification(
           ...base_debug,
           skipped_reason: 'active_same_room',
           notification_skipped_reason: 'active_same_room',
+        },
+      )
+
+      continue
+    }
+
+    if (active_state.is_active_in_app) {
+      await emit_admin_notification_debug(
+        'admin_notification_skipped_active_in_app',
+        {
+          ...base_debug,
+          skipped_reason: active_state.active_state_reason,
+          notification_skipped_reason: active_state.active_state_reason,
         },
       )
 
