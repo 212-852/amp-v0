@@ -28,6 +28,16 @@ const segment_labels: Record<string, label_block> = {
     en: 'DRIVER',
     es: 'Conductor',
   },
+  entry: {
+    ja: '募集',
+    en: 'ENTRY',
+    es: 'Entrada',
+  },
+  apply: {
+    ja: '応募',
+    en: 'APPLY',
+    es: 'Solicitud',
+  },
   admin: {
     ja: '管理',
     en: 'ADMIN',

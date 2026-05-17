@@ -3,6 +3,11 @@ import 'server-only'
 import { redirect } from 'next/navigation'
 
 import type { normalized_role, normalized_tier } from '@/lib/auth/identity'
+import {
+  can_access_apply,
+  can_access_driver_page,
+} from '@/lib/driver/rules'
+import { resolve_driver_route_subject } from '@/lib/driver/context'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
 import { run_browser_session_chat_room_resolve } from '@/lib/chat/browser_session_room'
@@ -268,6 +273,105 @@ export async function require_admin_route_access(pathname = '/admin') {
     role: 'admin' as const,
     tier: session.tier,
   }
+}
+
+export type driver_route_access =
+  | {
+      allowed: true
+      user_uuid: string
+      visitor_uuid: string
+      display_name: string | null
+      image_url: string | null
+      role: 'driver'
+      tier: string | null
+    }
+  | {
+      allowed: false
+      redirect_to: '/entry'
+    }
+
+export type apply_route_access =
+  | {
+      allowed: true
+      user_uuid: string
+      visitor_uuid: string
+      display_name: string | null
+      image_url: string | null
+      role: string | null
+      tier: string | null
+    }
+  | {
+      allowed: false
+      redirect_to: '/entry?reason=no_line'
+    }
+
+export async function resolve_driver_route_access(): Promise<driver_route_access> {
+  const subject = await resolve_driver_route_subject()
+  const session = await get_session_user()
+
+  if (!can_access_driver_page(subject.user)) {
+    return {
+      allowed: false,
+      redirect_to: '/entry',
+    }
+  }
+
+  return {
+    allowed: true,
+    user_uuid: subject.user.user_uuid!,
+    visitor_uuid: session.visitor_uuid!,
+    display_name: session.display_name,
+    image_url: session.image_url ?? null,
+    role: 'driver',
+    tier: session.tier,
+  }
+}
+
+export async function require_driver_route_access() {
+  const access = await resolve_driver_route_access()
+
+  if (!access.allowed) {
+    redirect(access.redirect_to)
+  }
+
+  return access
+}
+
+export async function resolve_apply_route_access(): Promise<apply_route_access> {
+  const subject = await resolve_driver_route_subject()
+  const session = await get_session_user()
+
+  if (
+    !can_access_apply({
+      user: subject.user,
+      identities: subject.identities,
+    })
+  ) {
+    return {
+      allowed: false,
+      redirect_to: '/entry?reason=no_line',
+    }
+  }
+
+  return {
+    allowed: true,
+    user_uuid: subject.user.user_uuid!,
+    visitor_uuid: session.visitor_uuid!,
+    display_name: session.display_name,
+    image_url: session.image_url ?? null,
+    role: session.role,
+    tier: session.tier,
+  }
+}
+
+export async function require_apply_route_access() {
+  const access = await resolve_apply_route_access()
+
+  if (!access.allowed) {
+    redirect(access.redirect_to)
+  }
+
+  return access
 }
 
 export async function resolve_browser_session_chat_room(input: {
