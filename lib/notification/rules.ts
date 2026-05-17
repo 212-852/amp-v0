@@ -2,7 +2,8 @@ import 'server-only'
 
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
-import { derive_presence_recent_within_ms } from '@/lib/chat/presence/rules'
+import { load_presence_by_user_uuid } from '@/lib/presence/action'
+import { decide_external_notification_skip } from '@/lib/presence/rules'
 
 export type notification_kind_key = 'chat' | 'reservation' | 'announcement'
 
@@ -241,12 +242,16 @@ export async function resolve_chat_external_notification_decision(input: {
     }
   }
 
-  const [foreground_open, push_subscription_exists, line_identity_exists] =
+  const [presence_row, push_subscription_exists, line_identity_exists] =
     await Promise.all([
-      resolve_foreground_app_open(participant_uuid),
+      load_presence_by_user_uuid(user_uuid),
       resolve_active_pwa_push_subscription_exists(user_uuid),
       resolve_line_identity_exists(user_uuid),
     ])
+  const presence_decision = decide_external_notification_skip({
+    presence: presence_row,
+  })
+  const foreground_open = presence_decision.skip_external
   const is_standalone = push_subscription_exists
 
   if (foreground_open) {
@@ -258,7 +263,9 @@ export async function resolve_chat_external_notification_decision(input: {
       push_subscription_exists,
       line_identity_exists,
       selected_route: null,
-      skipped_reason: 'foreground_app_open',
+      skipped_reason:
+        presence_decision.external_notification_skipped_reason ??
+        'receiver_active_in_app',
     }
   }
 
@@ -390,14 +397,6 @@ async function resolve_line_identity_exists(
     .limit(1)
 
   return !result.error && (result.data?.length ?? 0) > 0
-}
-
-const foreground_presence_within_ms = 5 * 60 * 1000
-
-async function resolve_foreground_app_open(
-  participant_uuid: string | null,
-): Promise<boolean> {
-  return false
 }
 
 export async function user_allows_notification(input: {

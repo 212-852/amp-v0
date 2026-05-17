@@ -74,6 +74,37 @@ self.addEventListener('push', (event) => {
         tag,
       })
 
+      const client_list = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      })
+      const focused_or_visible = client_list.some(
+        (client) =>
+          client.focused === true || client.visibilityState === 'visible',
+      )
+
+      if (focused_or_visible) {
+        await sw_debug('sw_push_suppressed_focused_client', {
+          room_uuid,
+          participant_uuid,
+          message_uuid,
+          tag,
+          client_count: client_list.length,
+        })
+
+        for (const client of client_list) {
+          client.postMessage({
+            type: 'push_suppressed_focused_client',
+            room_uuid,
+            participant_uuid,
+            message_uuid,
+            url,
+          })
+        }
+
+        return
+      }
+
       await self.registration.showNotification(title, {
         body,
         icon:

@@ -1,7 +1,6 @@
 import 'server-only'
 
 import { is_reception_state } from '@/lib/admin/reception/rules'
-import { derive_presence_recent_within_ms } from '@/lib/chat/presence/rules'
 import { env } from '@/lib/config/env'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { supabase } from '@/lib/db/supabase'
@@ -14,6 +13,12 @@ import { normalize_locale, type locale_key } from '@/lib/locale/action'
 import {
   resolve_admin_line_notification_copy,
 } from '@/lib/notify/admin_line_card'
+import { load_presence_by_user_uuids } from '@/lib/presence/action'
+import {
+  decide_external_notification_skip,
+  resolve_external_notification_allow_reason,
+  type external_notification_presence_decision,
+} from '@/lib/presence/rules'
 import { read_requester_display_name } from '@/lib/notify/recipients'
 import { resolve_push_subscription_enabled_for_notify } from '@/lib/notify/push_gate'
 
@@ -25,21 +30,8 @@ import {
 } from './discord'
 
 const admin_notification_phase = 'lib/notify/admin_push.ts'
-const admin_line_active_same_room_threshold_ms = 30_000
 
-type admin_active_room_state = {
-  admin_participant_uuid: string | null
-  active_room_uuid: string | null
-  active_area: string | null
-  visibility_state: string | null
-  last_seen_at: string | null
-  is_active: boolean
-  has_presence_row: boolean
-  participant_recent: boolean
-  is_active_in_app: boolean
-  is_active_same_room: boolean
-  active_state_reason: string
-}
+type receiver_presence_state = external_notification_presence_decision
 
 type admin_notification_candidate = {
   user_uuid: string
@@ -50,7 +42,7 @@ type admin_notification_candidate = {
   has_push_subscription: boolean
   has_line_identity: boolean
   line_user_id: string | null
-  active_state: admin_active_room_state
+  presence_state: receiver_presence_state
 }
 
 type admin_push_route_input = {
@@ -88,23 +80,17 @@ type admin_debug_payload = {
   selected_method?: string | null
   skipped_reason?: string | null
   notification_skipped_reason?: string | null
-  is_active_same_room?: boolean | null
   role?: string | null
   admin_event?: string | null
   support_mode?: string | null
   should_auto_reply?: boolean | null
   auto_reply_skipped_reason?: string | null
-  admin_active_in_same_room?: boolean | null
-  active_room_uuid?: string | null
-  active_area?: string | null
-  visibility_state?: string | null
-  last_seen_at?: string | null
-  active_same_room_reason?: string | null
-  active_state_reason?: string | null
-  is_active_in_app?: boolean | null
-  admin_participant_uuid?: string | null
-  app_visibility_state?: string | null
-  is_active?: boolean | null
+  external_notification_skipped_reason?: string | null
+  presence_found?: boolean | null
+  presence_visible?: boolean | null
+  presence_seen_at?: string | null
+  presence_age_seconds?: number | null
+  presence_area?: string | null
   display_name?: string | null
   latest_message_preview?: string | null
   error_code?: string | null
@@ -115,12 +101,9 @@ type admin_notification_debug_event =
   | 'admin_notification_rule_checked'
   | 'admin_line_notification_rule_checked'
   | 'admin_notification_candidate_checked'
-  | 'admin_notification_active_room_checked'
   | 'admin_notification_active_state_checked'
-  | 'admin_line_active_same_room_checked'
-  | 'admin_notification_skipped_active_same_room'
-  | 'admin_notification_skipped_active_in_app'
-  | 'admin_line_notification_skipped_active_same_room'
+  | 'admin_notification_skipped_receiver_active_in_app'
+  | 'admin_line_notification_skipped_receiver_active_in_app'
   | 'admin_notification_skipped_offline'
   | 'admin_notification_skipped_header_off'
   | 'admin_line_notification_skipped_header_off'
@@ -136,8 +119,6 @@ type admin_notification_debug_event =
   | 'admin_line_send_started'
   | 'admin_line_send_succeeded'
   | 'admin_line_send_failed'
-  | 'admin_notification_background_detected'
-  | 'admin_notification_closed_detected'
   | 'admin_discord_fallback_started'
 
 async function emit_admin_notification_debug(
@@ -171,144 +152,8 @@ function format_selected_method(methods: Array<'push' | 'line'>): string {
   return methods.join('->') || 'none'
 }
 
-function resolve_active_app_state(input: {
-  target_room_uuid: string
-  active_room_uuid: string | null
-  visibility_state: string | null
-  last_seen_at: string | null
-  is_active: boolean
-  has_presence_row: boolean
-  participant_recent: boolean
-  now?: Date
-}): {
-  is_active_in_app: boolean
-  is_active_same_room: boolean
-  active_state_reason: string
-} {
-  if (!input.has_presence_row && !input.participant_recent) {
-    return {
-      is_active_in_app: false,
-      is_active_same_room: false,
-      active_state_reason: 'presence_missing_or_closed',
-    }
-  }
-
-  if (input.visibility_state === 'hidden') {
-    return {
-      is_active_in_app: false,
-      is_active_same_room: false,
-      active_state_reason: 'background_or_closed',
-    }
-  }
-
-  const recent = derive_presence_recent_within_ms({
-    last_seen_at: input.last_seen_at,
-    is_typing: false,
-    typing_at: null,
-    active_within_ms: admin_line_active_same_room_threshold_ms,
-    now: input.now,
-  })
-
-  if (input.visibility_state === 'visible' && recent && input.is_active) {
-    const is_active_same_room = input.active_room_uuid === input.target_room_uuid
-
-    return {
-      is_active_in_app: true,
-      is_active_same_room,
-      active_state_reason: is_active_same_room
-        ? 'same_room_visible'
-        : input.active_room_uuid
-          ? 'active_different_room'
-          : 'active_different_area',
-    }
-  }
-
-  if (!recent) {
-    return {
-      is_active_in_app: false,
-      is_active_same_room: false,
-      active_state_reason: 'stale_last_seen',
-    }
-  }
-
-  if (!input.is_active) {
-    return {
-      is_active_in_app: false,
-      is_active_same_room: false,
-      active_state_reason: 'realtime_inactive',
-    }
-  }
-
-  return {
-    is_active_in_app: false,
-    is_active_same_room: false,
-    active_state_reason: 'not_visible',
-  }
-}
-
-function empty_admin_active_room_state(): admin_active_room_state {
-  return {
-    admin_participant_uuid: null,
-    active_room_uuid: null,
-    active_area: null,
-    visibility_state: null,
-    last_seen_at: null,
-    is_active: false,
-    has_presence_row: false,
-    participant_recent: false,
-    is_active_in_app: false,
-    is_active_same_room: false,
-    active_state_reason: 'presence_missing_or_closed',
-  }
-}
-
-async function load_participant_recent_by_user_uuid(input: {
-  room_uuid: string
-  user_uuids: string[]
-}): Promise<Map<string, boolean>> {
-  const clean_room_uuid = clean_uuid(input.room_uuid)
-
-  if (!clean_room_uuid || input.user_uuids.length === 0) {
-    return new Map()
-  }
-
-  const result = await supabase
-    .from('participants')
-    .select('user_uuid, last_seen_at, is_typing, typing_at')
-    .eq('room_uuid', clean_room_uuid)
-    .in('user_uuid', input.user_uuids)
-    .in('role', ['admin', 'concierge'])
-
-  if (result.error) {
-    return new Map()
-  }
-
-  const now = new Date()
-  const recent_by_user_uuid = new Map<string, boolean>()
-
-  for (const row of result.data ?? []) {
-    const user_uuid = clean_uuid(
-      typeof row.user_uuid === 'string' ? row.user_uuid : null,
-    )
-
-    if (!user_uuid || recent_by_user_uuid.has(user_uuid)) {
-      continue
-    }
-
-    recent_by_user_uuid.set(
-      user_uuid,
-      derive_presence_recent_within_ms({
-        last_seen_at:
-          typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
-        is_typing: row.is_typing === true,
-        typing_at: typeof row.typing_at === 'string' ? row.typing_at : null,
-        active_within_ms: admin_line_active_same_room_threshold_ms,
-        now,
-      }),
-    )
-  }
-
-  return recent_by_user_uuid
+function empty_receiver_presence_state(): receiver_presence_state {
+  return decide_external_notification_skip({ presence: null })
 }
 
 async function load_admin_locale_by_user_uuid(
@@ -343,133 +188,19 @@ async function load_admin_locale_by_user_uuid(
   return locale_by_user_uuid
 }
 
-async function load_admin_active_room_state_by_user_uuid(
-  room_uuid: string | null,
+async function load_receiver_presence_state_by_user_uuid(
   user_uuids: string[],
-): Promise<Map<string, admin_active_room_state>> {
-  const clean_room_uuid = clean_uuid(room_uuid)
-
-  if (!clean_room_uuid || user_uuids.length === 0) {
-    return new Map()
-  }
-
-  const [result, participant_recent_by_user_uuid] = await Promise.all([
-    supabase
-      .from('presence')
-      .select(
-        'participant_uuid, active_room_uuid, active_area, user_uuid, visibility_state, app_visibility_state, last_seen_at, is_active, updated_at',
-      )
-      .in('user_uuid', user_uuids)
-      .order('updated_at', { ascending: false }),
-    load_participant_recent_by_user_uuid({
-      room_uuid: clean_room_uuid,
-      user_uuids,
-    }),
-  ])
-
-  if (result.error) {
-    await debug_event({
-      category: 'chat_realtime',
-      event: 'admin_notification_active_state_checked',
-      payload: {
-        phase: admin_notification_phase,
-        room_uuid: clean_room_uuid,
-        skipped_reason: 'presence_load_failed',
-        error_code: result.error.code ?? 'presence_load_failed',
-        error_message: result.error.message,
-      },
-    })
-
-    return new Map()
-  }
-
-  const now = new Date()
-  const state_by_user_uuid = new Map<string, admin_active_room_state>()
-
-  for (const row of result.data ?? []) {
-    const user_uuid = clean_uuid(
-      typeof row.user_uuid === 'string' ? row.user_uuid : null,
-    )
-    const participant_uuid = clean_uuid(
-      typeof row.participant_uuid === 'string' ? row.participant_uuid : null,
-    )
-    const active_room_uuid = clean_uuid(
-      typeof row.active_room_uuid === 'string' ? row.active_room_uuid : null,
-    )
-    const active_area =
-      typeof row.active_area === 'string' && row.active_area.trim()
-        ? row.active_area.trim()
-        : null
-    const visibility_state =
-      typeof row.visibility_state === 'string' ? row.visibility_state : null
-    const last_seen_at =
-      typeof row.last_seen_at === 'string' ? row.last_seen_at : null
-    const is_active = row.is_active === true
-
-    if (!user_uuid) {
-      continue
-    }
-
-    const active_state = resolve_active_app_state({
-      target_room_uuid: clean_room_uuid,
-      active_room_uuid,
-      visibility_state,
-      last_seen_at,
-      is_active,
-      has_presence_row: true,
-      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
-      now,
-    })
-
-    const next_state: admin_active_room_state = {
-      admin_participant_uuid: participant_uuid,
-      active_room_uuid,
-      active_area,
-      visibility_state,
-      last_seen_at,
-      is_active,
-      has_presence_row: true,
-      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
-      is_active_in_app: active_state.is_active_in_app,
-      is_active_same_room: active_state.is_active_same_room,
-      active_state_reason: active_state.active_state_reason,
-    }
-    const current_state = state_by_user_uuid.get(user_uuid)
-
-    if (!current_state || (!current_state.is_active_in_app && next_state.is_active_in_app)) {
-      state_by_user_uuid.set(user_uuid, next_state)
-    }
-  }
+): Promise<Map<string, receiver_presence_state>> {
+  const presence_by_user_uuid = await load_presence_by_user_uuids(user_uuids)
+  const state_by_user_uuid = new Map<string, receiver_presence_state>()
 
   for (const user_uuid of user_uuids) {
-    if (state_by_user_uuid.has(user_uuid)) {
-      continue
-    }
-
-    const active_state = resolve_active_app_state({
-      target_room_uuid: clean_room_uuid,
-      active_room_uuid: null,
-      visibility_state: null,
-      last_seen_at: null,
-      is_active: false,
-      has_presence_row: false,
-      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
-      now,
-    })
-
-    state_by_user_uuid.set(user_uuid, {
-      admin_participant_uuid: null,
-      active_room_uuid: null,
-      active_area: null,
-      visibility_state: null,
-      last_seen_at: null,
-      is_active: false,
-      has_presence_row: false,
-      participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
-      is_active_in_app: active_state.is_active_in_app,
-      is_active_same_room: active_state.is_active_same_room,
-      active_state_reason: active_state.active_state_reason,
-    })
+    state_by_user_uuid.set(
+      user_uuid,
+      decide_external_notification_skip({
+        presence: presence_by_user_uuid.get(user_uuid) ?? null,
+      }),
+    )
   }
 
   return state_by_user_uuid
@@ -662,8 +393,8 @@ async function load_admin_notification_candidates(input: {
     }
   }
 
-  const active_state_by_user_uuid =
-    await load_admin_active_room_state_by_user_uuid(room_uuid, user_uuids)
+  const presence_state_by_user_uuid =
+    await load_receiver_presence_state_by_user_uuid(user_uuids)
 
   return user_rows.map((row) => {
     const line_user_id = line_user_id_by_uuid.get(row.user_uuid) ?? null
@@ -689,9 +420,9 @@ async function load_admin_notification_candidates(input: {
       ),
       has_line_identity: Boolean(line_user_id),
       line_user_id,
-      active_state:
-        active_state_by_user_uuid.get(row.user_uuid) ??
-        empty_admin_active_room_state(),
+      presence_state:
+        presence_state_by_user_uuid.get(row.user_uuid) ??
+        empty_receiver_presence_state(),
     }
   })
 }
@@ -749,7 +480,9 @@ export async function route_admin_push_notification(
     const pwa_enabled = candidate.preferences.pwa_push_enabled === true
     const line_enabled = candidate.preferences.line_enabled === true
     const both_methods_enabled = pwa_enabled && line_enabled
-    const active_state = candidate.active_state
+    const presence_state = candidate.presence_state
+    const presence_allow_reason =
+      resolve_external_notification_allow_reason(presence_state)
     const admin_locale = admin_locale_by_user_uuid.get(candidate.user_uuid) ?? 'ja'
     const line_copy = resolve_admin_line_notification_copy({
       locale: admin_locale,
@@ -759,25 +492,20 @@ export async function route_admin_push_notification(
 
     const base_debug: admin_debug_payload = {
       admin_user_uuid: candidate.user_uuid,
-      admin_participant_uuid: active_state.admin_participant_uuid,
       room_uuid: input.room_uuid,
       message_uuid: input.message_uuid,
       support_mode: input.support_mode ?? null,
       should_auto_reply: input.should_auto_reply ?? null,
       auto_reply_skipped_reason: input.auto_reply_skipped_reason ?? null,
-      admin_active_in_same_room: active_state.is_active_same_room,
-      is_active_same_room: active_state.is_active_same_room,
-      is_active_in_app: active_state.is_active_in_app,
-      active_room_uuid: active_state.active_room_uuid,
-      active_area: active_state.active_area,
-      visibility_state: active_state.visibility_state,
-      last_seen_at: active_state.last_seen_at,
-      active_same_room_reason: active_state.active_state_reason,
-      active_state_reason: active_state.active_state_reason,
-      is_active: active_state.is_active,
+      external_notification_skipped_reason:
+        presence_state.external_notification_skipped_reason,
+      presence_found: presence_state.presence_found,
+      presence_visible: presence_state.presence_visible,
+      presence_seen_at: presence_state.presence_seen_at,
+      presence_age_seconds: presence_state.presence_age_seconds,
+      presence_area: presence_state.presence_area,
       display_name: line_copy.display_name,
       latest_message_preview: line_copy.latest_message_preview,
-      app_visibility_state: active_state.visibility_state,
       header_status: candidate.header_status,
       chat_reception_enabled: candidate.chat_reception_enabled,
       pwa_enabled,
@@ -802,50 +530,28 @@ export async function route_admin_push_notification(
     )
 
     await emit_admin_notification_debug(
-      'admin_notification_active_room_checked',
-      base_debug,
-    )
-    await emit_admin_notification_debug(
       'admin_notification_active_state_checked',
-      base_debug,
-    )
-    await emit_admin_notification_debug(
-      'admin_line_active_same_room_checked',
-      base_debug,
-    )
-
-    if (active_state.active_state_reason === 'background_or_closed') {
-      await emit_admin_notification_debug(
-        'admin_notification_background_detected',
-        base_debug,
-      )
-    }
-
-    if (
-      active_state.active_state_reason === 'presence_missing_or_closed' ||
-      active_state.active_state_reason === 'stale_last_seen'
-    ) {
-      await emit_admin_notification_debug('admin_notification_closed_detected', {
+      {
         ...base_debug,
-        skipped_reason: active_state.active_state_reason,
-      })
-    }
+        skipped_reason: presence_allow_reason,
+      },
+    )
 
     if (candidate.header_status === 'off') {
       await emit_admin_notification_debug(
         'admin_notification_skipped_header_off',
         {
           ...base_debug,
-          skipped_reason: 'header_off',
-          notification_skipped_reason: 'header_off',
+          skipped_reason: 'notification_settings_off',
+          notification_skipped_reason: 'notification_settings_off',
         },
       )
       await emit_admin_notification_debug(
         'admin_line_notification_skipped_header_off',
         {
           ...base_debug,
-          skipped_reason: 'header_off',
-          notification_skipped_reason: 'header_off',
+          skipped_reason: 'notification_settings_off',
+          notification_skipped_reason: 'notification_settings_off',
         },
       )
       await emit_admin_notification_debug(
@@ -873,34 +579,23 @@ export async function route_admin_push_notification(
       continue
     }
 
-    if (active_state.is_active_same_room) {
+    if (presence_state.skip_external) {
       await emit_admin_notification_debug(
-        'admin_notification_skipped_active_same_room',
+        'admin_notification_skipped_receiver_active_in_app',
         {
           ...base_debug,
-          skipped_reason: 'active_same_room_visible',
-          notification_skipped_reason: 'active_same_room_visible',
+          skipped_reason: 'receiver_active_in_app',
+          notification_skipped_reason: 'receiver_active_in_app',
+          selected_method: null,
         },
       )
       await emit_admin_notification_debug(
-        'admin_line_notification_skipped_active_same_room',
+        'admin_line_notification_skipped_receiver_active_in_app',
         {
           ...base_debug,
-          skipped_reason: 'active_same_room',
-          notification_skipped_reason: 'active_same_room',
-        },
-      )
-
-      continue
-    }
-
-    if (active_state.is_active_in_app) {
-      await emit_admin_notification_debug(
-        'admin_notification_skipped_active_in_app',
-        {
-          ...base_debug,
-          skipped_reason: active_state.active_state_reason,
-          notification_skipped_reason: active_state.active_state_reason,
+          skipped_reason: 'receiver_active_in_app',
+          notification_skipped_reason: 'receiver_active_in_app',
+          selected_method: null,
         },
       )
 

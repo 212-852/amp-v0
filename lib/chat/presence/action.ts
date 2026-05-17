@@ -194,148 +194,6 @@ async function participant_user_uuid_for_debug(input: {
   return typeof u === 'string' && u.trim() ? u.trim() : null
 }
 
-async function load_presence_participant(input: {
-  room_uuid?: string | null
-  participant_uuid: string
-}): Promise<{ user_uuid: string | null; role: string | null } | null> {
-  let query = supabase
-    .from('participants')
-    .select('user_uuid, role')
-    .eq('participant_uuid', input.participant_uuid)
-
-  if (input.room_uuid) {
-    query = query.eq('room_uuid', input.room_uuid)
-  }
-
-  const snap = await query.maybeSingle()
-
-  if (snap.error || !snap.data) {
-    return null
-  }
-
-  const row = snap.data as { user_uuid?: string | null; role?: string | null }
-  const role = typeof row.role === 'string' ? row.role : null
-
-  return {
-    user_uuid:
-      typeof row.user_uuid === 'string' && row.user_uuid.trim()
-        ? row.user_uuid.trim()
-        : null,
-    role,
-  }
-}
-
-async function hide_other_presence_rooms(input: {
-  user_uuid: string
-  participant_uuid: string
-}) {
-  const now = new Date().toISOString()
-
-  await supabase
-    .from('presence')
-    .update({
-      visibility_state: 'hidden',
-      app_visibility_state: 'hidden',
-      is_active: false,
-      updated_at: now,
-    })
-    .eq('user_uuid', input.user_uuid)
-    .neq('participant_uuid', input.participant_uuid)
-}
-
-async function upsert_presence_state(input: {
-  room_uuid?: string | null
-  participant_uuid: string
-  visibility_state: 'visible' | 'hidden'
-  last_channel?: participant_surface_channel | null
-  active_area?: string | null
-}) {
-  const participant = await load_presence_participant(input)
-
-  if (!participant) {
-    return
-  }
-
-  const user_uuid = participant.user_uuid
-  const now = new Date().toISOString()
-  const is_active = input.visibility_state === 'visible'
-
-  const debug_payload = {
-    admin_user_uuid: user_uuid,
-    admin_participant_uuid: input.participant_uuid,
-    room_uuid: input.room_uuid ?? null,
-    role: participant.role,
-    source_channel: input.last_channel ?? null,
-    last_channel: input.last_channel ?? null,
-    active_room_uuid: input.visibility_state === 'visible' ? input.room_uuid : null,
-    active_area: input.active_area ?? null,
-    visibility_state: input.visibility_state,
-    last_seen_at: now,
-    error_code: null as string | null,
-    error_message: null as string | null,
-  }
-
-  await debug_event({
-    category: 'admin_chat',
-    event: 'admin_participant_presence_update_started',
-    payload: debug_payload,
-  })
-
-  const result = await supabase
-    .from('presence')
-    .upsert(
-      {
-        participant_uuid: input.participant_uuid,
-        user_uuid,
-        role: participant.role,
-        source_channel: input.last_channel ?? null,
-        active_room_uuid:
-          input.visibility_state === 'visible' ? input.room_uuid ?? null : null,
-        active_area: input.active_area ?? null,
-        visibility_state: input.visibility_state,
-        app_visibility_state: input.visibility_state,
-        is_active,
-        last_seen_at: now,
-        updated_at: now,
-      },
-      { onConflict: 'participant_uuid' },
-    )
-
-  if (result.error) {
-    await debug_event({
-      category: 'admin_chat',
-      event: 'admin_participant_presence_update_failed',
-      payload: {
-        ...debug_payload,
-        error_code: result.error.code ?? null,
-        error_message: result.error.message ?? 'presence_update_failed',
-      },
-    })
-
-    console.error('[presence] upsert_failed', {
-      room_uuid: input.room_uuid,
-      participant_uuid: input.participant_uuid,
-      visibility_state: input.visibility_state,
-      error: result.error.message,
-    })
-
-    return
-  }
-
-  await debug_event({
-    category: 'admin_chat',
-    event: 'admin_participant_presence_update_succeeded',
-    payload: debug_payload,
-  })
-
-  if (input.visibility_state === 'visible' && user_uuid) {
-    await hide_other_presence_rooms({
-      user_uuid,
-      participant_uuid: input.participant_uuid,
-    })
-  }
-}
-
 export async function mark_room_entered(input: {
   room_uuid: string
   participant_uuid: string
@@ -355,15 +213,6 @@ export async function mark_room_entered(input: {
     patch,
   })
 
-  if (input.track_presence !== false && input.last_channel) {
-    await upsert_presence_state({
-      room_uuid: input.room_uuid,
-      participant_uuid: input.participant_uuid,
-      visibility_state: 'visible',
-      last_channel: input.last_channel ?? null,
-      active_area: input.active_area ?? 'chat_room',
-    })
-  }
 }
 
 export async function mark_participant_last_channel(input: {
@@ -424,13 +273,6 @@ export async function mark_room_left(input: {
       })
     }
 
-    await upsert_presence_state({
-      room_uuid: input.room_uuid,
-      participant_uuid: input.participant_uuid,
-      visibility_state: 'hidden',
-      last_channel: null,
-      active_area: null,
-    })
   } catch (error) {
     if (input.trace_admin_presence_leave_update) {
       await debug_event({

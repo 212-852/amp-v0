@@ -7,6 +7,7 @@ import {
   useUserChat,
 } from '@/components/chat/context'
 import { PwaBootProvider } from '@/components/pwa/boot_gate'
+import PresenceClient from '@/components/presence/client'
 import UserFooter from '@/components/user/footer'
 import UserHeader from '@/components/user/header'
 
@@ -34,6 +35,7 @@ export default function UserShell({ children }: UserShellProps) {
     <div className="h-[100dvh] overflow-hidden bg-[#f6e5cf]">
       <div className="relative mx-auto flex h-[100dvh] min-h-0 w-full max-w-[430px] flex-col overflow-hidden bg-[#f6e5cf]">
         <PwaBootProvider>
+          <PresenceClient />
           <div className="fixed left-0 right-0 top-0 z-50 w-screen">
             <div className="mx-auto w-full max-w-[430px]">
               <UserHeader />

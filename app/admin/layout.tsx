@@ -1,6 +1,6 @@
 import AdminHeader from '@/components/admin/header'
 import AdminShell from '@/components/layout/admin/shell'
-import PresenceClient from '@/components/presence/presence_client'
+import PresenceClient from '@/components/presence/client'
 import { read_admin_display_name } from '@/lib/admin/management/action'
 import { require_admin_route_access } from '@/lib/auth/route'
 

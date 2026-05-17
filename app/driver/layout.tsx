@@ -1,7 +1,14 @@
+import PresenceClient from '@/components/presence/client'
+
 export default function DriverLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  return children
+  return (
+    <>
+      <PresenceClient />
+      {children}
+    </>
+  )
 }
