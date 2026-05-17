@@ -12,8 +12,6 @@ import {
 
 const content = {
   cta_pending: '準備中...',
-  cta_error:
-    'LINE連携を開始できませんでした。しばらくしてから再度お試しください。',
 } as const
 
 type DriverEntryViewProps = {
@@ -91,7 +89,6 @@ export default function DriverEntryView({
   const scroll_ref = useRef<HTMLDivElement>(null)
   const [active_index, set_active_index] = useState(0)
   const [is_pending, set_is_pending] = useState(false)
-  const [error_message, set_error_message] = useState<string | null>(null)
 
   const cards = driver_recruitment_content.cards
   const page = driver_recruitment_content.page
@@ -141,42 +138,17 @@ export default function DriverEntryView({
       return
     }
 
-    set_error_message(null)
-
     if (line_linked) {
       router.push(driver_recruitment_content.apply_path)
       return
     }
 
     set_is_pending(true)
-
-    try {
-      const response = await fetch('/api/auth/link/start', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          provider: 'line',
-          return_path: driver_recruitment_content.apply_path,
-          source_channel: 'web',
-        }),
-      })
-
-      const payload = (await response.json().catch(() => null)) as
-        | { ok?: boolean; auth_url?: string }
-        | null
-
-      if (!response.ok || !payload?.ok || !payload.auth_url) {
-        set_error_message(content.cta_error)
-        return
-      }
-
-      window.location.assign(payload.auth_url)
-    } catch {
-      set_error_message(content.cta_error)
-    } finally {
-      set_is_pending(false)
-    }
+    window.location.assign(
+      `/auth/link/line?return_path=${encodeURIComponent(
+        driver_recruitment_content.apply_path,
+      )}`,
+    )
   }
 
   return (
@@ -210,12 +182,12 @@ export default function DriverEntryView({
           <PageDots count={cards.length} active_index={active_index} />
         </div>
 
-        {reason === 'no_line' || error_message ? (
+        {reason === 'no_line' ? (
           <p
             role="status"
             className="mx-6 mt-5 rounded-[16px] border border-neutral-300 bg-white px-4 py-3 text-[13px] leading-relaxed text-neutral-700"
           >
-            {error_message ?? page.no_line_message}
+            {page.no_line_message}
           </p>
         ) : null}
 

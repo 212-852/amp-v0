@@ -804,7 +804,7 @@ export async function run_line_callback_for_pwa_one_time_pass(input: {
   return {
     visitor_uuid: access.visitor_uuid,
     user_uuid: access.user_uuid,
-    return_path: '/',
+    return_path: null,
     is_new_user: access.is_new_user,
     is_new_visitor: access.is_new_visitor,
     display_name: input.display_name,

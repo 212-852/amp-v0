@@ -2,6 +2,11 @@ import { cookies, headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 import { run_auth_link_start } from '@/lib/auth/link/action'
+import {
+  line_link_return_path_cookie_name,
+  line_link_return_path_cookie_options,
+  normalize_line_link_return_path,
+} from '@/lib/auth/link/return_path'
 import { debug_event } from '@/lib/debug'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import {
@@ -110,7 +115,7 @@ export async function POST(request: Request) {
       },
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       auth_url: result.auth_url,
       pass_uuid: result.pass_uuid,
@@ -119,6 +124,20 @@ export async function POST(request: Request) {
       link_session_uuid: result.link_state,
       status: result.status,
     })
+
+    const return_path = normalize_line_link_return_path(
+      typeof body?.return_path === 'string' ? body.return_path : null,
+    )
+
+    if (return_path) {
+      response.cookies.set(
+        line_link_return_path_cookie_name,
+        return_path,
+        line_link_return_path_cookie_options(),
+      )
+    }
+
+    return response
   } catch (error) {
     const error_message =
       error instanceof Error ? error.message : String(error)

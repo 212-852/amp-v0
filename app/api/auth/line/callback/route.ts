@@ -16,6 +16,7 @@ import {
   visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
+import { supabase } from '@/lib/db/supabase'
 import {
   line_link_return_path_cookie_name,
   normalize_line_link_return_path,
@@ -48,6 +49,41 @@ function redirect_return_path(return_path: string | null | undefined) {
   const origin = get_app_origin_from_callback_env() ?? ''
 
   return NextResponse.redirect(`${origin}${return_path ?? '/'}`)
+}
+
+async function resolve_role_redirect_path(user_uuid: string | null) {
+  if (!user_uuid) {
+    return '/entry'
+  }
+
+  const result = await supabase
+    .from('users')
+    .select('role')
+    .eq('user_uuid', user_uuid)
+    .maybeSingle()
+
+  if (result.error) {
+    return '/entry'
+  }
+
+  const role =
+    result.data && typeof result.data.role === 'string'
+      ? result.data.role
+      : null
+
+  if (role === 'admin') {
+    return '/admin'
+  }
+
+  if (role === 'driver') {
+    return '/driver'
+  }
+
+  if (role === 'user' || role === 'member') {
+    return '/user'
+  }
+
+  return '/entry'
 }
 
 function redirect_pwa_line_link_landing(
@@ -185,9 +221,9 @@ export async function GET(request: Request) {
         })
       }
 
-      const response = line_link_return_path
-        ? redirect_return_path(line_link_return_path)
-        : redirect_pwa_line_link_landing(request, 'completed')
+      const redirect_path =
+        line_link_return_path ?? (await resolve_role_redirect_path(out.user_uuid))
+      const response = redirect_return_path(redirect_path)
 
       response.cookies.set(
         visitor_cookie_name,
@@ -285,7 +321,10 @@ export async function GET(request: Request) {
       },
     })
 
-    const response = redirect_home()
+    const redirect_path =
+      line_link_return_path ??
+      (await resolve_role_redirect_path(access.user_uuid))
+    const response = redirect_return_path(redirect_path)
 
     response.cookies.set(
       visitor_cookie_name,
@@ -294,6 +333,7 @@ export async function GET(request: Request) {
         cross_site_friendly: true,
       }),
     )
+    response.cookies.delete(line_link_return_path_cookie_name)
 
     return response
   } catch {
