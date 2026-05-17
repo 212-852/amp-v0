@@ -43,7 +43,7 @@ export async function GET() {
   } catch (error) {
     await debug_event({
       category: 'admin_management',
-      event: 'admin_availability_toggle_failed',
+      event: 'admin_availability_load_failed',
       payload: {
         step: 'get',
         admin_user_uuid: context.admin_user_uuid,
@@ -52,7 +52,7 @@ export async function GET() {
     })
 
     return NextResponse.json(
-      { ok: false, error: 'admin_reception_failed' },
+      { ok: false, error: 'admin_availability_load_failed' },
       { status: 500 },
     )
   }
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json(
-      { ok: false, error: 'admin_reception_failed' },
+      { ok: false, error: 'admin_availability_toggle_failed' },
       { status: 500 },
     )
   }

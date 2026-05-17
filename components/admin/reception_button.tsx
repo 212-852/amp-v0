@@ -8,6 +8,7 @@ type reception_state_value = 'open' | 'offline'
 type reception_state_response = {
   ok: boolean
   state?: reception_state_value
+  is_available?: boolean
 }
 
 const reception_label = {
@@ -50,12 +51,15 @@ export function AdminReceptionButton() {
 
         const payload = (await response.json()) as reception_state_response
 
-        if (
-          !cancelled &&
-          payload.ok &&
-          (payload.state === 'open' || payload.state === 'offline')
-        ) {
-          set_state(payload.state)
+        if (!cancelled && payload.ok) {
+          if (typeof payload.is_available === 'boolean') {
+            set_state(payload.is_available ? 'open' : 'offline')
+            return
+          }
+
+          if (payload.state === 'open' || payload.state === 'offline') {
+            set_state(payload.state)
+          }
         }
       } catch {
         // Keep the button in its neutral state.
@@ -108,12 +112,20 @@ export function AdminReceptionButton() {
 
       const payload = (await response.json()) as reception_state_response
 
-      if (
-        payload.ok &&
-        (payload.state === 'open' || payload.state === 'offline')
-      ) {
-        set_state(payload.state)
-        show_toast(reception_label[payload.state])
+      if (payload.ok) {
+        const next_state =
+          typeof payload.is_available === 'boolean'
+            ? payload.is_available
+              ? 'open'
+              : 'offline'
+            : payload.state === 'open' || payload.state === 'offline'
+              ? payload.state
+              : null
+
+        if (next_state) {
+          set_state(next_state)
+          show_toast(reception_label[next_state])
+        }
       }
     } finally {
       set_is_pending(false)

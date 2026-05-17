@@ -56,13 +56,14 @@ function serialize_error(error: unknown) {
 }
 
 async function debug_admin_availability_failed(input: {
+  event: 'admin_availability_load_failed' | 'admin_availability_toggle_failed'
   step: string
   admin_user_uuid?: string | null
   error: unknown
 }) {
   await debug_event({
     category: 'admin_management',
-    event: 'admin_availability_toggle_failed',
+    event: input.event,
     payload: {
       step: input.step,
       admin_user_uuid: input.admin_user_uuid ?? null,
@@ -96,31 +97,6 @@ export async function read_admin_availability(
 
   if (existing) {
     return existing
-  }
-
-  const inserted = await supabase
-    .from('admin_availability')
-    .upsert(
-      {
-        admin_user_uuid: sanitized,
-        is_available: false,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'admin_user_uuid' },
-    )
-    .select(availability_select)
-    .single()
-
-  if (inserted.error) {
-    throw inserted.error
-  }
-
-  const initialized = row_to_record(
-    inserted.data as admin_availability_row | null,
-  )
-
-  if (initialized) {
-    return initialized
   }
 
   return {
@@ -188,6 +164,7 @@ export async function apply_admin_availability_request(input: {
     current = await read_admin_availability(input.admin_user_uuid)
   } catch (error) {
     await debug_admin_availability_failed({
+      event: 'admin_availability_load_failed',
       step: 'read_current',
       admin_user_uuid: input.admin_user_uuid,
       error,
@@ -199,13 +176,6 @@ export async function apply_admin_availability_request(input: {
     current,
     parsed.request,
   )
-
-  if (next_is_available === current.is_available) {
-    return {
-      ok: true,
-      record: current,
-    }
-  }
 
   try {
     const updated = await upsert_admin_availability({
@@ -219,6 +189,7 @@ export async function apply_admin_availability_request(input: {
     }
   } catch (error) {
     await debug_admin_availability_failed({
+      event: 'admin_availability_toggle_failed',
       step: 'update',
       admin_user_uuid: input.admin_user_uuid,
       error,
