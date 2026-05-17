@@ -1,5 +1,6 @@
 import 'server-only'
 
+import type { reception_state } from '@/lib/admin/reception/rules'
 import { batch_resolve_admin_operator_display } from '@/lib/admin/profile'
 import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
@@ -27,7 +28,7 @@ export type admin_user_summary = {
   tier: string | null
   image_url: string | null
   created_at: string | null
-  reception_state: 'open' | 'offline' | null
+  reception_state: reception_state | null
   reception_updated_at: string | null
   is_available: boolean
   profile: profile
@@ -52,7 +53,7 @@ export type admin_user_detail = admin_user_summary & {
 }
 
 type users_row = Record<string, unknown>
-type availability_row = Record<string, unknown>
+type receptions_row = Record<string, unknown>
 type identities_row = Record<string, unknown>
 type profiles_row = Record<string, unknown>
 
@@ -61,44 +62,51 @@ function string_value(value: unknown): string | null {
 }
 
 function row_user_uuid(
-  row: users_row | identities_row | availability_row | profiles_row,
+  row: users_row | identities_row | receptions_row | profiles_row,
 ): string | null {
   const raw = row['user_uuid']
   return typeof raw === 'string' && raw.length > 0 ? raw : null
 }
 
-function row_admin_user_uuid(row: availability_row): string | null {
-  const raw = row['admin_user_uuid']
-  return typeof raw === 'string' && raw.length > 0 ? raw : null
+function parse_reception_state(value: unknown): reception_state | null {
+  if (value === 'open' || value === 'closed') {
+    return value
+  }
+
+  return null
 }
 
-async function fetch_availability_by_user(
+async function fetch_receptions_by_user(
   user_uuids: string[],
-): Promise<Map<string, { is_available: boolean; updated_at: string | null }>> {
-  const map = new Map<string, { is_available: boolean; updated_at: string | null }>()
+): Promise<Map<string, { state: reception_state; updated_at: string | null }>> {
+  const map = new Map<
+    string,
+    { state: reception_state; updated_at: string | null }
+  >()
 
   if (user_uuids.length === 0) {
     return map
   }
 
   const result = await supabase
-    .from('admin_availability')
-    .select('admin_user_uuid, is_available, updated_at')
-    .in('admin_user_uuid', user_uuids)
+    .from('receptions')
+    .select('user_uuid, state, updated_at')
+    .in('user_uuid', user_uuids)
 
   if (result.error) {
     return map
   }
 
-  for (const raw of (result.data ?? []) as availability_row[]) {
-    const uuid = row_admin_user_uuid(raw)
+  for (const raw of (result.data ?? []) as receptions_row[]) {
+    const uuid = row_user_uuid(raw)
+    const state = parse_reception_state(raw['state'])
 
-    if (!uuid) {
+    if (!uuid || !state) {
       continue
     }
 
     map.set(uuid, {
-      is_available: raw['is_available'] === true,
+      state,
       updated_at: string_value(raw['updated_at']),
     })
   }
@@ -221,7 +229,7 @@ function fallback_user_name(row: users_row): string | null {
 
 function row_to_summary(
   row: users_row,
-  availability: Map<string, { is_available: boolean; updated_at: string | null }>,
+  receptions: Map<string, { state: reception_state; updated_at: string | null }>,
   profiles: Map<string, profile>,
 ): admin_user_summary | null {
   const user_uuid = row_user_uuid(row)
@@ -230,7 +238,7 @@ function row_to_summary(
     return null
   }
 
-  const available = availability.get(user_uuid) ?? null
+  const reception = receptions.get(user_uuid) ?? null
   const profile = profiles.get(user_uuid) ?? empty_profile()
   const fallback_name = fallback_user_name(row)
 
@@ -242,20 +250,16 @@ function row_to_summary(
     tier: string_value(row['tier']),
     image_url: string_value(row['image_url']),
     created_at: string_value(row['created_at']),
-    reception_state: available?.is_available
-      ? 'open'
-      : available
-        ? 'offline'
-        : null,
-    reception_updated_at: available?.updated_at ?? null,
-    is_available: available?.is_available ?? false,
+    reception_state: reception?.state ?? null,
+    reception_updated_at: reception?.updated_at ?? null,
+    is_available: reception?.state === 'open',
     profile,
   }
 }
 
 /**
- * List every user with admin role. Availability state is enriched best-effort:
- * if the availability read fails, summaries still render as unavailable.
+ * List every user with admin role. Reception state is enriched best-effort:
+ * if the receptions read fails, summaries still render as unavailable.
  */
 export async function list_admin_users(): Promise<admin_user_summary[]> {
   const result = await supabase
@@ -271,13 +275,13 @@ export async function list_admin_users(): Promise<admin_user_summary[]> {
   const user_uuids = rows
     .map((row) => row_user_uuid(row))
     .filter((value): value is string => value !== null)
-  const [availability, profiles] = await Promise.all([
-    fetch_availability_by_user(user_uuids),
+  const [receptions, profiles] = await Promise.all([
+    fetch_receptions_by_user(user_uuids),
     fetch_profiles_by_user(user_uuids),
   ])
 
   const summaries = rows
-    .map((row) => row_to_summary(row, availability, profiles))
+    .map((row) => row_to_summary(row, receptions, profiles))
     .filter((value): value is admin_user_summary => value !== null)
 
   return summaries.sort((a, b) => {
@@ -291,7 +295,7 @@ export async function list_available_admin_users(): Promise<admin_user_summary[]
   const admins = await list_admin_users()
 
   return admins
-    .filter((admin) => admin.is_available)
+    .filter((admin) => admin.reception_state === 'open')
     .sort((a, b) => {
       const left = new Date(a.reception_updated_at ?? 0).getTime()
       const right = new Date(b.reception_updated_at ?? 0).getTime()
@@ -329,11 +333,11 @@ export async function read_admin_user(
     return null
   }
 
-  const [availability, profiles] = await Promise.all([
-    fetch_availability_by_user([sanitized]),
+  const [receptions, profiles] = await Promise.all([
+    fetch_receptions_by_user([sanitized]),
     fetch_profiles_by_user([sanitized]),
   ])
-  const summary = row_to_summary(row, availability, profiles)
+  const summary = row_to_summary(row, receptions, profiles)
 
   if (!summary) {
     return null

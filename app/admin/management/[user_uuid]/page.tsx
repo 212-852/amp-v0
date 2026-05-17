@@ -37,24 +37,24 @@ function format_time(iso: string | null): string {
   })
 }
 
-function reception_label(state: 'open' | 'offline' | null): string {
+function reception_label(state: 'open' | 'closed' | null): string {
   if (state === 'open') {
     return '受付中'
   }
 
-  if (state === 'offline') {
+  if (state === 'closed') {
     return '受付停止'
   }
 
   return '未設定'
 }
 
-function reception_chip_class(state: 'open' | 'offline' | null): string {
+function reception_chip_class(state: 'open' | 'closed' | null): string {
   if (state === 'open') {
     return 'border-black bg-black text-white'
   }
 
-  if (state === 'offline') {
+  if (state === 'closed') {
     return 'border-neutral-300 bg-neutral-100 text-neutral-600'
   }
 

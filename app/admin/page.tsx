@@ -9,8 +9,8 @@ import { require_admin_route_access } from '@/lib/auth/route'
 
 export const dynamic = 'force-dynamic'
 
-async function load_top_rooms(state: 'open' | 'offline'): Promise<reception_room[]> {
-  if (state === 'offline') {
+async function load_top_rooms(state: 'open' | 'closed'): Promise<reception_room[]> {
+  if (state === 'closed') {
     return []
   }
 
@@ -30,7 +30,7 @@ async function load_top_rooms(state: 'open' | 'offline'): Promise<reception_room
 
 async function load_reception_state(
   admin_user_uuid: string,
-): Promise<'open' | 'offline'> {
+): Promise<'open' | 'closed'> {
   try {
     const record = await read_admin_reception(admin_user_uuid)
     return record.state
@@ -38,7 +38,7 @@ async function load_reception_state(
     console.error('[admin_home] read_admin_reception_failed', {
       error: error instanceof Error ? error.message : String(error),
     })
-    return 'offline'
+    return 'closed'
   }
 }
 

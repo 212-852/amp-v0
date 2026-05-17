@@ -3,17 +3,21 @@
 import { MessageCircle, MessageCircleOff } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-type reception_state_value = 'open' | 'offline'
+import { create_browser_supabase } from '@/lib/db/browser'
+import {
+  normalize_reception_state,
+  type reception_state,
+} from '@/lib/admin/reception/rules'
 
 type reception_state_response = {
   ok: boolean
-  state?: reception_state_value
+  state?: reception_state
   is_available?: boolean
 }
 
 const reception_label = {
   open: 'ON',
-  offline: 'OFF',
+  closed: 'OFF',
 } as const
 
 const base_button_class =
@@ -22,17 +26,41 @@ const base_button_class =
 const open_button_class =
   'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_2px_8px_rgba(16,185,129,0.16)] hover:bg-emerald-100 focus-visible:outline-emerald-500'
 
-const offline_button_class =
+const closed_button_class =
   'border-neutral-200 bg-neutral-100 text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:bg-neutral-200 focus-visible:outline-neutral-500'
 
 const idle_button_class =
   'border-neutral-200 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.04)] focus-visible:outline-neutral-500'
 
+function resolve_state_from_payload(
+  payload: reception_state_response,
+): reception_state | null {
+  if (!payload.ok) {
+    return null
+  }
+
+  const from_state = normalize_reception_state(payload.state)
+
+  if (from_state) {
+    return from_state
+  }
+
+  if (typeof payload.is_available === 'boolean') {
+    return payload.is_available ? 'open' : 'closed'
+  }
+
+  return null
+}
+
 export function AdminReceptionButton() {
-  const [state, set_state] = useState<reception_state_value | null>(null)
+  const [state, set_state] = useState<reception_state | null>(null)
   const [is_pending, set_is_pending] = useState(false)
   const [toast_message, set_toast_message] = useState<string | null>(null)
   const toast_timer_ref = useRef<number | null>(null)
+
+  const apply_state = useCallback((next: reception_state) => {
+    set_state(next)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -50,16 +78,10 @@ export function AdminReceptionButton() {
         }
 
         const payload = (await response.json()) as reception_state_response
+        const next_state = resolve_state_from_payload(payload)
 
-        if (!cancelled && payload.ok) {
-          if (typeof payload.is_available === 'boolean') {
-            set_state(payload.is_available ? 'open' : 'offline')
-            return
-          }
-
-          if (payload.state === 'open' || payload.state === 'offline') {
-            set_state(payload.state)
-          }
+        if (!cancelled && next_state) {
+          apply_state(next_state)
         }
       } catch {
         // Keep the button in its neutral state.
@@ -69,7 +91,44 @@ export function AdminReceptionButton() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [apply_state])
+
+  useEffect(() => {
+    const supabase = create_browser_supabase()
+
+    if (!supabase) {
+      return
+    }
+
+    const channel = supabase
+      .channel('receptions:header_toggle')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'receptions',
+        },
+        (payload) => {
+          const row = payload.new as { state?: unknown } | null
+
+          if (!row) {
+            return
+          }
+
+          const next_state = normalize_reception_state(row.state)
+
+          if (next_state) {
+            apply_state(next_state)
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [apply_state])
 
   useEffect(() => {
     return () => {
@@ -111,40 +170,30 @@ export function AdminReceptionButton() {
       }
 
       const payload = (await response.json()) as reception_state_response
+      const next_state = resolve_state_from_payload(payload)
 
-      if (payload.ok) {
-        const next_state =
-          typeof payload.is_available === 'boolean'
-            ? payload.is_available
-              ? 'open'
-              : 'offline'
-            : payload.state === 'open' || payload.state === 'offline'
-              ? payload.state
-              : null
-
-        if (next_state) {
-          set_state(next_state)
-          show_toast(reception_label[next_state])
-        }
+      if (next_state) {
+        apply_state(next_state)
+        show_toast(reception_label[next_state])
       }
     } finally {
       set_is_pending(false)
     }
-  }, [is_pending, show_toast])
+  }, [apply_state, is_pending, show_toast])
 
   const is_open = state === 'open'
-  const is_offline = state === 'offline'
+  const is_closed = state === 'closed'
   const button_class = `${base_button_class} ${
     is_open
       ? open_button_class
-      : is_offline
-        ? offline_button_class
+      : is_closed
+        ? closed_button_class
         : idle_button_class
   }`
   const label = is_open
     ? reception_label.open
-    : is_offline
-      ? reception_label.offline
+    : is_closed
+      ? reception_label.closed
       : '...'
   const aria_label =
     state === null ? 'Reception' : `Reception ${reception_label[state]}`
@@ -161,7 +210,7 @@ export function AdminReceptionButton() {
           void toggle()
         }}
       >
-        {is_offline ? (
+        {is_closed ? (
           <MessageCircleOff className="h-4 w-4" strokeWidth={2} />
         ) : (
           <MessageCircle className="h-4 w-4" strokeWidth={2} />

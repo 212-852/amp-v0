@@ -26,7 +26,7 @@ export async function GET() {
   } catch (error) {
     await debug_event({
       category: 'admin_management',
-      event: 'admin_availability_realtime_failed',
+      event: 'admin_reception_realtime_failed',
       payload: {
         step: 'list_available_admins',
         ...serialize_error(error),
@@ -34,7 +34,7 @@ export async function GET() {
     })
 
     return NextResponse.json(
-      { ok: false, error: 'admin_availability_failed' },
+      { ok: false, error: 'admin_reception_failed' },
       { status: 500 },
     )
   }

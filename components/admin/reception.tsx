@@ -6,11 +6,11 @@ import type { reception_room } from '@/lib/admin/reception/types'
 
 type AdminReceptionProps = {
   rooms: reception_room[]
-  state: 'open' | 'offline'
+  state: 'open' | 'closed'
 }
 
 export default function AdminReception({ rooms, state }: AdminReceptionProps) {
-  if (state === 'offline') {
+  if (state === 'closed') {
     return null
   }
 

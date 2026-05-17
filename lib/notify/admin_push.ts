@@ -220,13 +220,13 @@ function admin_notification_discord_content(input: admin_push_route_input) {
 
 function resolve_header_status(input: {
   role: string | null
-  is_available: boolean | null
+  reception_open: boolean
 }): 'on' | 'off' {
   if (input.role !== 'admin') {
     return 'on'
   }
 
-  return input.is_available === true ? 'on' : 'off'
+  return input.reception_open ? 'on' : 'off'
 }
 
 function resolve_delivery_methods(input: {
@@ -296,13 +296,14 @@ async function load_admin_notification_candidates(input: {
     .filter((row) => row.role === 'admin')
     .map((row) => row.user_uuid)
 
-  const [availability_result, settings_result, identities_result, push_result] =
+  const [receptions_result, settings_result, identities_result, push_result] =
     await Promise.all([
       admin_user_uuids.length > 0
         ? supabase
-            .from('admin_availability')
-            .select('admin_user_uuid, is_available')
-            .in('admin_user_uuid', admin_user_uuids)
+            .from('receptions')
+            .select('user_uuid, state')
+            .in('user_uuid', admin_user_uuids)
+            .eq('state', 'open')
         : Promise.resolve({ data: [], error: null }),
       supabase
         .from('settings')
@@ -323,8 +324,8 @@ async function load_admin_notification_candidates(input: {
         .order('updated_at', { ascending: false }),
     ])
 
-  if (availability_result.error) {
-    throw availability_result.error
+  if (receptions_result.error) {
+    throw receptions_result.error
   }
 
   if (settings_result.error) {
@@ -339,17 +340,15 @@ async function load_admin_notification_candidates(input: {
     throw push_result.error
   }
 
-  const availability_by_uuid = new Map<string, boolean>()
+  const open_reception_by_uuid = new Set<string>()
 
-  for (const row of availability_result.data ?? []) {
+  for (const row of receptions_result.data ?? []) {
     if (
-      typeof row.admin_user_uuid === 'string' &&
-      row.admin_user_uuid.length > 0
+      typeof row.user_uuid === 'string' &&
+      row.user_uuid.length > 0 &&
+      row.state === 'open'
     ) {
-      availability_by_uuid.set(
-        row.admin_user_uuid,
-        row.is_available === true,
-      )
+      open_reception_by_uuid.add(row.user_uuid)
     }
   }
 
@@ -407,12 +406,12 @@ async function load_admin_notification_candidates(input: {
       role: row.role,
       header_status: resolve_header_status({
         role: row.role,
-        is_available: availability_by_uuid.get(row.user_uuid) ?? null,
+        reception_open: open_reception_by_uuid.has(row.user_uuid),
       }),
       chat_reception_enabled:
         resolve_header_status({
           role: row.role,
-          is_available: availability_by_uuid.get(row.user_uuid) ?? null,
+          reception_open: open_reception_by_uuid.has(row.user_uuid),
         }) === 'on',
       preferences:
         preferences_by_uuid.get(row.user_uuid) ??

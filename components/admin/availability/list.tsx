@@ -32,24 +32,24 @@ function format_time(iso: string | null): string {
   })
 }
 
-function reception_label(state: 'open' | 'offline' | null): string {
+function reception_label(state: 'open' | 'closed' | null): string {
   if (state === 'open') {
     return '受付中'
   }
 
-  if (state === 'offline') {
+  if (state === 'closed') {
     return '受付停止'
   }
 
   return '未設定'
 }
 
-function reception_chip_class(state: 'open' | 'offline' | null): string {
+function reception_chip_class(state: 'open' | 'closed' | null): string {
   if (state === 'open') {
     return 'border-black bg-black text-white'
   }
 
-  if (state === 'offline') {
+  if (state === 'closed') {
     return 'border-neutral-300 bg-neutral-100 text-neutral-600'
   }
 
@@ -58,7 +58,7 @@ function reception_chip_class(state: 'open' | 'offline' | null): string {
 
 function sort_available_admins(admins: admin_user_summary[]) {
   return [...admins]
-    .filter((admin) => admin.is_available)
+    .filter((admin) => admin.reception_state === 'open')
     .sort((a, b) => {
       const left = new Date(a.reception_updated_at ?? 0).getTime()
       const right = new Date(b.reception_updated_at ?? 0).getTime()
@@ -82,7 +82,7 @@ export default function AdminAvailabilityList({
     })
 
     if (!response.ok) {
-      throw new Error('admin_availability_fetch_failed')
+      throw new Error('admin_reception_fetch_failed')
     }
 
     const payload = (await response.json().catch(() => null)) as
@@ -90,7 +90,7 @@ export default function AdminAvailabilityList({
       | null
 
     if (!payload?.ok || !Array.isArray(payload.admins)) {
-      throw new Error('admin_availability_payload_invalid')
+      throw new Error('admin_reception_payload_invalid')
     }
 
     set_admins(sort_available_admins(payload.admins))
@@ -105,33 +105,33 @@ export default function AdminAvailabilityList({
 
     if (!supabase) {
       send_admin_chat_debug({
-        event: 'admin_availability_realtime_failed',
+        event: 'admin_reception_realtime_failed',
         level: 'error',
         error_code: 'supabase_client_unavailable',
         error_message: 'Supabase browser client is unavailable.',
-        phase: 'admin_availability_list',
+        phase: 'admin_reception_list',
       })
       return
     }
 
     const channel = supabase
-      .channel('admin_availability:list')
+      .channel('receptions:list')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'admin_availability',
+          table: 'receptions',
         },
         () => {
           void reload_admins().catch((error) => {
             send_admin_chat_debug({
-              event: 'admin_availability_realtime_failed',
+              event: 'admin_reception_realtime_failed',
               level: 'error',
-              error_code: 'admin_availability_reload_failed',
+              error_code: 'admin_reception_reload_failed',
               error_message:
                 error instanceof Error ? error.message : String(error),
-              phase: 'admin_availability_list',
+              phase: 'admin_reception_list',
             })
           })
         },
@@ -139,12 +139,12 @@ export default function AdminAvailabilityList({
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           send_admin_chat_debug({
-            event: 'admin_availability_realtime_failed',
+            event: 'admin_reception_realtime_failed',
             level: 'error',
-            error_code: 'admin_availability_subscribe_failed',
+            error_code: 'admin_reception_subscribe_failed',
             error_message: status,
             subscribe_status: status,
-            phase: 'admin_availability_list',
+            phase: 'admin_reception_list',
           })
         }
       })

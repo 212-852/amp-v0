@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 
 import {
-  apply_admin_availability_request,
-  read_admin_availability,
-  state_from_availability_record,
-} from '@/lib/admin/action'
+  apply_admin_reception_request,
+  read_admin_reception,
+} from '@/lib/admin/reception/action'
 import { resolve_admin_context } from '@/lib/admin/context'
+import { is_reception_open } from '@/lib/admin/rules'
 import { debug_event } from '@/lib/debug'
-import type { admin_availability_request_input } from '@/lib/admin/rules'
+import type { reception_request_input } from '@/lib/admin/reception/rules'
 
 function serialize_error(error: unknown) {
   return {
@@ -30,20 +30,19 @@ export async function GET() {
   }
 
   try {
-    const record = await read_admin_availability(context.admin_user_uuid)
-    const state = state_from_availability_record(record)
+    const record = await read_admin_reception(context.admin_user_uuid)
 
     return NextResponse.json({
       ok: true,
       admin_user_uuid: context.admin_user_uuid,
-      state,
-      is_available: record.is_available,
+      state: record.state,
+      is_available: is_reception_open(record.state),
       updated_at: record.updated_at,
     })
   } catch (error) {
     await debug_event({
       category: 'admin_management',
-      event: 'admin_availability_load_failed',
+      event: 'admin_reception_load_failed',
       payload: {
         step: 'get',
         admin_user_uuid: context.admin_user_uuid,
@@ -52,7 +51,7 @@ export async function GET() {
     })
 
     return NextResponse.json(
-      { ok: false, error: 'admin_availability_load_failed' },
+      { ok: false, error: 'admin_reception_load_failed' },
       { status: 500 },
     )
   }
@@ -61,7 +60,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => null)) as
-      | admin_availability_request_input
+      | reception_request_input
       | null
 
     const context = await resolve_admin_context()
@@ -73,7 +72,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const result = await apply_admin_availability_request({
+    const result = await apply_admin_reception_request({
       admin_user_uuid: context.admin_user_uuid,
       body,
     })
@@ -85,19 +84,17 @@ export async function POST(request: Request) {
       )
     }
 
-    const state = state_from_availability_record(result.record)
-
     return NextResponse.json({
       ok: true,
       admin_user_uuid: context.admin_user_uuid,
-      state,
-      is_available: result.record.is_available,
+      state: result.record.state,
+      is_available: is_reception_open(result.record.state),
       updated_at: result.record.updated_at,
     })
   } catch (error) {
     await debug_event({
       category: 'admin_management',
-      event: 'admin_availability_toggle_failed',
+      event: 'admin_reception_toggle_failed',
       payload: {
         step: 'unexpected',
         ...serialize_error(error),
@@ -105,7 +102,7 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json(
-      { ok: false, error: 'admin_availability_toggle_failed' },
+      { ok: false, error: 'admin_reception_toggle_failed' },
       { status: 500 },
     )
   }

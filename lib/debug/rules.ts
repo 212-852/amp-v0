@@ -127,6 +127,9 @@ export function resolve_debug_rule(input: {
     'profile_save_succeeded',
     'admin_internal_name_notify_failed',
     'admin_internal_name_notify_succeeded',
+    'admin_reception_load_failed',
+    'admin_reception_toggle_failed',
+    'admin_reception_realtime_failed',
     'admin_availability_load_failed',
     'admin_availability_toggle_failed',
     'admin_availability_realtime_failed',
@@ -139,6 +142,9 @@ export function resolve_debug_rule(input: {
     const is_failed =
       input.event === 'profile_save_failed' ||
       input.event === 'admin_internal_name_notify_failed' ||
+      input.event === 'admin_reception_load_failed' ||
+      input.event === 'admin_reception_toggle_failed' ||
+      input.event === 'admin_reception_realtime_failed' ||
       input.event === 'admin_availability_load_failed' ||
       input.event === 'admin_availability_toggle_failed' ||
       input.event === 'admin_availability_realtime_failed'
@@ -354,7 +360,8 @@ export function resolve_debug_rule(input: {
 
   if (
     input.category === 'admin_chat' &&
-    input.event === 'admin_availability_realtime_failed'
+    (input.event === 'admin_reception_realtime_failed' ||
+      input.event === 'admin_availability_realtime_failed')
   ) {
     return {
       category: 'admin_chat',

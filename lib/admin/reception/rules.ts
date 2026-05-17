@@ -1,11 +1,10 @@
 // ============================================================================
 // Admin reception STATE rules (pure)
 // ----------------------------------------------------------------------------
-// Compatibility types for the admin reception toggle (`open` | `offline`).
-// The source of truth is `public.admin_availability` through `lib/admin/*`.
+// Source of truth: `public.receptions.state` (`open` | `closed`).
 // ============================================================================
 
-export type reception_state = 'open' | 'offline'
+export type reception_state = 'open' | 'closed'
 
 export type reception_record = {
   state: reception_state
@@ -21,17 +20,32 @@ export type reception_request =
   | { kind: 'toggle' }
 
 /**
- * Default state when no availability row has ever been inserted for an admin.
+ * Default state when no receptions row exists for an admin.
  */
-export const default_reception_state: reception_state = 'offline'
+export const default_reception_state: reception_state = 'closed'
 
 export function is_reception_state(value: unknown): value is reception_state {
-  return value === 'open' || value === 'offline'
+  return value === 'open' || value === 'closed'
+}
+
+/**
+ * Accept legacy `offline` as `closed` for older clients.
+ */
+export function normalize_reception_state(value: unknown): reception_state | null {
+  if (value === 'open') {
+    return 'open'
+  }
+
+  if (value === 'closed' || value === 'offline') {
+    return 'closed'
+  }
+
+  return null
 }
 
 /**
  * Pure parser for incoming reception mutation requests.
- * - When `state` is 'open' or 'offline', it is treated as an explicit set.
+ * - When `state` is 'open' or 'closed', it is treated as an explicit set.
  * - When omitted/null/undefined, the request is treated as a toggle.
  * - Any other value is rejected.
  */
@@ -49,10 +63,12 @@ export function parse_reception_request(
     }
   }
 
-  if (is_reception_state(raw)) {
+  const normalized = normalize_reception_state(raw)
+
+  if (normalized) {
     return {
       ok: true,
-      request: { kind: 'set', state: raw },
+      request: { kind: 'set', state: normalized },
     }
   }
 
@@ -65,7 +81,7 @@ export function parse_reception_request(
 export function toggle_reception_state(
   state: reception_state,
 ): reception_state {
-  return state === 'open' ? 'offline' : 'open'
+  return state === 'open' ? 'closed' : 'open'
 }
 
 /**
@@ -83,11 +99,12 @@ export function resolve_next_reception_state(
   return toggle_reception_state(current.state)
 }
 
-/**
- * Compatibility helper. New code should use `lib/admin/rules.ts`.
- */
 export function should_admin_receive_concierge_notify(
   state: reception_state | null,
 ): boolean {
+  return state === 'open'
+}
+
+export function is_reception_open(state: reception_state | null): boolean {
   return state === 'open'
 }
