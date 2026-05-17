@@ -394,21 +394,41 @@ export function resolve_debug_rule(input: {
     input.category === 'admin_chat' &&
     support_started_ok_debug.has(input.event)
   ) {
-    const keep_customer_line_debug =
-      input.event === 'customer_notification_rule_checked' ||
-      input.event === 'customer_line_notification_rule_checked' ||
-      input.event === 'customer_line_notification_send_started' ||
-      input.event === 'customer_line_notification_send_succeeded' ||
-      input.event === 'customer_line_notification_skipped'
+    const customer_notification_decision_events = new Set([
+      'customer_notification_rule_checked',
+      'customer_line_notification_rule_checked',
+      'customer_line_notification_send_started',
+      'customer_line_notification_send_succeeded',
+      'customer_line_notification_skipped',
+    ])
 
     return {
       category: 'admin_chat',
       level: 'info',
-      channels: keep_customer_line_debug ||
-        debug_control.debug_full ||
-        debug_control.support_started_debug_enabled
-        ? ['discord']
-        : [],
+      channels:
+        customer_notification_decision_events.has(input.event) ||
+        debug_control.support_started_debug_enabled ||
+        debug_control.debug_full
+          ? ['discord']
+          : [],
+    }
+  }
+
+  const admin_chat_periodic_debug = new Set([
+    'admin_presence_recovered',
+    'admin_presence_marked_inactive',
+    'admin_presence_visibility_hidden',
+    'admin_presence_heartbeat',
+  ])
+
+  if (
+    input.category === 'admin_chat' &&
+    admin_chat_periodic_debug.has(input.event)
+  ) {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.debug_full ? ['discord'] : [],
     }
   }
 
@@ -708,8 +728,8 @@ export function resolve_debug_rule(input: {
       level: is_failed ? 'error' : 'info',
       channels:
         is_failed ||
-        input.event === 'presence_channel_detected' ||
-        debug_control.debug_full
+        (debug_control.debug_full &&
+          input.event === 'presence_channel_detected')
           ? ['discord']
           : [],
     }
@@ -1128,6 +1148,27 @@ export function resolve_debug_rule(input: {
       category: 'chat_realtime',
       level: 'info',
       channels: [],
+    }
+  }
+
+  if (input.category === 'admin_chat') {
+    return {
+      category: 'admin_chat',
+      level: 'info',
+      channels: debug_control.debug_full ? ['discord'] : [],
+    }
+  }
+
+  if (input.category === 'pwa') {
+    const is_failed =
+      input.event.endsWith('_failed') ||
+      input.event === 'notification_setting_validation_failed' ||
+      input.event === 'push_permission_denied'
+
+    return {
+      category: 'pwa',
+      level: is_failed ? 'error' : 'info',
+      channels: is_failed ? ['discord'] : [],
     }
   }
 

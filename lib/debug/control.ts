@@ -1,7 +1,7 @@
 import 'server-only'
 
 export const debug_control = {
-  debug_full: false,
+  debug_full: process.env.DEBUG_FULL === 'true',
   debug_presence: false,
   debug_notify: true,
   debug_line_notify: true,

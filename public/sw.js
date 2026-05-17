@@ -185,20 +185,11 @@ self.addEventListener('message', (event) => {
 
   event.waitUntil(
     (async () => {
-      await sw_debug('sw_notifications_clear_requested', {
-        source_channel: 'pwa',
-      })
-
       const notifications = await self.registration.getNotifications()
 
       for (const notification of notifications) {
         notification.close()
       }
-
-      await sw_debug('sw_notifications_cleared', {
-        notification_count: notifications.length,
-        source_channel: 'pwa',
-      })
     })(),
   )
 })

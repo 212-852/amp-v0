@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { get_session_user } from '@/lib/auth/route'
+import { debug_control } from '@/lib/debug/control'
 import { debug_event } from '@/lib/debug'
 import { write_presence } from '@/lib/presence/action'
 import { resolve_presence_context } from '@/lib/presence/context'
@@ -24,7 +25,11 @@ export async function POST(request: Request) {
 
   const decision = decide_presence_write(context.context)
 
-  if (typeof body?.detection === 'object' && body.detection !== null) {
+  if (
+    debug_control.debug_full &&
+    typeof body?.detection === 'object' &&
+    body.detection !== null
+  ) {
     await debug_event({
       category: 'pwa',
       event: 'presence_channel_detected',

@@ -44,9 +44,17 @@ function parse_primary_channel(
 export function notification_preferences_to_json(
   preferences: notification_preferences,
 ): Record<string, unknown> {
+  const channel =
+    preferences.primary_channel === 'line' ||
+    preferences.primary_channel === 'push'
+      ? preferences.primary_channel
+      : null
+
   return {
     primary_channel: preferences.primary_channel,
+    channel,
     pwa_push_enabled: preferences.pwa_push_enabled,
+    push_enabled: preferences.pwa_push_enabled,
     line_enabled: preferences.line_enabled,
     kinds: {
       chat: preferences.kinds.chat,
@@ -176,27 +184,10 @@ export function normalize_notification_preferences(
 export async function load_notification_preferences_for_user(
   user_uuid: string | null,
 ): Promise<notification_preferences | null> {
-  const uuid = clean_uuid(user_uuid)
+  const { load_notify_settings_for_user } = await import('@/lib/notify/settings')
+  const parsed = await load_notify_settings_for_user(user_uuid)
 
-  if (!uuid) {
-    return null
-  }
-
-  const result = await supabase
-    .from('settings')
-    .select('notification_preferences')
-    .eq('user_uuid', uuid)
-    .maybeSingle()
-
-  if (result.error || !result.data) {
-    return null
-  }
-
-  const row = result.data as { notification_preferences?: unknown }
-
-  return normalize_notification_preferences(
-    row.notification_preferences ?? null,
-  )
+  return parsed?.preferences ?? null
 }
 
 export async function resolve_chat_external_notification_route(input: {
@@ -227,13 +218,15 @@ export async function resolve_chat_external_notification_decision(input: {
   const participant_uuid = clean_uuid(input.participant_uuid ?? null)
   const source_channel =
     typeof input.source_channel === 'string' ? input.source_channel : null
-  const prefs = await load_notification_preferences_for_user(input.user_uuid)
+  const { load_notify_settings_for_user } = await import('@/lib/notify/settings')
+  const parsed_settings = await load_notify_settings_for_user(input.user_uuid)
+  const prefs = parsed_settings?.preferences ?? null
 
   if (!prefs || !prefs.kinds.chat) {
     return {
       primary_channel: prefs?.primary_channel ?? 'none',
-      push_enabled: prefs?.pwa_push_enabled ?? false,
-      line_enabled: prefs?.line_enabled ?? false,
+      push_enabled: parsed_settings?.parsed_push_enabled ?? false,
+      line_enabled: parsed_settings?.parsed_line_enabled ?? false,
       is_standalone: false,
       push_subscription_exists: false,
       line_identity_exists: false,
@@ -257,8 +250,8 @@ export async function resolve_chat_external_notification_decision(input: {
   if (foreground_open) {
     return {
       primary_channel: prefs.primary_channel,
-      push_enabled: prefs.pwa_push_enabled,
-      line_enabled: prefs.line_enabled,
+      push_enabled: parsed_settings?.parsed_push_enabled ?? prefs.pwa_push_enabled,
+      line_enabled: parsed_settings?.parsed_line_enabled ?? prefs.line_enabled,
       is_standalone,
       push_subscription_exists,
       line_identity_exists,

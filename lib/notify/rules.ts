@@ -490,65 +490,6 @@ export function format_support_started_customer_line_copy(
   }
 }
 
-export function resolve_support_started_customer_line_route(input: {
-  customer_user_uuid: string | null
-  has_line_identity: boolean
-  line_enabled: boolean
-  chat_notifications_enabled: boolean
-  external_selected_route: 'push' | 'line' | null
-  external_skipped_reason: string | null
-}): {
-  selected_method: 'line' | null
-  skipped_reason: string | null
-} {
-  if (!input.customer_user_uuid) {
-    return {
-      selected_method: null,
-      skipped_reason: 'customer_user_missing',
-    }
-  }
-
-  if (!input.chat_notifications_enabled) {
-    return {
-      selected_method: null,
-      skipped_reason: 'chat_notifications_disabled',
-    }
-  }
-
-  if (!input.line_enabled) {
-    return {
-      selected_method: null,
-      skipped_reason: 'line_disabled',
-    }
-  }
-
-  if (!input.has_line_identity) {
-    return {
-      selected_method: null,
-      skipped_reason: 'line_identity_missing',
-    }
-  }
-
-  if (input.external_selected_route === 'line') {
-    return {
-      selected_method: 'line',
-      skipped_reason: null,
-    }
-  }
-
-  if (input.external_selected_route === 'push') {
-    return {
-      selected_method: null,
-      skipped_reason: 'primary_channel_push',
-    }
-  }
-
-  return {
-    selected_method: 'line',
-    skipped_reason: null,
-  }
-}
-
 export function format_support_started_notify_content(
   event: Extract<notify_event, { event: 'support_started' }>,
 ): string {

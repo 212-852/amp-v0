@@ -6,10 +6,10 @@ import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import {
   default_notification_preferences,
-  normalize_notification_preferences,
   notification_preferences_to_json,
   type notification_preferences,
 } from './rules'
+import { parse_notification_settings_json } from '@/lib/notify/settings'
 import {
   enforce_notification_method_selection,
   type notification_method_trigger,
@@ -64,12 +64,12 @@ export async function load_notification_settings() {
 
   const row = settings.data as { notification_preferences?: unknown } | null
 
-  const normalized = normalize_notification_preferences(
+  const parsed = parse_notification_settings_json(
     row?.notification_preferences ?? null,
   )
   const adjusted = enforce_notification_method_selection({
     previous: default_notification_preferences,
-    next: normalized,
+    next: parsed.preferences,
     trigger_method: null,
   })
 
@@ -167,7 +167,8 @@ export async function save_notification_settings(input: {
     notification_preferences?: unknown
   } | null
   const source = current_row?.notification_preferences ?? null
-  const previous = normalize_notification_preferences(source)
+  const previous_parsed = parse_notification_settings_json(source)
+  const previous = previous_parsed.preferences
   const incoming = input.preferences ?? {}
   const incoming_record = incoming as Record<string, unknown>
 
@@ -186,9 +187,17 @@ export async function save_notification_settings(input: {
       incoming.line_enabled !== undefined
         ? incoming.line_enabled
         : previous.line_enabled,
+    channel:
+      incoming.line_enabled === true && incoming.pwa_push_enabled !== true
+        ? 'line'
+        : incoming.pwa_push_enabled === true
+          ? 'push'
+          : incoming_record.primary_channel ?? previous.primary_channel,
   }
 
-  const requested_preferences = normalize_notification_preferences(merged_record)
+  const requested_preferences = parse_notification_settings_json(
+    merged_record,
+  ).preferences
   const method_adjustment = enforce_notification_method_selection({
     previous,
     next: requested_preferences,
