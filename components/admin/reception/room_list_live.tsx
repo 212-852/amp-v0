@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { MessageCircle } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
@@ -55,7 +56,10 @@ type admin_reception_room_list_live_props = {
   initial_rooms: reception_room[]
   limit?: number
   mode?: 'concierge' | 'bot'
-  reception_state?: reception_state | 'loading'
+  on_reception_gate_change?: (input: {
+    state: reception_list_state
+    room_count: number
+  }) => void
 }
 
 type reception_list_state = reception_state | 'loading'
@@ -198,19 +202,37 @@ export default function AdminReceptionRoomListLive({
   initial_rooms,
   limit,
   mode = 'concierge',
-  reception_state = 'loading',
+  on_reception_gate_change,
 }: admin_reception_room_list_live_props) {
-  void reception_state
+  const pathname = usePathname()
   const [rooms, set_rooms] = useState<reception_room[]>([])
   const [db_reception_state, set_db_reception_state] =
-    useState<reception_list_state>('loading')
+    useState<reception_list_state>('closed')
   const { session } = use_session_profile()
   const titles_ref = useRef<Map<string, string>>(new Map())
   const resolved_admin_user_uuid = admin_user_uuid ?? session?.user_uuid ?? null
   const should_render_rooms = db_reception_state === 'open'
+  const visible_rooms =
+    typeof limit === 'number' ? rooms.slice(0, Math.max(0, limit)) : rooms
 
   useEffect(() => {
-    set_rooms(db_reception_state === 'open' ? initial_rooms : [])
+    console.log('[reception_list_actual_renderer_mounted]', { pathname })
+  }, [pathname])
+
+  useEffect(() => {
+    on_reception_gate_change?.({
+      state: db_reception_state,
+      room_count: visible_rooms.length,
+    })
+  }, [db_reception_state, on_reception_gate_change, visible_rooms.length])
+
+  useEffect(() => {
+    if (db_reception_state !== 'open') {
+      set_rooms([])
+      return
+    }
+
+    set_rooms(initial_rooms)
   }, [db_reception_state, initial_rooms])
 
   useEffect(() => {
@@ -236,10 +258,14 @@ export default function AdminReceptionRoomListLive({
         .join(','),
     [initial_rooms],
   )
-  const visible_rooms =
-    typeof limit === 'number' ? rooms.slice(0, Math.max(0, limit)) : rooms
-
   useEffect(() => {
+    console.log('[reception_render_gate_checked]', {
+      pathname,
+      admin_user_uuid: resolved_admin_user_uuid,
+      reception_state: db_reception_state,
+      room_count: rooms.length,
+      should_render_rooms,
+    })
     send_reception_visibility_debug({
       event: 'reception_render_gate_checked',
       admin_user_uuid: resolved_admin_user_uuid,
@@ -251,22 +277,11 @@ export default function AdminReceptionRoomListLive({
     })
   }, [
     db_reception_state,
+    pathname,
     resolved_admin_user_uuid,
     rooms.length,
     should_render_rooms,
   ])
-
-  useEffect(() => {
-    send_reception_visibility_debug({
-      event: 'reception_list_component_mounted',
-      admin_user_uuid: resolved_admin_user_uuid,
-      reception_state: db_reception_state,
-      next_state: db_reception_state,
-      room_count: rooms.length,
-      should_render_rooms,
-      source: 'initial_load',
-    })
-  }, [])
 
   const refetch_rooms_for_reception = useCallback(
     async (next_state: reception_state, source: 'initial_load' | 'realtime') => {
@@ -415,6 +430,11 @@ export default function AdminReceptionRoomListLive({
           (result.data as { state?: unknown } | null)?.state,
         ) ?? 'closed'
 
+      console.log('[reception_state_loaded]', {
+        pathname,
+        admin_user_uuid: resolved_admin_user_uuid,
+        reception_state: next_state,
+      })
       send_reception_visibility_debug({
         event: 'reception_state_loaded',
         admin_user_uuid: resolved_admin_user_uuid,
@@ -435,6 +455,11 @@ export default function AdminReceptionRoomListLive({
         return
       }
 
+      console.log('[reception_state_realtime_received]', {
+        pathname,
+        admin_user_uuid: resolved_admin_user_uuid,
+        reception_state: next_state,
+      })
       send_reception_visibility_debug({
         event: 'reception_state_realtime_received',
         admin_user_uuid: resolved_admin_user_uuid,
@@ -496,6 +521,7 @@ export default function AdminReceptionRoomListLive({
   }, [
     db_reception_state,
     initial_rooms.length,
+    pathname,
     refetch_rooms_for_reception,
     resolved_admin_user_uuid,
     rooms.length,
@@ -1742,12 +1768,10 @@ export default function AdminReceptionRoomListLive({
     session?.user_uuid,
   ])
 
-  if (!should_render_rooms) {
-    return null
-  }
-
   return (
     <>
+      <div data-debug="actual_admin_room_list_renderer" />
+      {should_render_rooms ? (
       <ul className="flex flex-col gap-2">
       {visible_rooms.map((room) => (
         <li key={room.room_uuid}>
@@ -1818,6 +1842,7 @@ export default function AdminReceptionRoomListLive({
         </li>
       ))}
     </ul>
+      ) : null}
     </>
   )
 }
