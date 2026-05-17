@@ -326,7 +326,7 @@ function build_driver_recruitment_bubbles(
   const p = bundle.payload
   const primary_cta = p.ctas[0]
 
-  return p.cards.map((card) => {
+  return p.cards.map((card, index) => {
     const body_contents: Record<string, unknown>[] = [
       flex_text(card.title, { weight: 'bold', size: 'xl' }),
     ]
@@ -338,10 +338,6 @@ function build_driver_recruitment_bubbles(
       )
     }
 
-    const footer_contents = primary_cta
-      ? [flex_uri_button(primary_cta.label, primary_cta.href, 'primary')]
-      : []
-
     const bubble: Record<string, unknown> = {
       type: 'bubble',
       size: 'kilo',
@@ -351,12 +347,17 @@ function build_driver_recruitment_bubbles(
         spacing: 'md',
         contents: body_contents,
       },
-      footer: {
+    }
+
+    if (index === 0 && primary_cta) {
+      bubble.footer = {
         type: 'box',
         layout: 'vertical',
         spacing: 'sm',
-        contents: footer_contents,
-      },
+        contents: [
+          flex_uri_button(primary_cta.label, primary_cta.href, 'primary'),
+        ],
+      }
     }
 
     const image_url = card.image ? absolute_url(card.image.src) : null
