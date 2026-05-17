@@ -302,7 +302,9 @@ export type apply_route_access =
     }
   | {
       allowed: false
-      redirect_to: '/entry?reason=no_line'
+      redirect_to:
+        | '/entry?reason=no_line'
+        | '/auth/link/line?return_path=%2Fapply'
     }
 
 export async function resolve_driver_route_access(): Promise<driver_route_access> {
@@ -337,6 +339,23 @@ export async function require_driver_route_access() {
   return access
 }
 
+export async function require_line_identity_or_redirect_to_link(
+  return_path: string,
+) {
+  const subject = await resolve_driver_route_subject()
+
+  if (
+    can_access_apply({
+      user: subject.user,
+      identities: subject.identities,
+    })
+  ) {
+    return
+  }
+
+  redirect(`/auth/link/line?return_path=${encodeURIComponent(return_path)}`)
+}
+
 export async function resolve_apply_route_access(): Promise<apply_route_access> {
   const subject = await resolve_driver_route_subject()
   const session = await get_session_user()
@@ -349,7 +368,7 @@ export async function resolve_apply_route_access(): Promise<apply_route_access> 
   ) {
     return {
       allowed: false,
-      redirect_to: '/entry?reason=no_line',
+      redirect_to: '/auth/link/line?return_path=%2Fapply',
     }
   }
 
@@ -365,6 +384,8 @@ export async function resolve_apply_route_access(): Promise<apply_route_access> 
 }
 
 export async function require_apply_route_access() {
+  await require_line_identity_or_redirect_to_link('/apply')
+
   const access = await resolve_apply_route_access()
 
   if (!access.allowed) {

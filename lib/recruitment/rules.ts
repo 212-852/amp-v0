@@ -1,5 +1,10 @@
 import 'server-only'
 
+import {
+  recruitment_apply_path,
+  recruitment_entry_path,
+} from '@/lib/recruitment/content'
+
 export type recruitment_intent = 'driver_recruitment'
 
 function normalize_dispatch_text(value: string | null | undefined) {
@@ -54,9 +59,9 @@ export function resolve_recruitment_app_base_url(): string {
 }
 
 export function resolve_recruitment_entry_url(): string {
-  return `${resolve_recruitment_app_base_url()}/entry`
+  return `${resolve_recruitment_app_base_url()}${recruitment_entry_path}`
 }
 
 export function resolve_recruitment_apply_url(): string {
-  return `${resolve_recruitment_app_base_url()}/apply`
+  return `${resolve_recruitment_app_base_url()}${recruitment_apply_path}`
 }

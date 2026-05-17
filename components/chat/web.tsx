@@ -213,56 +213,60 @@ function HowToUseCard({ bundle }: { bundle: how_to_use_bundle }) {
 }
 
 function DriverRecruitmentCard({ bundle }: { bundle: driver_recruitment_bundle }) {
+  const primary_cta = bundle.payload.ctas[0]
+
   return (
-    <article className="w-[292px] shrink-0 overflow-hidden rounded-[24px] bg-white shadow-[0_3px_18px_rgba(42,29,24,0.08)]">
-      <Image
-        src={bundle.payload.image.src}
-        alt={text_for(bundle.payload.image.alt)}
-        width={584}
-        height={360}
-        className="h-[178px] w-full object-cover"
-      />
-      <div className="flex flex-col items-center gap-4 px-5 pb-5 pt-4">
-        <div className="w-full max-w-[252px] text-center">
-          <h2 className="text-[18px] font-semibold leading-[1.45] text-[#2a1d18]">
-            {text_for(bundle.payload.title)}
-          </h2>
-          <p className="mt-2 whitespace-pre-line text-left text-[12px] leading-[1.6] text-[#7f6a59]">
-            {text_for(bundle.payload.summary)}
-          </p>
-        </div>
-        <div className="flex w-full flex-col gap-3">
-          {bundle.payload.sections.map((section) => (
-            <div
-              key={section.key}
-              className="w-full max-w-[252px] rounded-[18px] border border-[#eadccc] bg-[#faf6f1] px-4 py-3 text-left"
-            >
-              <p className="text-[13px] font-semibold leading-[1.45] text-[#2a1d18]">
-                {text_for(section.heading)}
-              </p>
-              <p className="mt-1.5 whitespace-pre-line text-[12px] leading-[1.55] text-[#7f6a59]">
-                {text_for(section.body)}
-              </p>
+    <article className="w-[292px] shrink-0 rounded-[24px] bg-[#11100f] px-0 pb-4 pt-4 shadow-[0_3px_18px_rgba(42,29,24,0.08)]">
+      <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {bundle.payload.cards.map((card) => (
+          <section
+            key={card.key}
+            className="flex h-[342px] w-[244px] shrink-0 snap-center flex-col overflow-hidden rounded-[24px] bg-white text-[#201714]"
+          >
+            {card.image ? (
+              <Image
+                src={card.image.src}
+                alt={text_for(card.image.alt)}
+                width={488}
+                height={420}
+                className="h-[210px] w-full object-cover"
+              />
+            ) : null}
+            <div className="flex flex-1 flex-col px-4 py-4">
+              <h2 className="text-[18px] font-bold leading-tight text-[#201714]">
+                {text_for(card.title)}
+              </h2>
+              {card.subtitle ? (
+                <p className="mt-2 text-[13px] font-semibold leading-relaxed text-[#806750]">
+                  {text_for(card.subtitle)}
+                </p>
+              ) : null}
+              {card.items.length > 0 ? (
+                <ul className="mt-4 flex flex-col gap-2">
+                  {card.items.map((item) => (
+                    <li
+                      key={item}
+                      className="rounded-[14px] bg-[#f6f0e9] px-3 py-2 text-[12px] font-semibold leading-relaxed text-[#4a3c33]"
+                    >
+                      {text_for(item)}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
-          ))}
-        </div>
-        <div className="flex w-full flex-col items-center gap-2.5">
-          {bundle.payload.ctas.map((cta) => (
-            <a
-              key={cta.key}
-              href={cta.href}
-              className={[
-                'w-full max-w-[248px] rounded-[18px] px-4 py-3 text-center text-[14px] font-semibold leading-[1.45] shadow-[0_2px_8px_rgba(42,29,24,0.07)]',
-                cta.style === 'primary'
-                  ? 'bg-[#c9a77d] text-white'
-                  : 'border border-[#c9a77d] bg-white text-[#9c7d5d]',
-              ].join(' ')}
-            >
-              {text_for(cta.label)}
-            </a>
-          ))}
-        </div>
+          </section>
+        ))}
       </div>
+      {primary_cta ? (
+        <div className="px-4 pt-1">
+          <a
+            href={primary_cta.href}
+            className="block w-full rounded-[18px] bg-[#06C755] px-4 py-3 text-center text-[14px] font-bold leading-[1.45] text-white shadow-[0_2px_8px_rgba(0,0,0,0.14)]"
+          >
+            {text_for(primary_cta.label)}
+          </a>
+        </div>
+      ) : null}
     </article>
   )
 }

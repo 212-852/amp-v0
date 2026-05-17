@@ -4,8 +4,9 @@ import { randomUUID } from 'crypto'
 
 import {
   resolve_recruitment_apply_url,
-  resolve_recruitment_entry_url,
 } from '@/lib/recruitment/rules'
+import { driver_recruitment_content } from '@/lib/recruitment/content'
+import type { recruitment_card } from '@/lib/recruitment/content'
 
 export type chat_locale = 'ja' | 'en' | 'es'
 
@@ -115,10 +116,10 @@ export type driver_recruitment_section = {
 }
 
 export type driver_recruitment_cta = {
-  key: 'entry' | 'apply'
+  key: 'apply'
   label: string
   href: string
-  style: 'primary' | 'secondary'
+  style: 'primary'
 }
 
 export type driver_recruitment_bundle = {
@@ -132,6 +133,7 @@ export type driver_recruitment_bundle = {
     title: string
     summary: string
     image: bundle_image
+    cards: recruitment_card[]
     sections: driver_recruitment_section[]
     ctas: driver_recruitment_cta[]
   }
@@ -586,140 +588,38 @@ const line_followup_ack_text: localized_content = {
   es: 'Hemos recibido tu mensaje.',
 }
 
-const driver_recruitment_content = {
-  title: {
-    ja: 'ドライバー募集',
-    en: 'Driver recruitment',
-    es: 'Reclutamiento de conductores',
-  },
-  summary: {
-    ja: 'ペットタクシーわんだにゃーでは、大切なペットとご家族をお迎え・お届けするドライバー様を募集しています。ご希望の方はエントリーフォームからお進みください。',
-    en: 'Pet Taxi Wandanya is recruiting drivers who care for pets and families. Start from the entry form.',
-    es: 'Pet Taxi Wandanya recluta conductores. Comience desde el formulario de entrada.',
-  },
-  image_alt: {
-    ja: 'ドライバー募集',
-    en: 'Driver recruitment',
-    es: 'Reclutamiento de conductores',
-  },
-  sections: {
-    overview: {
-      heading: {
-        ja: '案件概要',
-        en: 'Overview',
-        es: 'Resumen',
-      },
-      body: {
-        ja: '愛犬・愛猫の送迎・同伴サポート\n案件ごとの案内とサポート\nスマートフォンでの連絡・ナビ利用',
-        en: 'Pet pickup and companion support\nGuidance per assignment\nSmartphone communication and navigation',
-        es: 'Traslado y acompanamiento de mascotas\nGuia por encargo\nComunicacion y navegacion por smartphone',
-      },
-    },
-    requirements: {
-      heading: {
-        ja: '応募資格',
-        en: 'Requirements',
-        es: 'Requisitos',
-      },
-      body: {
-        ja: '普通自動車免許（AT可）をお持ちの方\nペットへの接客・配慮ができる方\nスマートフォンでの連絡・ナビ利用ができる方',
-        en: 'Valid driver license (AT OK)\nComfortable caring for pets\nAble to use smartphone for contact and navigation',
-        es: 'Licencia de conducir valida (AT OK)\nCuidado y trato con mascotas\nUso de smartphone para contacto y navegacion',
-      },
-    },
-    compensation: {
-      heading: {
-        ja: '報酬',
-        en: 'Compensation',
-        es: 'Compensacion',
-      },
-      body: {
-        ja: '案件・シフトに応じた報酬をお支払いします。詳細はエントリー後にご案内いたします。',
-        en: 'Compensation depends on assignments and shifts. Details are shared after entry.',
-        es: 'La compensacion depende de encargos y turnos. Los detalles se comparten tras el registro.',
-      },
-    },
-  },
-  ctas: {
-    entry: {
-      ja: 'エントリーフォームへ',
-      en: 'Go to entry form',
-      es: 'Ir al formulario de entrada',
-    },
-    apply: {
-      ja: '応募フォームへ',
-      en: 'Go to apply form',
-      es: 'Ir al formulario de solicitud',
-    },
-  },
-} as const
-
 export function build_driver_recruitment_bundle(input: {
   locale: chat_locale
 }): driver_recruitment_bundle {
-  const locale = input.locale
+  const cards = [...driver_recruitment_content.cards]
+  const section_cards = cards.filter((card) => card.key !== 'hero')
 
   return {
     bundle_uuid: create_bundle_uuid(),
     bundle_type: 'driver_recruitment',
     sender: 'bot',
     version: 1,
-    locale,
+    locale: input.locale,
     content_key: 'recruitment.driver',
     payload: {
-      title: pick_text(driver_recruitment_content.title, locale),
-      summary: pick_text(driver_recruitment_content.summary, locale),
+      title: cards[0]?.title ?? 'ドライバー募集',
+      summary: cards[0]?.subtitle ?? 'ペットタクシーわんだにゃー',
       image: {
-        src: '/images/LINE---recruit.jpg',
-        alt: pick_text(driver_recruitment_content.image_alt, locale),
+        src: driver_recruitment_content.image_path,
+        alt: cards[0]?.image?.alt ?? 'ドライバー募集',
       },
-      sections: [
-        {
-          key: 'overview',
-          heading: pick_text(
-            driver_recruitment_content.sections.overview.heading,
-            locale,
-          ),
-          body: pick_text(
-            driver_recruitment_content.sections.overview.body,
-            locale,
-          ),
-        },
-        {
-          key: 'requirements',
-          heading: pick_text(
-            driver_recruitment_content.sections.requirements.heading,
-            locale,
-          ),
-          body: pick_text(
-            driver_recruitment_content.sections.requirements.body,
-            locale,
-          ),
-        },
-        {
-          key: 'compensation',
-          heading: pick_text(
-            driver_recruitment_content.sections.compensation.heading,
-            locale,
-          ),
-          body: pick_text(
-            driver_recruitment_content.sections.compensation.body,
-            locale,
-          ),
-        },
-      ],
+      cards,
+      sections: section_cards.map((card) => ({
+        key: card.key,
+        heading: card.title,
+        body: card.items.join('\n'),
+      })),
       ctas: [
         {
-          key: 'entry',
-          label: pick_text(driver_recruitment_content.ctas.entry, locale),
-          href: resolve_recruitment_entry_url(),
-          style: 'primary',
-        },
-        {
           key: 'apply',
-          label: pick_text(driver_recruitment_content.ctas.apply, locale),
+          label: driver_recruitment_content.cta_label,
           href: resolve_recruitment_apply_url(),
-          style: 'secondary',
+          style: 'primary',
         },
       ],
     },

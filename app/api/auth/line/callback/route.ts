@@ -16,6 +16,10 @@ import {
   visitor_cookie_max_age,
   visitor_cookie_name,
 } from '@/lib/auth/session'
+import {
+  line_link_return_path_cookie_name,
+  normalize_line_link_return_path,
+} from '@/lib/auth/link/return_path'
 import { debug, debug_event } from '@/lib/debug'
 import { notify_new_user_created } from '@/lib/notify/user/created'
 import { line_login_state_cookie_name } from '../route'
@@ -88,6 +92,9 @@ export async function GET(request: Request) {
   const saved_state = cookie_store.get(line_login_state_cookie_name)?.value
   const browser_visitor_uuid =
     cookie_store.get(visitor_cookie_name)?.value ?? null
+  const line_link_return_path = normalize_line_link_return_path(
+    cookie_store.get(line_link_return_path_cookie_name)?.value ?? null,
+  )
 
   cookie_store.delete(line_login_state_cookie_name)
 
@@ -178,7 +185,9 @@ export async function GET(request: Request) {
         })
       }
 
-      const response = redirect_pwa_line_link_landing(request, 'completed')
+      const response = line_link_return_path
+        ? redirect_return_path(line_link_return_path)
+        : redirect_pwa_line_link_landing(request, 'completed')
 
       response.cookies.set(
         visitor_cookie_name,
@@ -187,6 +196,7 @@ export async function GET(request: Request) {
           cross_site_friendly: true,
         }),
       )
+      response.cookies.delete(line_link_return_path_cookie_name)
 
       return response
     } catch (link_error) {

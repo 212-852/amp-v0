@@ -319,63 +319,65 @@ function is_driver_recruitment(
   return b.bundle_type === 'driver_recruitment'
 }
 
-function build_driver_recruitment_bubble(
+function build_driver_recruitment_bubbles(
   bundle: driver_recruitment_bundle,
   absolute_url: (path: string) => string | null,
-): Record<string, unknown> {
+): Record<string, unknown>[] {
   const p = bundle.payload
-  const image_url = absolute_url(p.image.src)
+  const primary_cta = p.ctas[0]
 
-  const body_contents: Record<string, unknown>[] = [
-    flex_text(p.title, { weight: 'bold', size: 'xl' }),
-    flex_text(p.summary, { size: 'sm', color: '#666666' }),
-  ]
+  return p.cards.map((card) => {
+    const body_contents: Record<string, unknown>[] = [
+      flex_text(card.title, { weight: 'bold', size: 'xl' }),
+    ]
 
-  for (const section of p.sections) {
-    body_contents.push(flex_separator())
-    body_contents.push(flex_text(section.heading, { weight: 'bold', size: 'sm' }))
-    body_contents.push(
-      flex_text(section.body, { size: 'xs', color: '#666666' }),
-    )
-  }
+    if (card.subtitle) {
+      body_contents.push(
+        flex_text(card.subtitle, { size: 'sm', color: '#666666' }),
+      )
+    }
 
-  const footer_buttons: Record<string, unknown>[] = p.ctas.map((cta) =>
-    flex_uri_button(
-      cta.label,
-      cta.href,
-      cta.style === 'primary' ? 'primary' : 'secondary',
-    ),
-  )
+    for (const item of card.items) {
+      body_contents.push(flex_separator())
+      body_contents.push(flex_text(item, { size: 'sm', color: '#4a3c33' }))
+    }
 
-  const bubble: Record<string, unknown> = {
-    type: 'bubble',
-    body: {
-      type: 'box',
-      layout: 'vertical',
-      spacing: 'md',
-      contents: body_contents,
-    },
-    footer: {
-      type: 'box',
-      layout: 'vertical',
-      spacing: 'sm',
-      contents: footer_buttons,
-    },
-  }
+    const footer_contents = primary_cta
+      ? [flex_uri_button(primary_cta.label, primary_cta.href, 'primary')]
+      : []
 
-  const hero = bubble_hero(image_url)
-  if (hero) {
-    bubble.hero = hero
-  }
+    const bubble: Record<string, unknown> = {
+      type: 'bubble',
+      size: 'kilo',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'md',
+        contents: body_contents,
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: footer_contents,
+      },
+    }
 
-  return bubble
+    const image_url = card.image ? absolute_url(card.image.src) : null
+    const hero = bubble_hero(image_url)
+    if (hero) {
+      bubble.hero = hero
+    }
+
+    return bubble
+  })
 }
 
 export function build_driver_recruitment_line_messages(input: {
   bundle: driver_recruitment_bundle
   absolute_url: (path: string) => string | null
 }): { messages: line_api_message[]; flex_bubble_count: number } {
-  const bubble = build_driver_recruitment_bubble(input.bundle, input.absolute_url)
+  const bubbles = build_driver_recruitment_bubbles(input.bundle, input.absolute_url)
   const alt_text = truncate(input.bundle.payload.title, 400)
 
   return {
@@ -383,10 +385,13 @@ export function build_driver_recruitment_line_messages(input: {
       {
         type: 'flex',
         altText: alt_text,
-        contents: bubble,
+        contents: {
+          type: 'carousel',
+          contents: bubbles,
+        },
       },
     ],
-    flex_bubble_count: 1,
+    flex_bubble_count: bubbles.length,
   }
 }
 
