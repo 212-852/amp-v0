@@ -2,6 +2,7 @@ import 'server-only'
 
 import { is_reception_state } from '@/lib/admin/reception/rules'
 import { derive_presence_recent_within_ms } from '@/lib/chat/presence/rules'
+import { env } from '@/lib/config/env'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
@@ -19,7 +20,7 @@ import {
 } from './discord'
 
 const admin_notification_phase = 'lib/notify/admin_push.ts'
-const admin_line_active_same_room_threshold_ms = 30_000
+const admin_line_active_same_room_threshold_ms = 25_000
 
 type admin_active_room_state = {
   admin_participant_uuid: string | null
@@ -132,6 +133,47 @@ async function emit_admin_notification_debug(
   })
 }
 
+function resolve_admin_notification_open_url(room_uuid: string | null): string {
+  const base = env.app_url.trim().replace(/\/+$/, '') || 'https://app.da-nya.com'
+  const path = room_uuid
+    ? `/admin/reception/${encodeURIComponent(room_uuid)}`
+    : '/admin/reception'
+
+  return `${base}${path}`
+}
+
+function format_selected_method(methods: Array<'push' | 'line'>): string {
+  if (methods.length === 2 && methods[0] === 'push' && methods[1] === 'line') {
+    return 'push_then_line'
+  }
+
+  return methods.join('->') || 'none'
+}
+
+function resolve_is_active_same_room(input: {
+  target_room_uuid: string
+  active_room_uuid: string | null
+  visibility_state: string | null
+  last_seen_at: string | null
+  now?: Date
+}): boolean {
+  if (input.active_room_uuid !== input.target_room_uuid) {
+    return false
+  }
+
+  if (input.visibility_state !== 'visible') {
+    return false
+  }
+
+  return derive_presence_recent_within_ms({
+    last_seen_at: input.last_seen_at,
+    is_typing: false,
+    typing_at: null,
+    active_within_ms: admin_line_active_same_room_threshold_ms,
+    now: input.now,
+  })
+}
+
 function empty_admin_active_room_state(): admin_active_room_state {
   return {
     admin_participant_uuid: null,
@@ -162,6 +204,18 @@ async function load_admin_active_room_state_by_user_uuid(
     .order('updated_at', { ascending: false })
 
   if (result.error) {
+    await debug_event({
+      category: 'chat_realtime',
+      event: 'admin_notification_active_state_checked',
+      payload: {
+        phase: admin_notification_phase,
+        room_uuid: clean_room_uuid,
+        skipped_reason: 'admin_presence_load_failed',
+        error_code: result.error.code ?? 'admin_presence_load_failed',
+        error_message: result.error.message,
+      },
+    })
+
     return new Map()
   }
 
@@ -192,16 +246,13 @@ async function load_admin_active_room_state_by_user_uuid(
       active_room_uuid,
       visibility_state,
       last_seen_at,
-      is_active_same_room:
-        active_room_uuid === clean_room_uuid &&
-        visibility_state === 'visible' &&
-        derive_presence_recent_within_ms({
-          last_seen_at,
-          is_typing: false,
-          typing_at: null,
-          active_within_ms: admin_line_active_same_room_threshold_ms,
-          now,
-        }),
+      is_active_same_room: resolve_is_active_same_room({
+        target_room_uuid: clean_room_uuid,
+        active_room_uuid,
+        visibility_state,
+        last_seen_at,
+        now,
+      }),
     })
   }
 
@@ -432,9 +483,7 @@ async function load_admin_notification_candidates(input: {
 export async function route_admin_push_notification(
   input: admin_push_route_input,
 ): Promise<admin_push_route_result> {
-  const push_url = input.room_uuid
-    ? `/admin/reception/${encodeURIComponent(input.room_uuid)}`
-    : '/admin/reception'
+  const push_url = resolve_admin_notification_open_url(input.room_uuid)
 
   await emit_admin_notification_debug('admin_notification_rule_checked', {
     room_uuid: input.room_uuid,
@@ -644,9 +693,11 @@ export async function route_admin_push_notification(
       continue
     }
 
+    const selected_method = format_selected_method(methods)
+
     await emit_admin_notification_debug('admin_notification_method_resolved', {
       ...base_debug,
-      selected_method: methods.join('->'),
+      selected_method,
       skipped_reason: null,
       notification_skipped_reason: null,
     })
@@ -715,7 +766,7 @@ export async function route_admin_push_notification(
         )
 
         try {
-          await send_line_push_notify({
+          const line_result = await send_line_push_notify({
             line_user_id: candidate.line_user_id,
             message: input.message,
             title: input.title,
@@ -726,6 +777,10 @@ export async function route_admin_push_notification(
             message_uuid: input.message_uuid,
             selected_route: 'line',
           })
+
+          if (!line_result.ok) {
+            throw new Error(line_result.error_message ?? 'line_push_failed')
+          }
         } catch (error) {
           await emit_admin_notification_debug('admin_line_send_failed', {
             ...base_debug,

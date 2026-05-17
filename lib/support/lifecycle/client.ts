@@ -280,13 +280,53 @@ export function use_support_lifecycle(input: use_support_lifecycle_input) {
   useEffect(() => {
     void run_enter_support_room('room_mount')
 
+    const room_uuid = latest_room_uuid_ref.current
+    const participant_uuid = admin_participant_uuid_ref.current.trim()
+
+    const post_presence = (action: string) => {
+      if (!room_uuid || !participant_uuid) {
+        return
+      }
+
+      void fetch('/api/chat/presence', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          room_uuid,
+          participant_uuid,
+          action,
+          last_channel: 'admin',
+        }),
+      }).catch(() => {})
+    }
+
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        post_presence('admin_support_heartbeat')
+      }
+    }, 20_000)
+
+    const on_visibility_change = () => {
+      if (document.visibilityState === 'hidden') {
+        post_presence('admin_support_idle')
+        return
+      }
+
+      post_presence('admin_support_recovered')
+    }
+
     const on_page_hide = () => {
+      post_presence('admin_support_idle')
       run_leave_support_room('pagehide')
     }
 
+    document.addEventListener('visibilitychange', on_visibility_change)
     window.addEventListener('pagehide', on_page_hide)
 
     return () => {
+      window.clearInterval(heartbeat)
+      document.removeEventListener('visibilitychange', on_visibility_change)
       window.removeEventListener('pagehide', on_page_hide)
       run_leave_support_room('component_cleanup')
     }

@@ -97,11 +97,20 @@ export type line_push_notify_input = {
   selected_route?: string | null
 }
 
-export async function send_line_push_notify(input: line_push_notify_input) {
+export type line_push_notify_result = {
+  ok: boolean
+  http_status?: number | null
+  error_code?: string | null
+  error_message?: string | null
+}
+
+export async function send_line_push_notify(
+  input: line_push_notify_input,
+): Promise<line_push_notify_result> {
   const access_token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN
 
   if (!access_token) {
-    return
+    throw new Error('line_access_token_missing')
   }
 
   const structured =
@@ -173,7 +182,7 @@ export async function send_line_push_notify(input: line_push_notify_input) {
         : ''
 
     if (!text) {
-      return
+      throw new Error('line_push_message_empty')
     }
 
     messages = [{ type: 'text', text }]
@@ -193,7 +202,7 @@ export async function send_line_push_notify(input: line_push_notify_input) {
 
   if (!response.ok) {
     const body_text = await response.text()
-    throw new Error(`line push failed: ${response.status} ${body_text}`)
+    throw new Error(`line_push_failed:${response.status}:${body_text}`)
   }
 
   if (structured) {
@@ -210,5 +219,12 @@ export async function send_line_push_notify(input: line_push_notify_input) {
         selected_route: input.selected_route ?? null,
       },
     })
+  }
+
+  return {
+    ok: true,
+    http_status: response.status,
+    error_code: null,
+    error_message: null,
   }
 }

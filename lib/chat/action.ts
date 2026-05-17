@@ -79,6 +79,7 @@ import { browser_channel_cookie_name, client_source_channel_header_name } from '
 import { get_session_user } from '@/lib/auth/route'
 import { resolve_handoff_memo_saved_by_name } from '@/lib/admin/profile'
 import {
+  mark_admin_support_join,
   mark_participant_last_channel,
 } from '@/lib/chat/presence/action'
 import { resolve_room_subject } from '@/lib/admin/reception/room'
@@ -505,8 +506,20 @@ function schedule_admin_notification_after_incoming_archive(input: {
     return
   }
 
-  after(() =>
-    notify({
+  after(async () => {
+    await debug_event({
+      category: 'chat_realtime',
+      event: 'admin_notification_archive_hook_started',
+      payload: {
+        phase: 'schedule_admin_notification_after_incoming_archive',
+        room_uuid: input.room.room_uuid,
+        message_uuid,
+        support_mode: input.support_mode,
+        source_channel: input.source_channel,
+      },
+    })
+
+    await notify({
       event: 'admin_notification',
       admin_event: 'new_user_message',
       room_uuid: input.room.room_uuid,
@@ -518,8 +531,8 @@ function schedule_admin_notification_after_incoming_archive(input: {
       support_mode: input.support_mode,
       should_auto_reply: input.should_auto_reply,
       auto_reply_skipped_reason: input.auto_reply_skipped_reason,
-    }),
-  )
+    })
+  })
 }
 
 function build_line_mode_switch_bundle(input: {
@@ -2829,6 +2842,11 @@ export async function handle_admin_reception_room_opened(
           payload: duplicate_payload,
         })
 
+        await mark_admin_support_join({
+          room_uuid,
+          participant_uuid: admin_participant_uuid,
+        })
+
         return {
           status: 200,
           body: {
@@ -3021,6 +3039,13 @@ export async function handle_admin_reception_room_opened(
     payload_action_uuid: bundle.bundle_uuid,
     phase: 'archive_support_started_action',
   })
+
+  if (admin_participant_uuid) {
+    await mark_admin_support_join({
+      room_uuid,
+      participant_uuid: admin_participant_uuid,
+    })
+  }
 
   const room_pick = await supabase
     .from('rooms')

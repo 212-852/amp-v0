@@ -795,6 +795,7 @@ export function resolve_debug_rule(input: {
     'user_realtime_client_payload_accepted',
     'user_realtime_client_payload_ignored',
     'user_realtime_client_state_append_succeeded',
+    'admin_notification_archive_hook_started',
     'admin_notification_rule_checked',
     'admin_line_notification_rule_checked',
     'admin_notification_candidate_checked',
