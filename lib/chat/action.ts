@@ -74,6 +74,7 @@ import {
   should_skip_bot_auto_reply,
 } from './rules'
 import { decide_bot_action } from './bot/rules'
+import { try_deliver_driver_recruitment_reply } from '@/lib/recruitment/action'
 import { output_chat_bundles } from '@/lib/output'
 import { browser_channel_cookie_name, client_source_channel_header_name } from '@/lib/visitor/cookie'
 import { get_session_user } from '@/lib/auth/route'
@@ -1018,8 +1019,58 @@ export async function resolve_initial_chat(
         input.channel === 'line' &&
         input.line_reply_token &&
         input.line_user_id &&
-        input.incoming_line_text
+        input.incoming_line_text &&
+        normalized_line_text
       ) {
+        const recruitment_reply = await try_deliver_driver_recruitment_reply({
+          text: normalized_line_text,
+          locale: input.locale,
+          room: room_result.room,
+          channel: input.channel,
+          concierge_staff_active: live_gate.staff_controls_chat,
+          line_reply_token: input.line_reply_token,
+          line_user_id: input.line_user_id,
+          incoming_line_text: input.incoming_line_text,
+        })
+
+        if (recruitment_reply?.handled) {
+          if (!recruitment_reply.is_duplicate) {
+            schedule_admin_notification_after_incoming_archive({
+              room: room_result.room,
+              message_uuid:
+                recruitment_reply.messages[0]?.archive_uuid ?? null,
+              message: input.incoming_line_text.text,
+              source_channel: input.channel,
+              support_mode: mode_for_bot,
+              should_auto_reply: false,
+              auto_reply_skipped_reason: 'driver_recruitment_bundle_sent',
+            })
+          }
+
+          const messages =
+            recruitment_reply.messages.length > 0
+              ? recruitment_reply.messages
+              : await load_archived_messages(room_result.room.room_uuid)
+
+          await emit_chat_action_completed({
+            reason: recruitment_reply.is_duplicate
+              ? 'line_duplicate_incoming_skipped_recruitment'
+              : 'line_driver_recruitment_reply',
+            room: room_result.room,
+            channel: input.channel,
+            is_seeded: false,
+            message_count: messages.length,
+          })
+
+          return make_initial_chat_result({
+            room: room_result.room,
+            is_new_room: room_result.is_new_room,
+            is_seeded: false,
+            messages,
+            locale: input.locale,
+          })
+        }
+
         const archived_incoming = await archive_input_line_text_for_room({
           room: room_result.room,
           locale: input.locale,
@@ -2359,6 +2410,11 @@ export type chat_message_request_result =
   | {
       ok: true
       kind: 'plain_text'
+      messages: archived_message[]
+    }
+  | {
+      ok: true
+      kind: 'driver_recruitment'
       messages: archived_message[]
     }
   | {
@@ -4334,6 +4390,57 @@ export async function handle_chat_message_request(
       phase: 'participant_ready_for_archive',
     },
   })
+
+  const recruitment_reply = await try_deliver_driver_recruitment_reply({
+    text: text_value,
+    locale,
+    room: chat_room,
+    channel: chat_room.channel,
+    concierge_staff_active: web_gate.staff_controls_chat,
+  })
+
+  if (recruitment_reply?.handled) {
+    if (!recruitment_reply.is_duplicate) {
+      schedule_admin_notification_after_incoming_archive({
+        room: chat_room,
+        message_uuid: recruitment_reply.messages[0]?.archive_uuid ?? null,
+        message: text_value,
+        source_channel: chat_room.channel,
+        support_mode: web_mode_for_bot,
+        should_auto_reply: false,
+        auto_reply_skipped_reason: 'driver_recruitment_bundle_sent',
+      })
+    }
+
+    try {
+      await mark_participant_last_channel({
+        room_uuid: chat_room.room_uuid,
+        participant_uuid: chat_room.participant_uuid,
+        last_channel: chat_room.channel,
+      })
+    } catch (persist_error) {
+      console.error(
+        '[handle_chat_message_request] recruitment_last_channel_update_failed',
+        {
+          room_uuid: chat_room.room_uuid,
+          participant_uuid: chat_room.participant_uuid,
+          error:
+            persist_error instanceof Error
+              ? persist_error.message
+              : String(persist_error),
+        },
+      )
+    }
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        kind: 'driver_recruitment',
+        messages: recruitment_reply.messages,
+      },
+    }
+  }
 
   if (detected_switch_mode) {
     const incoming_bundle = build_line_mode_switch_bundle({

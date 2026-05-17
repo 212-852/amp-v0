@@ -48,6 +48,7 @@ function is_visible_on_web_chat(bundle: message_bundle): boolean {
     case 'quick_menu':
     case 'how_to_use':
     case 'faq':
+    case 'driver_recruitment':
     case 'text':
       return true
     case 'room_action_log':

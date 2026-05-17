@@ -25,6 +25,7 @@ import { normalize_locale } from '@/lib/locale/action'
 import { create_browser_supabase } from '@/lib/db/browser'
 import { end_user_should_see_room_action_log_bundle } from '@/lib/chat/rules'
 import type {
+  driver_recruitment_bundle,
   faq_bundle,
   how_to_use_bundle,
   initial_carousel_bundle,
@@ -211,6 +212,61 @@ function HowToUseCard({ bundle }: { bundle: how_to_use_bundle }) {
   )
 }
 
+function DriverRecruitmentCard({ bundle }: { bundle: driver_recruitment_bundle }) {
+  return (
+    <article className="w-[292px] shrink-0 overflow-hidden rounded-[24px] bg-white shadow-[0_3px_18px_rgba(42,29,24,0.08)]">
+      <Image
+        src={bundle.payload.image.src}
+        alt={text_for(bundle.payload.image.alt)}
+        width={584}
+        height={360}
+        className="h-[178px] w-full object-cover"
+      />
+      <div className="flex flex-col items-center gap-4 px-5 pb-5 pt-4">
+        <div className="w-full max-w-[252px] text-center">
+          <h2 className="text-[18px] font-semibold leading-[1.45] text-[#2a1d18]">
+            {text_for(bundle.payload.title)}
+          </h2>
+          <p className="mt-2 whitespace-pre-line text-left text-[12px] leading-[1.6] text-[#7f6a59]">
+            {text_for(bundle.payload.summary)}
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-3">
+          {bundle.payload.sections.map((section) => (
+            <div
+              key={section.key}
+              className="w-full max-w-[252px] rounded-[18px] border border-[#eadccc] bg-[#faf6f1] px-4 py-3 text-left"
+            >
+              <p className="text-[13px] font-semibold leading-[1.45] text-[#2a1d18]">
+                {text_for(section.heading)}
+              </p>
+              <p className="mt-1.5 whitespace-pre-line text-[12px] leading-[1.55] text-[#7f6a59]">
+                {text_for(section.body)}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="flex w-full flex-col items-center gap-2.5">
+          {bundle.payload.ctas.map((cta) => (
+            <a
+              key={cta.key}
+              href={cta.href}
+              className={[
+                'w-full max-w-[248px] rounded-[18px] px-4 py-3 text-center text-[14px] font-semibold leading-[1.45] shadow-[0_2px_8px_rgba(42,29,24,0.07)]',
+                cta.style === 'primary'
+                  ? 'bg-[#c9a77d] text-white'
+                  : 'border border-[#c9a77d] bg-white text-[#9c7d5d]',
+              ].join(' ')}
+            >
+              {text_for(cta.label)}
+            </a>
+          ))}
+        </div>
+      </div>
+    </article>
+  )
+}
+
 function FaqCard({ bundle }: { bundle: faq_bundle }) {
   return (
     <article className="w-[292px] shrink-0 overflow-hidden rounded-[24px] bg-white shadow-[0_3px_18px_rgba(42,29,24,0.08)]">
@@ -272,6 +328,20 @@ function ChatCard({ bundle }: { bundle: initial_carousel_card }) {
   return null
 }
 
+function StandaloneChatCard({
+  bundle,
+}: {
+  bundle:
+    | initial_carousel_card
+    | driver_recruitment_bundle
+}) {
+  if (bundle.bundle_type === 'driver_recruitment') {
+    return <DriverRecruitmentCard bundle={bundle} />
+  }
+
+  return <ChatCard bundle={bundle} />
+}
+
 function InitialCarouselBubble({
   bundle,
 }: {
@@ -315,11 +385,15 @@ function TextBubble({ bundle }: { bundle: text_bundle }) {
   )
 }
 
-function SingleCardRow({ bundle }: { bundle: initial_carousel_card }) {
+function SingleCardRow({
+  bundle,
+}: {
+  bundle: initial_carousel_card | driver_recruitment_bundle
+}) {
   return (
     <div className="overflow-x-auto px-5 pb-3">
       <div className="flex w-max gap-4">
-        <ChatCard bundle={bundle} />
+        <StandaloneChatCard bundle={bundle} />
       </div>
     </div>
   )
@@ -364,7 +438,8 @@ function WebChatMessageRow({ message }: { message: archived_message }) {
   if (
     bundle.bundle_type === 'quick_menu' ||
     bundle.bundle_type === 'how_to_use' ||
-    bundle.bundle_type === 'faq'
+    bundle.bundle_type === 'faq' ||
+    bundle.bundle_type === 'driver_recruitment'
   ) {
     return <SingleCardRow bundle={bundle} />
   }

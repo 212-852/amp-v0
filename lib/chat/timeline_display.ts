@@ -162,6 +162,8 @@ function timeline_text_from_bundle(bundle: message_bundle): string {
       return bundle.payload.title?.trim() || bundle.bundle_type
     case 'faq':
       return bundle.payload.title?.trim() || bundle.bundle_type
+    case 'driver_recruitment':
+      return bundle.payload.title?.trim() || bundle.bundle_type
     case 'initial_carousel':
       return bundle.cards
         .map((card) => {

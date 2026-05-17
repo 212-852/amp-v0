@@ -13,6 +13,13 @@ export {
   type chat_request_context,
 } from '@/lib/chat/context'
 
+export {
+  detect_driver_recruitment_intent,
+  resolve_recruitment_apply_url,
+  resolve_recruitment_entry_url,
+  type recruitment_intent,
+} from '@/lib/recruitment/rules'
+
 export type dispatch_source_channel = 'web' | 'line' | 'liff' | 'pwa'
 
 type locale_source =

@@ -5,7 +5,7 @@ import { env } from '@/lib/config/env'
 import type { message_bundle } from '@/lib/chat/message'
 import type { chat_room } from '@/lib/chat/room'
 
-import { build_seed_carousel_line_messages } from './line/flex'
+import { build_line_messages_from_bundles } from './line/flex'
 
 type deliver_line_chat_bundles_input = {
   room: chat_room
@@ -140,6 +140,20 @@ function build_flex_failure_text_fallback(
             i.answer.trim() ? [i.question, i.answer] : [i.question],
           ),
           p.primary_cta_label,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      )
+    }
+
+    if (bundle.bundle_type === 'driver_recruitment') {
+      const p = bundle.payload
+      lines.push(
+        [
+          p.title,
+          p.summary,
+          ...p.sections.flatMap((section) => [section.heading, section.body]),
+          ...p.ctas.map((cta) => cta.label),
         ]
           .filter(Boolean)
           .join('\n'),
@@ -290,7 +304,7 @@ export async function deliver_line_chat_bundles(
   let line_messages: line_api_message[]
 
   try {
-    const built = build_seed_carousel_line_messages({
+    const built = build_line_messages_from_bundles({
       bundles,
       absolute_url: to_absolute_asset_url,
     })

@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type {
+  driver_recruitment_bundle,
   faq_bundle,
   how_to_use_bundle,
   initial_carousel_bundle,
@@ -52,6 +53,19 @@ function flex_message_button(label: string, text: string, style: string) {
       type: 'message',
       label: truncate(label, 40),
       text: truncate(text, 300),
+    },
+  }
+}
+
+function flex_uri_button(label: string, uri: string, style: string) {
+  return {
+    type: 'button',
+    style,
+    height: 'sm',
+    action: {
+      type: 'uri',
+      label: truncate(label, 40),
+      uri,
     },
   }
 }
@@ -297,6 +311,99 @@ function is_how_to_use(b: message_bundle): b is how_to_use_bundle {
 
 function is_faq(b: message_bundle): b is faq_bundle {
   return b.bundle_type === 'faq'
+}
+
+function is_driver_recruitment(
+  b: message_bundle,
+): b is driver_recruitment_bundle {
+  return b.bundle_type === 'driver_recruitment'
+}
+
+function build_driver_recruitment_bubble(
+  bundle: driver_recruitment_bundle,
+  absolute_url: (path: string) => string | null,
+): Record<string, unknown> {
+  const p = bundle.payload
+  const image_url = absolute_url(p.image.src)
+
+  const body_contents: Record<string, unknown>[] = [
+    flex_text(p.title, { weight: 'bold', size: 'xl' }),
+    flex_text(p.summary, { size: 'sm', color: '#666666' }),
+  ]
+
+  for (const section of p.sections) {
+    body_contents.push(flex_separator())
+    body_contents.push(flex_text(section.heading, { weight: 'bold', size: 'sm' }))
+    body_contents.push(
+      flex_text(section.body, { size: 'xs', color: '#666666' }),
+    )
+  }
+
+  const footer_buttons: Record<string, unknown>[] = p.ctas.map((cta) =>
+    flex_uri_button(
+      cta.label,
+      cta.href,
+      cta.style === 'primary' ? 'primary' : 'secondary',
+    ),
+  )
+
+  const bubble: Record<string, unknown> = {
+    type: 'bubble',
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'md',
+      contents: body_contents,
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: footer_buttons,
+    },
+  }
+
+  const hero = bubble_hero(image_url)
+  if (hero) {
+    bubble.hero = hero
+  }
+
+  return bubble
+}
+
+export function build_driver_recruitment_line_messages(input: {
+  bundle: driver_recruitment_bundle
+  absolute_url: (path: string) => string | null
+}): { messages: line_api_message[]; flex_bubble_count: number } {
+  const bubble = build_driver_recruitment_bubble(input.bundle, input.absolute_url)
+  const alt_text = truncate(input.bundle.payload.title, 400)
+
+  return {
+    messages: [
+      {
+        type: 'flex',
+        altText: alt_text,
+        contents: bubble,
+      },
+    ],
+    flex_bubble_count: 1,
+  }
+}
+
+export function build_line_messages_from_bundles(input: {
+  bundles: message_bundle[]
+  absolute_url: (path: string) => string | null
+}): { messages: line_api_message[]; flex_bubble_count: number } {
+  const bundles = input.bundles
+
+  if (bundles.length === 1 && is_driver_recruitment(bundles[0])) {
+    return build_driver_recruitment_line_messages({
+      bundle: bundles[0],
+      absolute_url: input.absolute_url,
+    })
+  }
+
+  return build_seed_carousel_line_messages(input)
 }
 
 export function build_seed_carousel_line_messages(input: {
