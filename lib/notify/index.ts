@@ -296,6 +296,9 @@ export async function notify(
       message: event.message,
       actor_user_uuid: event.actor_user_uuid ?? null,
       source_channel: event.source_channel,
+      support_mode: event.support_mode ?? null,
+      should_auto_reply: event.should_auto_reply ?? null,
+      auto_reply_skipped_reason: event.auto_reply_skipped_reason ?? null,
     })
 
     return { deliveries: result.deliveries }
@@ -406,6 +409,9 @@ async function deliver_admin_notification(input: {
   message: string
   actor_user_uuid: string | null
   source_channel: string
+  support_mode?: string | null
+  should_auto_reply?: boolean | null
+  auto_reply_skipped_reason?: string | null
 }): Promise<admin_notification_route_result> {
   const { route_admin_push_notification } = await import('./admin_push')
 
@@ -417,6 +423,9 @@ async function deliver_admin_notification(input: {
     message: input.message,
     actor_user_uuid: input.actor_user_uuid,
     source_channel: input.source_channel,
+    support_mode: input.support_mode ?? null,
+    should_auto_reply: input.should_auto_reply ?? null,
+    auto_reply_skipped_reason: input.auto_reply_skipped_reason ?? null,
   })
 
   return {

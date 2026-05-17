@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { is_reception_state } from '@/lib/admin/reception/rules'
-import { derive_presence_recent_from_timestamps } from '@/lib/chat/presence/rules'
+import { public_actions_table_name } from '@/lib/actions/table'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { supabase } from '@/lib/db/supabase'
 import { debug_event } from '@/lib/debug'
@@ -39,6 +39,9 @@ type admin_push_route_input = {
   actor_user_uuid: string | null
   source_channel: string
   admin_event: string
+  support_mode?: string | null
+  should_auto_reply?: boolean | null
+  auto_reply_skipped_reason?: string | null
 }
 
 type admin_push_route_result = {
@@ -61,23 +64,36 @@ type admin_debug_payload = {
   has_line_identity?: boolean | null
   selected_method?: string | null
   skipped_reason?: string | null
+  notification_skipped_reason?: string | null
   role?: string | null
   admin_event?: string | null
+  support_mode?: string | null
+  should_auto_reply?: boolean | null
+  auto_reply_skipped_reason?: string | null
+  admin_active_in_same_room?: boolean | null
+  app_visibility_state?: string | null
+  error_code?: string | null
+  error_message?: string | null
 }
 
+type admin_notification_debug_event =
+  | 'admin_notification_rule_checked'
+  | 'admin_notification_candidate_checked'
+  | 'admin_notification_active_room_checked'
+  | 'admin_notification_skipped_active_same_room'
+  | 'admin_notification_skipped_offline'
+  | 'admin_notification_skipped_header_off'
+  | 'admin_notification_method_resolved'
+  | 'admin_push_send_started'
+  | 'admin_push_send_succeeded'
+  | 'admin_push_send_failed'
+  | 'admin_line_notification_send_started'
+  | 'admin_line_notification_send_succeeded'
+  | 'admin_line_notification_send_failed'
+  | 'admin_discord_fallback_started'
+
 async function emit_admin_notification_debug(
-  event:
-    | 'admin_notification_candidate_checked'
-    | 'admin_notification_skipped_offline'
-    | 'admin_notification_skipped_header_off'
-    | 'admin_notification_method_resolved'
-    | 'admin_push_send_started'
-    | 'admin_push_send_succeeded'
-    | 'admin_push_send_failed'
-    | 'admin_line_send_started'
-    | 'admin_line_send_succeeded'
-    | 'admin_discord_fallback_started'
-    | 'admin_push_skipped_active_in_room',
+  event: admin_notification_debug_event,
   payload: admin_debug_payload,
 ) {
   await debug_event({
@@ -88,6 +104,61 @@ async function emit_admin_notification_debug(
       ...payload,
     },
   })
+}
+
+async function load_active_admin_user_uuids_from_support_actions(
+  room_uuid: string | null,
+): Promise<Set<string>> {
+  const clean_room_uuid = clean_uuid(room_uuid)
+
+  if (!clean_room_uuid) {
+    return new Set()
+  }
+
+  const result = await supabase
+    .from(public_actions_table_name())
+    .select('action_type, actor_user_uuid, created_at')
+    .eq('room_uuid', clean_room_uuid)
+    .in('action_type', ['support_started', 'support_left'])
+    .order('created_at', { ascending: true })
+    .limit(400)
+
+  if (result.error) {
+    return new Set()
+  }
+
+  const active_by_user_uuid = new Map<string, boolean>()
+
+  for (const row of result.data ?? []) {
+    const user_uuid = clean_uuid(
+      typeof row.actor_user_uuid === 'string' ? row.actor_user_uuid : null,
+    )
+    const action_type =
+      typeof row.action_type === 'string' ? row.action_type : null
+
+    if (!user_uuid) {
+      continue
+    }
+
+    if (action_type === 'support_started') {
+      active_by_user_uuid.set(user_uuid, true)
+      continue
+    }
+
+    if (action_type === 'support_left') {
+      active_by_user_uuid.set(user_uuid, false)
+    }
+  }
+
+  const active_user_uuids = new Set<string>()
+
+  for (const [user_uuid, active] of active_by_user_uuid.entries()) {
+    if (active) {
+      active_user_uuids.add(user_uuid)
+    }
+  }
+
+  return active_user_uuids
 }
 
 function admin_notification_discord_content(input: admin_push_route_input) {
@@ -277,42 +348,8 @@ async function load_admin_notification_candidates(input: {
     }
   }
 
-  const active_user_uuids_in_room = new Set<string>()
-
-  if (room_uuid) {
-    const presence_result = await supabase
-      .from('participants')
-      .select('user_uuid, last_seen_at, is_typing, typing_at')
-      .eq('room_uuid', room_uuid)
-      .in('role', ['admin', 'concierge'])
-
-    if (!presence_result.error) {
-      const now = new Date()
-
-      for (const row of presence_result.data ?? []) {
-        const user_uuid =
-          typeof row.user_uuid === 'string' && row.user_uuid.length > 0
-            ? row.user_uuid
-            : null
-
-        if (!user_uuid) {
-          continue
-        }
-
-        if (
-          derive_presence_recent_from_timestamps({
-            last_seen_at:
-              typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
-            is_typing: row.is_typing === true,
-            typing_at: typeof row.typing_at === 'string' ? row.typing_at : null,
-            now,
-          })
-        ) {
-          active_user_uuids_in_room.add(user_uuid)
-        }
-      }
-    }
-  }
+  const active_user_uuids_in_room =
+    await load_active_admin_user_uuids_from_support_actions(room_uuid)
 
   return user_rows.map((row) => {
     const line_user_id = line_user_id_by_uuid.get(row.user_uuid) ?? null
@@ -345,6 +382,17 @@ export async function route_admin_push_notification(
     ? `/admin/reception/${encodeURIComponent(input.room_uuid)}`
     : '/admin/reception'
 
+  await emit_admin_notification_debug('admin_notification_rule_checked', {
+    room_uuid: input.room_uuid,
+    message_uuid: input.message_uuid,
+    support_mode: input.support_mode ?? null,
+    should_auto_reply: input.should_auto_reply ?? null,
+    auto_reply_skipped_reason: input.auto_reply_skipped_reason ?? null,
+    admin_event: input.admin_event,
+    selected_method: null,
+    notification_skipped_reason: null,
+  })
+
   let candidates: admin_notification_candidate[] = []
 
   try {
@@ -375,6 +423,13 @@ export async function route_admin_push_notification(
       admin_user_uuid: candidate.user_uuid,
       room_uuid: input.room_uuid,
       message_uuid: input.message_uuid,
+      support_mode: input.support_mode ?? null,
+      should_auto_reply: input.should_auto_reply ?? null,
+      auto_reply_skipped_reason: input.auto_reply_skipped_reason ?? null,
+      admin_active_in_same_room: candidate.active_in_room,
+      app_visibility_state: candidate.active_in_room
+        ? 'active'
+        : 'background_or_closed',
       header_status: candidate.header_status,
       pwa_enabled,
       line_enabled,
@@ -389,12 +444,18 @@ export async function route_admin_push_notification(
       base_debug,
     )
 
+    await emit_admin_notification_debug(
+      'admin_notification_active_room_checked',
+      base_debug,
+    )
+
     if (candidate.header_status === 'off') {
       await emit_admin_notification_debug(
         'admin_notification_skipped_header_off',
         {
           ...base_debug,
           skipped_reason: 'header_off',
+          notification_skipped_reason: 'header_off',
         },
       )
 
@@ -402,10 +463,14 @@ export async function route_admin_push_notification(
     }
 
     if (candidate.active_in_room) {
-      await emit_admin_notification_debug('admin_push_skipped_active_in_room', {
-        ...base_debug,
-        skipped_reason: 'active_in_room',
-      })
+      await emit_admin_notification_debug(
+        'admin_notification_skipped_active_same_room',
+        {
+          ...base_debug,
+          skipped_reason: 'active_same_room',
+          notification_skipped_reason: 'active_same_room',
+        },
+      )
 
       continue
     }
@@ -416,6 +481,7 @@ export async function route_admin_push_notification(
         {
           ...base_debug,
           skipped_reason: 'no_method_enabled',
+          notification_skipped_reason: 'no_method_enabled',
         },
       )
 
@@ -440,6 +506,11 @@ export async function route_admin_push_notification(
             : line_enabled
               ? 'line_unavailable'
               : 'method_unavailable',
+          notification_skipped_reason: pwa_enabled
+            ? 'push_unavailable'
+            : line_enabled
+              ? 'line_unavailable'
+              : 'method_unavailable',
         },
       )
 
@@ -454,6 +525,7 @@ export async function route_admin_push_notification(
       ...base_debug,
       selected_method: methods.join('->'),
       skipped_reason: null,
+      notification_skipped_reason: null,
     })
 
     let candidate_delivered = false
@@ -463,6 +535,7 @@ export async function route_admin_push_notification(
         await emit_admin_notification_debug('admin_push_send_started', {
           ...base_debug,
           selected_method: 'push',
+          notification_skipped_reason: null,
         })
 
         const push = await send_push_notify({
@@ -473,12 +546,17 @@ export async function route_admin_push_notification(
           message_uuid: input.message_uuid,
           kind: 'chat',
           url: push_url,
-        })
+        }).catch((error) => ({
+          ok: false,
+          available: false,
+          reason: error instanceof Error ? error.message : 'push_threw',
+        }))
 
         if (push.ok && push.available) {
           await emit_admin_notification_debug('admin_push_send_succeeded', {
             ...base_debug,
             selected_method: 'push',
+            notification_skipped_reason: null,
           })
 
           candidate_delivered = true
@@ -490,32 +568,57 @@ export async function route_admin_push_notification(
           ...base_debug,
           selected_method: 'push',
           skipped_reason: push.reason ?? 'push_unavailable',
+          notification_skipped_reason: push.reason ?? 'push_unavailable',
+          error_code: 'push_failed',
+          error_message: push.reason ?? 'push_unavailable',
         })
 
         continue
       }
 
       if (method === 'line' && candidate.line_user_id) {
-        await emit_admin_notification_debug('admin_line_send_started', {
+        await emit_admin_notification_debug(
+          'admin_line_notification_send_started',
+          {
+            ...base_debug,
+            selected_method: 'line',
+            notification_skipped_reason: null,
+          },
+        )
+
+        try {
+          await send_line_push_notify({
+            line_user_id: candidate.line_user_id,
+            message: input.message,
+            title: input.title,
+            body: input.message,
+            open_url: push_url,
+            user_uuid: candidate.user_uuid,
+            room_uuid: input.room_uuid,
+            message_uuid: input.message_uuid,
+            selected_route: 'line',
+          })
+        } catch (error) {
+          await emit_admin_notification_debug(
+            'admin_line_notification_send_failed',
+            {
+              ...base_debug,
+              selected_method: 'line',
+              skipped_reason: 'line_push_failed',
+              notification_skipped_reason: 'line_push_failed',
+              error_code: 'line_push_failed',
+              error_message:
+                error instanceof Error ? error.message : String(error),
+            },
+          )
+
+          continue
+        }
+
+        await emit_admin_notification_debug('admin_line_notification_send_succeeded', {
           ...base_debug,
           selected_method: 'line',
-        })
-
-        await send_line_push_notify({
-          line_user_id: candidate.line_user_id,
-          message: input.message,
-          title: input.title,
-          body: input.message,
-          open_url: push_url,
-          user_uuid: candidate.user_uuid,
-          room_uuid: input.room_uuid,
-          message_uuid: input.message_uuid,
-          selected_route: 'line',
-        })
-
-        await emit_admin_notification_debug('admin_line_send_succeeded', {
-          ...base_debug,
-          selected_method: 'line',
+          notification_skipped_reason: null,
         })
 
         candidate_delivered = true

@@ -114,6 +114,9 @@ export type notify_event =
       title?: string | null
       actor_user_uuid?: string | null
       source_channel: string
+      support_mode?: string | null
+      should_auto_reply?: boolean | null
+      auto_reply_skipped_reason?: string | null
     }
 
 export type notify_channel = 'discord' | 'discord_action' | 'line' | 'push'

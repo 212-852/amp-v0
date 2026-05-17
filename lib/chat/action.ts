@@ -4391,6 +4391,11 @@ export async function handle_chat_message_request(
         message: text_value,
         actor_user_uuid: clean_uuid(session.user_uuid),
         source_channel: chat_room.channel,
+        support_mode: web_mode_for_bot,
+        should_auto_reply: !web_gate.staff_controls_chat,
+        auto_reply_skipped_reason: web_gate.staff_controls_chat
+          ? 'concierge_staff_active'
+          : null,
       }),
     )
   }
