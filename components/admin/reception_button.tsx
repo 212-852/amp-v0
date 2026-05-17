@@ -3,17 +3,8 @@
 import { MessageCircle, MessageCircleOff } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { create_browser_supabase } from '@/lib/db/browser'
-import {
-  normalize_reception_state,
-  type reception_state,
-} from '@/lib/admin/reception/rules'
-
-type reception_state_response = {
-  ok: boolean
-  state?: reception_state
-  is_available?: boolean
-}
+import { use_admin_reception } from '@/components/admin/reception/provider'
+import type { reception_state } from '@/lib/admin/reception/rules'
 
 const reception_label = {
   open: 'ON',
@@ -32,103 +23,11 @@ const closed_button_class =
 const idle_button_class =
   'border-neutral-200 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.04)] focus-visible:outline-neutral-500'
 
-function resolve_state_from_payload(
-  payload: reception_state_response,
-): reception_state | null {
-  if (!payload.ok) {
-    return null
-  }
-
-  const from_state = normalize_reception_state(payload.state)
-
-  if (from_state) {
-    return from_state
-  }
-
-  if (typeof payload.is_available === 'boolean') {
-    return payload.is_available ? 'open' : 'closed'
-  }
-
-  return null
-}
-
 export function AdminReceptionButton() {
-  const [state, set_state] = useState<reception_state | null>(null)
-  const [is_pending, set_is_pending] = useState(false)
+  const { reception_state, is_loading, is_toggling, toggle_reception } =
+    use_admin_reception()
   const [toast_message, set_toast_message] = useState<string | null>(null)
   const toast_timer_ref = useRef<number | null>(null)
-
-  const apply_state = useCallback((next: reception_state) => {
-    set_state(next)
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-
-    void (async () => {
-      try {
-        const response = await fetch('/api/admin/reception', {
-          method: 'GET',
-          credentials: 'include',
-          cache: 'no-store',
-        })
-
-        if (!response.ok || cancelled) {
-          return
-        }
-
-        const payload = (await response.json()) as reception_state_response
-        const next_state = resolve_state_from_payload(payload)
-
-        if (!cancelled && next_state) {
-          apply_state(next_state)
-        }
-      } catch {
-        // Keep the button in its neutral state.
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [apply_state])
-
-  useEffect(() => {
-    const supabase = create_browser_supabase()
-
-    if (!supabase) {
-      return
-    }
-
-    const channel = supabase
-      .channel('receptions:header_toggle')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'receptions',
-        },
-        (payload) => {
-          const row = payload.new as { state?: unknown } | null
-
-          if (!row) {
-            return
-          }
-
-          const next_state = normalize_reception_state(row.state)
-
-          if (next_state) {
-            apply_state(next_state)
-          }
-        },
-      )
-      .subscribe()
-
-    return () => {
-      void supabase.removeChannel(channel)
-    }
-  }, [apply_state])
 
   useEffect(() => {
     return () => {
@@ -151,38 +50,22 @@ export function AdminReceptionButton() {
   }, [])
 
   const toggle = useCallback(async () => {
-    if (is_pending) {
+    if (is_toggling) {
       return
     }
 
-    set_is_pending(true)
+    const next_state = await toggle_reception()
 
-    try {
-      const response = await fetch('/api/admin/reception', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-
-      if (!response.ok) {
-        return
-      }
-
-      const payload = (await response.json()) as reception_state_response
-      const next_state = resolve_state_from_payload(payload)
-
-      if (next_state) {
-        apply_state(next_state)
-        show_toast(reception_label[next_state])
-      }
-    } finally {
-      set_is_pending(false)
+    if (next_state) {
+      show_toast(reception_label[next_state])
     }
-  }, [apply_state, is_pending, show_toast])
+  }, [is_toggling, show_toast, toggle_reception])
 
-  const is_open = state === 'open'
-  const is_closed = state === 'closed'
+  const display_state: reception_state | null = is_loading
+    ? null
+    : reception_state
+  const is_open = display_state === 'open'
+  const is_closed = display_state === 'closed'
   const button_class = `${base_button_class} ${
     is_open
       ? open_button_class
@@ -196,7 +79,9 @@ export function AdminReceptionButton() {
       ? reception_label.closed
       : '...'
   const aria_label =
-    state === null ? 'Reception' : `Reception ${reception_label[state]}`
+    display_state === null
+      ? 'Reception'
+      : `Reception ${reception_label[display_state]}`
 
   return (
     <div className="relative">
@@ -205,7 +90,7 @@ export function AdminReceptionButton() {
         className={button_class}
         aria-label={aria_label}
         aria-pressed={is_open}
-        disabled={is_pending}
+        disabled={is_toggling || is_loading}
         onClick={() => {
           void toggle()
         }}

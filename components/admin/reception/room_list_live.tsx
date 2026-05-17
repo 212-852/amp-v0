@@ -6,6 +6,7 @@ import { MessageCircle } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
+import { use_admin_reception } from '@/components/admin/reception/provider'
 import { use_session_profile } from '@/components/session/profile'
 import { send_admin_chat_debug } from '@/lib/admin/chat_debug_client'
 import { participant_presence_columns_available } from '@/lib/chat/presence/schema'
@@ -18,10 +19,7 @@ import {
   type room_card_summary_type,
   type reception_room,
 } from '@/lib/admin/reception/display'
-import {
-  normalize_reception_state,
-  type reception_state,
-} from '@/lib/admin/reception/rules'
+import type { reception_state } from '@/lib/admin/reception/rules'
 import {
   merge_admin_support_staff_from_presence,
   reception_room_refresh_admin_support_strings,
@@ -56,15 +54,7 @@ type admin_reception_room_list_live_props = {
   initial_rooms: reception_room[]
   limit?: number
   mode?: 'concierge' | 'bot'
-  /** Parent (`components/admin/reception.tsx`) already gates on `public.receptions`. */
-  parent_controls_reception_gate?: boolean
-  on_reception_gate_change?: (input: {
-    state: reception_list_state
-    room_count: number
-  }) => void
 }
-
-type reception_list_state = reception_state | 'loading'
 
 const component_file = 'components/admin/reception/room_list_live.tsx'
 
@@ -178,9 +168,9 @@ async function fetch_admin_room_card(room_uuid: string) {
 function send_reception_visibility_debug(input: {
   event: string
   admin_user_uuid: string | null
-  reception_state: reception_list_state
-  previous_state?: reception_list_state | null
-  next_state?: reception_list_state | null
+  reception_state: reception_state
+  previous_state?: reception_state | null
+  next_state?: reception_state | null
   room_count: number
   should_render_rooms: boolean
   source: 'initial_load' | 'realtime' | 'toggle' | 'render'
@@ -204,48 +194,25 @@ export default function AdminReceptionRoomListLive({
   initial_rooms,
   limit,
   mode = 'concierge',
-  parent_controls_reception_gate = false,
-  on_reception_gate_change,
 }: admin_reception_room_list_live_props) {
   const pathname = usePathname()
+  const { reception_state } = use_admin_reception()
   const [rooms, set_rooms] = useState<reception_room[]>([])
-  const [db_reception_state, set_db_reception_state] =
-    useState<reception_list_state>(
-      parent_controls_reception_gate ? 'open' : 'closed',
-    )
   const { session } = use_session_profile()
   const titles_ref = useRef<Map<string, string>>(new Map())
   const resolved_admin_user_uuid = admin_user_uuid ?? session?.user_uuid ?? null
-  const should_render_rooms = parent_controls_reception_gate
-    ? true
-    : db_reception_state === 'open'
+  const should_render_rooms = reception_state === 'open'
   const visible_rooms =
     typeof limit === 'number' ? rooms.slice(0, Math.max(0, limit)) : rooms
 
   useEffect(() => {
-    console.log('[reception_list_actual_renderer_mounted]', { pathname })
-  }, [pathname])
-
-  useEffect(() => {
-    on_reception_gate_change?.({
-      state: db_reception_state,
-      room_count: visible_rooms.length,
-    })
-  }, [db_reception_state, on_reception_gate_change, visible_rooms.length])
-
-  useEffect(() => {
-    if (parent_controls_reception_gate) {
-      set_rooms(initial_rooms)
-      return
-    }
-
-    if (db_reception_state !== 'open') {
+    if (reception_state !== 'open') {
       set_rooms([])
       return
     }
 
     set_rooms(initial_rooms)
-  }, [db_reception_state, initial_rooms, parent_controls_reception_gate])
+  }, [initial_rooms, reception_state])
 
   useEffect(() => {
     const next = new Map<string, string>()
@@ -274,278 +241,29 @@ export default function AdminReceptionRoomListLive({
     console.log('[reception_render_gate_checked]', {
       pathname,
       admin_user_uuid: resolved_admin_user_uuid,
-      reception_state: db_reception_state,
+      reception_state,
       room_count: rooms.length,
       should_render_rooms,
     })
     send_reception_visibility_debug({
       event: 'reception_render_gate_checked',
       admin_user_uuid: resolved_admin_user_uuid,
-      reception_state: db_reception_state,
-      next_state: db_reception_state,
+      reception_state,
+      next_state: reception_state,
       room_count: rooms.length,
       should_render_rooms,
       source: 'render',
     })
   }, [
-    db_reception_state,
     pathname,
+    reception_state,
     resolved_admin_user_uuid,
     rooms.length,
     should_render_rooms,
   ])
 
-  const refetch_rooms_for_reception = useCallback(
-    async (next_state: reception_state, source: 'initial_load' | 'realtime') => {
-      if (!resolved_admin_user_uuid) {
-        return
-      }
-
-      if (next_state !== 'open') {
-        set_rooms([])
-        send_reception_visibility_debug({
-          event: 'reception_rooms_cleared',
-          admin_user_uuid: resolved_admin_user_uuid,
-          reception_state: next_state,
-          next_state,
-          room_count: 0,
-          should_render_rooms: false,
-          source,
-        })
-        return
-      }
-
-      const response = await fetch(`/api/admin/reception/rooms?mode=${mode}`, {
-        method: 'GET',
-        credentials: 'include',
-        cache: 'no-store',
-        headers: { accept: 'application/json' },
-      })
-
-      if (!response.ok) {
-        throw new Error('chat_list_refetch_failed')
-      }
-
-      const payload = (await response.json().catch(() => null)) as
-        | { ok?: boolean; state?: unknown; rooms?: reception_room[] }
-        | null
-      const payload_state = normalize_reception_state(payload?.state)
-
-      if (!payload?.ok || !payload_state || !Array.isArray(payload.rooms)) {
-        throw new Error('chat_list_refetch_invalid_payload')
-      }
-
-      set_db_reception_state(payload_state)
-      set_rooms(payload_state === 'open' ? payload.rooms : [])
-      send_reception_visibility_debug({
-        event: 'reception_rooms_refetched',
-        admin_user_uuid: resolved_admin_user_uuid,
-        reception_state: payload_state,
-        next_state: payload_state,
-        room_count: payload_state === 'open' ? payload.rooms.length : 0,
-        should_render_rooms: payload_state === 'open',
-        source,
-      })
-    },
-    [mode, resolved_admin_user_uuid],
-  )
-
   useEffect(() => {
-    if (parent_controls_reception_gate) {
-      return
-    }
-
-    if (!resolved_admin_user_uuid) {
-      set_db_reception_state('closed')
-      set_rooms([])
-      return
-    }
-
-    const supabase = create_browser_supabase()
-
-    if (!supabase) {
-      set_db_reception_state('closed')
-      set_rooms([])
-      send_admin_chat_debug({
-        event: 'reception_state_realtime_failed',
-        admin_user_uuid: resolved_admin_user_uuid,
-        source_channel: 'initial_load',
-        error_code: 'supabase_client_unavailable',
-        error_message: 'Supabase browser client is unavailable.',
-        component_file,
-        phase: 'admin_reception_room_list_visibility',
-      })
-      return
-    }
-
-    let cancelled = false
-
-    const apply_state = (
-      next_state: reception_state,
-      source: 'initial_load' | 'realtime',
-    ) => {
-      set_db_reception_state((previous_state) => {
-        send_reception_visibility_debug({
-          event: 'reception_state_changed',
-          admin_user_uuid: resolved_admin_user_uuid,
-          reception_state: next_state,
-          previous_state,
-          next_state,
-          room_count: next_state === 'open' ? rooms.length : 0,
-          should_render_rooms: next_state === 'open',
-          source,
-        })
-
-        return next_state
-      })
-
-      void refetch_rooms_for_reception(next_state, source).catch((error) => {
-        send_admin_chat_debug({
-          event: 'chat_list_refetch_failed',
-          admin_user_uuid: resolved_admin_user_uuid,
-          source_channel: source,
-          error_code: 'chat_list_refetch_failed',
-          error_message: error instanceof Error ? error.message : String(error),
-          component_file,
-          phase: 'admin_reception_room_list_visibility',
-        })
-      })
-    }
-
-    void (async () => {
-      const result = await supabase
-        .from('receptions')
-        .select('state')
-        .eq('user_uuid', resolved_admin_user_uuid)
-        .maybeSingle()
-
-      if (cancelled) {
-        return
-      }
-
-      if (result.error) {
-        set_db_reception_state('closed')
-        set_rooms([])
-        send_admin_chat_debug({
-          event: 'reception_state_load_failed',
-          admin_user_uuid: resolved_admin_user_uuid,
-          source_channel: 'initial_load',
-          error_code:
-            typeof result.error.code === 'string'
-              ? result.error.code
-              : 'reception_state_load_failed',
-          error_message: result.error.message,
-          component_file,
-          phase: 'admin_reception_room_list_visibility',
-        })
-        return
-      }
-
-      const next_state =
-        normalize_reception_state(
-          (result.data as { state?: unknown } | null)?.state,
-        ) ?? 'closed'
-
-      console.log('[reception_state_loaded]', {
-        pathname,
-        admin_user_uuid: resolved_admin_user_uuid,
-        reception_state: next_state,
-      })
-      send_reception_visibility_debug({
-        event: 'reception_state_loaded',
-        admin_user_uuid: resolved_admin_user_uuid,
-        reception_state: next_state,
-        previous_state: db_reception_state,
-        next_state,
-        room_count: next_state === 'open' ? initial_rooms.length : 0,
-        should_render_rooms: next_state === 'open',
-        source: 'initial_load',
-      })
-      apply_state(next_state, 'initial_load')
-    })()
-
-    const handle_payload = (row: { state?: unknown } | null) => {
-      const next_state = normalize_reception_state(row?.state)
-
-      if (!next_state) {
-        return
-      }
-
-      console.log('[reception_state_realtime_received]', {
-        pathname,
-        admin_user_uuid: resolved_admin_user_uuid,
-        reception_state: next_state,
-      })
-      send_reception_visibility_debug({
-        event: 'reception_state_realtime_received',
-        admin_user_uuid: resolved_admin_user_uuid,
-        reception_state: next_state,
-        previous_state: db_reception_state,
-        next_state,
-        room_count: next_state === 'open' ? rooms.length : 0,
-        should_render_rooms: next_state === 'open',
-        source: 'realtime',
-      })
-      apply_state(next_state, 'realtime')
-    }
-
-    const channel = supabase
-      .channel(`receptions:room_list:${resolved_admin_user_uuid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'receptions',
-          filter: `user_uuid=eq.${resolved_admin_user_uuid}`,
-        },
-        (payload) => {
-          handle_payload(payload.new as { state?: unknown } | null)
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'receptions',
-          filter: `user_uuid=eq.${resolved_admin_user_uuid}`,
-        },
-        (payload) => {
-          handle_payload(payload.new as { state?: unknown } | null)
-        },
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          send_admin_chat_debug({
-            event: 'reception_state_realtime_failed',
-            admin_user_uuid: resolved_admin_user_uuid,
-            source_channel: 'realtime',
-            subscribe_status: status,
-            error_code: 'reception_state_realtime_failed',
-            error_message: status,
-            component_file,
-            phase: 'admin_reception_room_list_visibility',
-          })
-        }
-      })
-
-    return () => {
-      cancelled = true
-      void supabase.removeChannel(channel)
-    }
-  }, [
-    db_reception_state,
-    initial_rooms.length,
-    parent_controls_reception_gate,
-    pathname,
-    refetch_rooms_for_reception,
-    resolved_admin_user_uuid,
-    rooms.length,
-  ])
-
-  useEffect(() => {
-    if (db_reception_state !== 'open') {
+    if (reception_state !== 'open') {
       return
     }
 
@@ -616,10 +334,10 @@ export default function AdminReceptionRoomListLive({
     return () => {
       window.clearInterval(tick)
     }
-  }, [db_reception_state, room_key, session?.role])
+  }, [reception_state, room_key, session?.role])
 
   useEffect(() => {
-    if (db_reception_state !== 'open') {
+    if (reception_state !== 'open') {
       return
     }
 
@@ -1778,12 +1496,16 @@ export default function AdminReceptionRoomListLive({
       }
     }
   }, [
-    db_reception_state,
+    reception_state,
     room_key,
     session?.role,
     session?.tier,
     session?.user_uuid,
   ])
+
+  if (reception_state !== 'open') {
+    return null
+  }
 
   return (
     <>

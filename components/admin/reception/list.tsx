@@ -2,26 +2,23 @@
 
 import Link from 'next/link'
 import { Search } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import AdminReceptionRoomListLive from '@/components/admin/reception/room_list_live'
-import type { reception_state } from '@/lib/admin/reception/rules'
+import { use_admin_reception } from '@/components/admin/reception/provider'
 import type {
   reception_room,
   reception_room_mode,
 } from '@/lib/admin/reception/room'
 
 type admin_reception_list_props = {
-  admin_user_uuid: string
-  initial_state: reception_state
-  initial_rooms: reception_room[]
   mode: reception_room_mode
   load_ok: boolean
 }
 
-type reception_gate = {
-  state: reception_state | 'loading' | 'closed'
-  room_count: number
+type rooms_api_response = {
+  ok?: boolean
+  rooms?: reception_room[]
 }
 
 const tabs: Array<{ mode: reception_room_mode; label: string }> = [
@@ -30,18 +27,49 @@ const tabs: Array<{ mode: reception_room_mode; label: string }> = [
 ]
 
 export default function AdminReceptionList({
-  admin_user_uuid,
-  initial_state,
-  initial_rooms,
   mode,
   load_ok,
 }: admin_reception_list_props) {
-  const [gate, set_gate] = useState<reception_gate>({
-    state: initial_state,
-    room_count: initial_state === 'open' ? initial_rooms.length : 0,
-  })
+  const { admin_user_uuid, reception_state } = use_admin_reception()
+  const [rooms, set_rooms] = useState<reception_room[]>([])
+  const [rooms_load_ok, set_rooms_load_ok] = useState(load_ok)
+  const reception_open = reception_state === 'open'
 
-  const reception_open = gate.state === 'open'
+  const load_rooms = useCallback(async () => {
+    const response = await fetch(`/api/admin/reception/rooms?mode=${mode}`, {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { accept: 'application/json' },
+    })
+
+    if (!response.ok) {
+      throw new Error('admin_reception_list_fetch_failed')
+    }
+
+    const payload = (await response.json().catch(() => null)) as
+      | rooms_api_response
+      | null
+
+    if (!payload?.ok || !Array.isArray(payload.rooms)) {
+      throw new Error('admin_reception_list_invalid_payload')
+    }
+
+    set_rooms(payload.rooms)
+    set_rooms_load_ok(true)
+  }, [mode])
+
+  useEffect(() => {
+    if (reception_state !== 'open') {
+      set_rooms([])
+      return
+    }
+
+    void load_rooms().catch(() => {
+      set_rooms([])
+      set_rooms_load_ok(false)
+    })
+  }, [load_rooms, reception_state])
 
   return (
     <div className="flex flex-col gap-4">
@@ -99,28 +127,27 @@ export default function AdminReceptionList({
         </div>
       </section>
 
-      <AdminReceptionRoomListLive
-        admin_user_uuid={admin_user_uuid}
-        initial_rooms={initial_rooms}
-        mode={mode}
-        on_reception_gate_change={set_gate}
-      />
-
       {!reception_open ? (
         <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
           Chat reception is OFF
         </div>
-      ) : !load_ok ? (
+      ) : !rooms_load_ok ? (
         <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
           チャット一覧を読み込めませんでした
         </div>
-      ) : gate.room_count === 0 ? (
+      ) : rooms.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm font-medium text-neutral-500">
           {mode === 'concierge'
             ? 'コンシェルジュ案件はまだありません'
             : 'ボット対応中のルームはまだありません'}
         </div>
-      ) : null}
+      ) : (
+        <AdminReceptionRoomListLive
+          admin_user_uuid={admin_user_uuid}
+          initial_rooms={rooms}
+          mode={mode}
+        />
+      )}
     </div>
   )
 }
