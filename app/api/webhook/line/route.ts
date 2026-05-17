@@ -9,6 +9,7 @@ import {
   resolve_dispatch_locale,
   resolve_line_dispatch_identity,
 } from '@/lib/dispatch/context'
+import { normalize_recruitment_text } from '@/lib/recruitment/rules'
 import { fetch_line_messaging_profile } from '@/lib/line/messaging/profile'
 import { notify_new_user_created } from '@/lib/notify/user/created'
 import { deliver_line_text_reply } from '@/lib/output/line'
@@ -216,6 +217,30 @@ export async function POST(request: Request) {
       const dispatch_context = await resolve_line_dispatch_identity({
         line_user_id,
       })
+
+      try {
+        await debug_event({
+          category: 'recruitment',
+          event: 'line_message_context_checked',
+          payload: {
+            source_channel: 'line',
+            line_user_id_exists: Boolean(line_user_id),
+            room_uuid:
+              dispatch_context.room_result?.ok === true
+                ? dispatch_context.room_result.room.room_uuid
+                : null,
+            participant_uuid:
+              dispatch_context.room_result?.ok === true
+                ? dispatch_context.room_result.room.participant_uuid
+                : null,
+            user_uuid: dispatch_context.user_uuid,
+            message_text: event.message.text,
+            normalized_text: normalize_recruitment_text(event.message.text),
+          },
+        })
+      } catch {
+        /* observability only */
+      }
 
       if (dispatch_context.user_uuid) {
         const resolved_locale = await resolve_dispatch_locale({

@@ -221,14 +221,25 @@ function DriverRecruitmentCard({ bundle }: { bundle: driver_recruitment_bundle }
         {bundle.payload.cards.map((card) => (
           <section
             key={card.key}
-            className="flex h-[300px] w-[244px] shrink-0 snap-center flex-col justify-between rounded-[20px] border border-neutral-200 bg-white px-4 py-5 text-neutral-900"
+            className="flex h-[330px] w-[244px] shrink-0 snap-center flex-col overflow-hidden rounded-[20px] border border-neutral-200 bg-white text-neutral-900"
           >
-            <h2 className="text-[17px] font-semibold leading-tight">
-              {text_for(card.title)}
-            </h2>
-            <p className="text-[13px] leading-relaxed text-neutral-600">
-              {text_for(card.body)}
-            </p>
+            {card.image ? (
+              <Image
+                src={card.image.src}
+                alt={text_for(card.image.alt)}
+                width={488}
+                height={368}
+                className="h-[150px] w-full object-cover"
+              />
+            ) : null}
+            <div className="flex flex-1 flex-col justify-between px-4 py-5">
+              <h2 className="text-[17px] font-semibold leading-tight">
+                {text_for(card.title)}
+              </h2>
+              <p className="whitespace-pre-line text-[13px] leading-relaxed text-neutral-600">
+                {text_for(card.body)}
+              </p>
+            </div>
           </section>
         ))}
       </div>

@@ -359,6 +359,12 @@ function build_driver_recruitment_bubbles(
       },
     }
 
+    const image_url = card.image ? absolute_url(card.image.src) : null
+    const hero = bubble_hero(image_url)
+    if (hero) {
+      bubble.hero = hero
+    }
+
     return bubble
   })
 }

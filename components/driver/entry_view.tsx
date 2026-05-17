@@ -1,6 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 
 import type { entry_redirect_reason } from '@/lib/driver/rules'
@@ -30,12 +31,28 @@ function RecruitmentCard({
   return (
     <article
       data-card-index={index}
-      className="flex h-[300px] w-[82vw] max-w-[320px] shrink-0 snap-center flex-col justify-between rounded-[24px] border border-neutral-200 bg-white px-6 py-6 text-neutral-900 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
+      className="flex h-[390px] w-[82vw] max-w-[320px] shrink-0 snap-center flex-col overflow-hidden rounded-[24px] border border-neutral-200 bg-white text-neutral-900 shadow-sm"
     >
-      <h2 className="text-[22px] font-semibold leading-tight tracking-tight">
-        {card.title}
-      </h2>
-      <p className="text-[15px] leading-relaxed text-neutral-600">{card.body}</p>
+      {card.image ? (
+        <div className="h-[184px] w-full overflow-hidden bg-neutral-100">
+          <Image
+            src={card.image.src}
+            alt={card.image.alt}
+            width={900}
+            height={700}
+            priority={index === 0}
+            className="h-full w-full object-cover"
+          />
+        </div>
+      ) : null}
+      <div className="flex flex-1 flex-col justify-between px-6 py-6">
+        <h2 className="text-[22px] font-semibold leading-tight tracking-normal">
+          {card.title}
+        </h2>
+        <p className="whitespace-pre-line text-[15px] leading-relaxed text-neutral-600">
+          {card.body}
+        </p>
+      </div>
     </article>
   )
 }
@@ -57,7 +74,7 @@ function PageDots({
           key={index}
           className={[
             'h-2 w-2 rounded-full transition-colors',
-            index === active_index ? 'bg-white' : 'bg-neutral-500',
+            index === active_index ? 'bg-black' : 'bg-neutral-300',
           ].join(' ')}
           aria-hidden={index !== active_index}
         />
@@ -163,19 +180,19 @@ export default function DriverEntryView({
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-white">
+    <main className="min-h-screen bg-neutral-100 text-black">
       <div className="mx-auto flex min-h-screen w-full max-w-lg flex-col px-0 pb-8 pt-10">
         <header className="px-6 pb-6">
-          <p className="text-[12px] font-medium uppercase tracking-[0.18em] text-neutral-400">
+          <p className="text-[12px] font-medium uppercase tracking-[0.18em] text-neutral-500">
             Driver entry
           </p>
-          <h1 className="mt-3 text-[26px] font-semibold leading-tight text-white">
+          <h1 className="mt-3 text-[28px] font-semibold leading-tight text-black">
             {page.title}
           </h1>
-          <p className="mt-3 text-[15px] leading-relaxed text-neutral-300">
+          <p className="mt-3 text-[15px] leading-relaxed text-neutral-700">
             {page.subtitle}
           </p>
-          <p className="mt-2 text-[14px] leading-relaxed text-neutral-400">
+          <p className="mt-2 text-[14px] leading-relaxed text-neutral-500">
             {page.intro}
           </p>
         </header>
@@ -196,7 +213,7 @@ export default function DriverEntryView({
         {reason === 'no_line' || error_message ? (
           <p
             role="status"
-            className="mx-6 mt-5 rounded-[16px] border border-neutral-700 bg-neutral-900 px-4 py-3 text-[13px] leading-relaxed text-neutral-200"
+            className="mx-6 mt-5 rounded-[16px] border border-neutral-300 bg-white px-4 py-3 text-[13px] leading-relaxed text-neutral-700"
           >
             {error_message ?? page.no_line_message}
           </p>
@@ -209,7 +226,7 @@ export default function DriverEntryView({
             onClick={() => {
               void handle_apply_click()
             }}
-            className="flex h-14 w-full items-center justify-center rounded-full bg-white px-6 text-[16px] font-semibold text-neutral-950 transition-transform active:scale-[0.98] disabled:opacity-60"
+            className="flex h-14 w-full items-center justify-center rounded-full bg-black px-6 text-[16px] font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-60"
           >
             {is_pending
               ? content.cta_pending

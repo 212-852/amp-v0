@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { archived_message } from '@/lib/chat/archive'
 import { env } from '@/lib/config/env'
+import { debug_event } from '@/lib/debug'
 import type { message_bundle } from '@/lib/chat/message'
 import type { chat_room } from '@/lib/chat/room'
 
@@ -293,6 +294,9 @@ export async function deliver_line_chat_bundles(
   }
 
   const bundles = input.messages.map((row) => row.bundle)
+  const includes_recruitment = bundles.some(
+    (bundle) => bundle.bundle_type === 'driver_recruitment',
+  )
   const bundle_count = bundles.length
   const line_trace_base = {
     line_user_id: input.line_user_id ?? null,
@@ -322,11 +326,40 @@ export async function deliver_line_chat_bundles(
   const line_message_count = line_messages.length
 
   try {
+    if (includes_recruitment) {
+      await debug_event({
+        category: 'recruitment',
+        event: 'recruitment_output_send_started',
+        payload: {
+          output_channel: 'line',
+          room_uuid: input.room.room_uuid,
+          participant_uuid: input.room.participant_uuid,
+          line_user_id_exists: Boolean(line_user_id),
+          delivery_method: reply_token?.trim() ? 'reply' : 'push',
+          line_message_count,
+        },
+      })
+    }
+
     if (reply_token?.trim()) {
       await post_line_reply_messages({
         reply_token,
         messages: line_messages,
       })
+      if (includes_recruitment) {
+        await debug_event({
+          category: 'recruitment',
+          event: 'recruitment_output_send_succeeded',
+          payload: {
+            output_channel: 'line',
+            room_uuid: input.room.room_uuid,
+            participant_uuid: input.room.participant_uuid,
+            line_user_id_exists: Boolean(line_user_id),
+            delivery_method: 'reply',
+            line_message_count,
+          },
+        })
+      }
       return
     }
 
@@ -335,6 +368,20 @@ export async function deliver_line_chat_bundles(
         line_user_id,
         messages: line_messages,
       })
+      if (includes_recruitment) {
+        await debug_event({
+          category: 'recruitment',
+          event: 'recruitment_output_send_succeeded',
+          payload: {
+            output_channel: 'line',
+            room_uuid: input.room.room_uuid,
+            participant_uuid: input.room.participant_uuid,
+            line_user_id_exists: true,
+            delivery_method: 'push',
+            line_message_count,
+          },
+        })
+      }
       return
     }
 
@@ -349,6 +396,23 @@ export async function deliver_line_chat_bundles(
       bundle_count,
       line_message_count,
     })
+
+    if (includes_recruitment) {
+      await debug_event({
+        category: 'recruitment',
+        event: 'recruitment_output_send_failed',
+        payload: {
+          output_channel: 'line',
+          room_uuid: input.room.room_uuid,
+          participant_uuid: input.room.participant_uuid,
+          line_user_id_exists: Boolean(line_user_id),
+          error_code: err.line_status ?? 'line_delivery_failed',
+          error_message:
+            line_error instanceof Error ? line_error.message : String(line_error),
+          error_details: err.line_body ?? serialize_error(line_error),
+        },
+      })
+    }
 
     throw line_error
   }

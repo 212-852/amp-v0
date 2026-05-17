@@ -12,6 +12,7 @@ import {
 } from '@/lib/chat/message'
 import type { chat_channel, chat_room } from '@/lib/chat/room'
 import { clean_uuid } from '@/lib/db/uuid/payload'
+import { debug_event } from '@/lib/debug'
 import { output_chat_bundles } from '@/lib/output'
 
 import {
@@ -48,14 +49,12 @@ export type driver_recruitment_reply_result = {
 export async function try_deliver_driver_recruitment_reply(
   input: driver_recruitment_reply_input,
 ): Promise<driver_recruitment_reply_result | null> {
-  const intent = detect_driver_recruitment_intent(input.text)
+  const intent = detect_driver_recruitment_intent(input.text, {
+    source_channel: input.channel,
+  })
   const normalized_text = input.text.trim().replace(/\s+/g, ' ')
 
   if (!intent) {
-    return null
-  }
-
-  if (input.concierge_staff_active) {
     return null
   }
 
@@ -120,6 +119,18 @@ export async function try_deliver_driver_recruitment_reply(
 
   const recruitment_bundle = build_driver_recruitment_bundle({
     locale: input.locale,
+  })
+
+  await debug_event({
+    category: 'recruitment',
+    event: 'recruitment_bundle_built',
+    payload: {
+      bundle_type: recruitment_bundle.bundle_type,
+      card_count: recruitment_bundle.payload.cards.length,
+      image_path: recruitment_bundle.payload.image.src,
+      cta_path: recruitment_bundle.payload.ctas[0]?.href ?? null,
+      source_channel: input.channel,
+    },
   })
 
   const outgoing_messages = await archive_message_bundles({

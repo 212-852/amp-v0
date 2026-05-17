@@ -4,6 +4,7 @@ import {
   recruitment_apply_path,
   recruitment_entry_path,
 } from '@/lib/recruitment/content'
+import { debug_event } from '@/lib/debug'
 
 export type recruitment_intent = 'driver_recruitment'
 
@@ -15,18 +16,18 @@ const DRIVER_RECRUITMENT_KEYWORDS = [
   'ドライバー',
   'ドライバー募集',
   '求人',
+  '応募',
+  '応募したい',
   '働きたい',
   'エントリー',
-  '配送したい',
   'ペットタクシーのドライバー',
-  '応募したい',
 ] as const
 
 const normalized_keywords = DRIVER_RECRUITMENT_KEYWORDS.map((keyword) =>
   normalize_recruitment_text(keyword),
 )
 
-function normalize_recruitment_text(text: string): string {
+export function normalize_recruitment_text(text: string): string {
   return text
     .normalize('NFKC')
     .trim()
@@ -36,16 +37,52 @@ function normalize_recruitment_text(text: string): string {
 
 export function detect_driver_recruitment_intent(
   text: string | null | undefined,
+  input?: {
+    source_channel?: string | null
+  },
 ): recruitment_intent | null {
   const normalized = normalize_recruitment_text(
     normalize_dispatch_text(text),
   )
 
+  let matched_keyword: string | null = null
+
   if (!normalized) {
+    void debug_event({
+      category: 'recruitment',
+      event: 'recruitment_intent_checked',
+      payload: {
+        source_channel: input?.source_channel ?? null,
+        message_text: text ?? null,
+        normalized_text: normalized,
+        matched_keyword,
+        intent: null,
+        should_reply: false,
+      },
+    })
+
     return null
   }
 
-  if (normalized_keywords.some((keyword) => normalized.includes(keyword))) {
+  matched_keyword =
+    normalized_keywords.find((keyword) => normalized.includes(keyword)) ?? null
+
+  const intent = matched_keyword ? 'driver_recruitment' : null
+
+  void debug_event({
+    category: 'recruitment',
+    event: 'recruitment_intent_checked',
+    payload: {
+      source_channel: input?.source_channel ?? null,
+      message_text: text ?? null,
+      normalized_text: normalized,
+      matched_keyword,
+      intent,
+      should_reply: intent !== null,
+    },
+  })
+
+  if (intent) {
     return 'driver_recruitment'
   }
 

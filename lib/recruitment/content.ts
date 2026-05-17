@@ -9,6 +9,10 @@ export type recruitment_card = {
   key: recruitment_card_key
   title: string
   body: string
+  image?: {
+    src: string
+    alt: string
+  }
 }
 
 export const recruitment_image_path = '/images/LINE---recruit.jpg'
@@ -28,8 +32,12 @@ export const driver_recruitment_page = {
 export const driver_recruitment_cards: recruitment_card[] = [
   {
     key: 'recruitment',
-    title: 'ドライバー募集',
-    body: 'ペットとご家族の移動を支えるパートナーを募集しています。',
+    title: 'ペットタクシードライバー募集',
+    body: 'ペットとご家族の移動を、やさしく支えるお仕事です。',
+    image: {
+      src: recruitment_image_path,
+      alt: 'ペットタクシードライバー募集',
+    },
   },
   {
     key: 'work',
@@ -39,17 +47,17 @@ export const driver_recruitment_cards: recruitment_card[] = [
   {
     key: 'requirements',
     title: '応募しやすい条件',
-    body: '普通免許とスマートフォンがあれば応募できます。ペットにやさしく接する気持ちを大切にしています。',
+    body: '普通免許とスマートフォンがあれば応募できます。\nペットにやさしく接する気持ちを大切にしています。',
   },
   {
     key: 'style',
     title: '働き方',
-    body: '案件ごとに相談しながら進めます。無理のない範囲でスタートできます。',
+    body: '案件ごとに相談しながら進めます。\n無理のない範囲でスタートできます。',
   },
   {
     key: 'flow',
     title: '応募の流れ',
-    body: 'LINE連携後、応募フォームに進みます。内容確認後、担当者よりご案内します。',
+    body: 'LINE連携後、応募フォームに進みます。\n内容確認後、担当者よりご案内します。',
   },
 ]
 
