@@ -25,21 +25,83 @@ export type line_webhook_context = {
   event_type?: string | null
 }
 
-function serialize_error(error: unknown) {
+export function serialize_line_webhook_error(error: unknown) {
   if (error instanceof Error) {
+    const supabase_like = error as Error & {
+      code?: string
+      details?: string
+      hint?: string
+    }
+
     return {
       name: error.name,
-      message: error.message,
+      error_message: error.message,
+      error_stack: error.stack ?? null,
       stack_exists: Boolean(error.stack),
-      stack: error.stack,
+      error_code: supabase_like.code ?? error.name,
+      error_json: safe_json_stringify({
+        message: error.message,
+        code: supabase_like.code ?? null,
+        details: supabase_like.details ?? null,
+        hint: supabase_like.hint ?? null,
+      }),
+    }
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    const message =
+      typeof record.message === 'string'
+        ? record.message
+        : typeof record.error === 'string'
+          ? record.error
+          : safe_json_stringify(record)
+
+    return {
+      name: typeof record.name === 'string' ? record.name : 'object',
+      error_message: message,
+      error_stack: null,
+      stack_exists: false,
+      error_code:
+        typeof record.code === 'string' ? record.code : 'object_error',
+      error_json: safe_json_stringify(record),
     }
   }
 
   return {
     name: null,
-    message: String(error),
+    error_message: String(error),
+    error_stack: null,
     stack_exists: false,
-    stack: null,
+    error_code: null,
+    error_json: null,
+  }
+}
+
+function safe_json_stringify(value: unknown) {
+  try {
+    return JSON.stringify(value, Object.getOwnPropertyNames(value as object))
+  } catch {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+}
+
+function serialize_error(error: unknown) {
+  const serialized = serialize_line_webhook_error(error)
+
+  return {
+    name: serialized.name,
+    error_message: serialized.error_message,
+    message: serialized.error_message,
+    stack_exists: serialized.stack_exists,
+    error_stack: serialized.error_stack,
+    stack: serialized.error_stack,
+    error_code: serialized.error_code,
+    error_json: serialized.error_json,
   }
 }
 
@@ -113,11 +175,51 @@ export async function line_webhook_phase_failed(
   await line_webhook_debug('line_webhook_phase_failed', {
     phase,
     reason: input.reason,
-    error_code: err?.name ?? null,
-    error_message: err?.message ?? input.reason,
+    error_code: err?.error_code ?? err?.name ?? null,
+    error_message: err?.error_message ?? err?.message ?? input.reason,
+    error_stack: err?.error_stack ?? err?.stack ?? null,
     stack_exists: err?.stack_exists ?? false,
+    error_json: err?.error_json ?? null,
     ...(input.context ?? {}),
     ...(input.extra ?? {}),
+  })
+}
+
+export async function line_webhook_event_skipped(input: {
+  reason: string
+  context?: line_webhook_context
+  extra?: Record<string, unknown>
+}) {
+  await line_webhook_debug('line_webhook_event_skipped', {
+    reason: input.reason,
+    ...(input.context ?? {}),
+    ...(input.extra ?? {}),
+  })
+}
+
+export async function line_user_resolve_soft_failed(input: {
+  context: line_webhook_context
+  reason: string
+  error?: unknown
+  auth_resolved: boolean
+  fallback_mode: string
+  continue_reply_flow: boolean
+}) {
+  const err = input.error ? serialize_error(input.error) : null
+
+  await line_webhook_debug('line_user_resolve_soft_failed', {
+    line_user_id: input.context.line_user_id ?? null,
+    auth_resolved: input.auth_resolved,
+    fallback_mode: input.fallback_mode,
+    continue_reply_flow: input.continue_reply_flow,
+    reason: input.reason,
+    error_message: err?.error_message ?? null,
+    error_stack: err?.error_stack ?? null,
+    error_json: err?.error_json ?? null,
+    user_uuid: input.context.user_uuid ?? null,
+    visitor_uuid: input.context.visitor_uuid ?? null,
+    room_uuid: input.context.room_uuid ?? null,
+    participant_uuid: input.context.participant_uuid ?? null,
   })
 }
 
@@ -133,9 +235,11 @@ export async function line_webhook_fallback_returned(input: {
   await line_webhook_debug('line_webhook_fallback_returned', {
     phase: input.phase,
     reason: input.reason,
-    error_code: err?.name ?? null,
-    error_message: err?.message ?? input.reason,
+    error_code: err?.error_code ?? err?.name ?? null,
+    error_message: err?.error_message ?? input.reason,
+    error_stack: err?.error_stack ?? null,
     stack_exists: err?.stack_exists ?? false,
+    error_json: err?.error_json ?? null,
     line_user_id_exists: Boolean(input.context?.line_user_id),
     reply_token_exists: Boolean(input.context?.reply_token),
     message_text: input.context?.message_text ?? null,

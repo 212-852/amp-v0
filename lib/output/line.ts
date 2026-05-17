@@ -3,7 +3,10 @@ import 'server-only'
 import type { archived_message } from '@/lib/chat/archive'
 import { env } from '@/lib/config/env'
 import { debug_event } from '@/lib/debug'
-import type { message_bundle } from '@/lib/chat/message'
+import type {
+  driver_recruitment_bundle,
+  message_bundle,
+} from '@/lib/chat/message'
 import type { chat_room } from '@/lib/chat/room'
 
 import { build_line_messages_from_bundles } from './line/flex'
@@ -413,6 +416,89 @@ export async function deliver_line_chat_bundles(
         },
       })
     }
+
+    throw line_error
+  }
+}
+
+/**
+ * LINE recruitment auto-reply without room/session/archive.
+ * Used when identity or room restore fails on webhook.
+ */
+export async function deliver_line_recruitment_standalone_reply(input: {
+  reply_token: string
+  line_user_id?: string | null
+  bundle: driver_recruitment_bundle
+}) {
+  const reply_token = input.reply_token.trim()
+
+  if (!reply_token) {
+    throw new Error('missing_reply_token')
+  }
+
+  await debug_event({
+    category: 'recruitment',
+    event: 'recruitment_output_send_started',
+    payload: {
+      output_channel: 'line',
+      standalone: true,
+      room_uuid: null,
+      participant_uuid: null,
+      line_user_id_exists: Boolean(input.line_user_id),
+      delivery_method: 'reply',
+    },
+  })
+
+  let line_messages: line_api_message[]
+
+  try {
+    const built = build_line_messages_from_bundles({
+      bundles: [input.bundle],
+      absolute_url: to_absolute_asset_url,
+    })
+    line_messages = built.messages
+  } catch (flex_error) {
+    console.error('[line_recruitment_flex_render_failed]', flex_error)
+    line_messages = build_flex_failure_text_fallback([input.bundle])
+  }
+
+  try {
+    await post_line_reply_messages({
+      reply_token,
+      messages: line_messages,
+    })
+
+    await debug_event({
+      category: 'recruitment',
+      event: 'recruitment_output_send_succeeded',
+      payload: {
+        output_channel: 'line',
+        standalone: true,
+        room_uuid: null,
+        participant_uuid: null,
+        line_user_id_exists: Boolean(input.line_user_id),
+        delivery_method: 'reply',
+        line_message_count: line_messages.length,
+      },
+    })
+  } catch (line_error) {
+    const err = line_error as line_reply_error
+
+    await debug_event({
+      category: 'recruitment',
+      event: 'recruitment_output_send_failed',
+      payload: {
+        output_channel: 'line',
+        standalone: true,
+        room_uuid: null,
+        participant_uuid: null,
+        line_user_id_exists: Boolean(input.line_user_id),
+        error_code: err.line_status ?? 'line_delivery_failed',
+        error_message:
+          line_error instanceof Error ? line_error.message : String(line_error),
+        error_details: err.line_body ?? serialize_error(line_error),
+      },
+    })
 
     throw line_error
   }

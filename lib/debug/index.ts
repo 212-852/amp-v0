@@ -68,6 +68,10 @@ function allow_discord_debug_category(category: string, event?: string) {
     'line_webhook_phase_started',
     'line_webhook_phase_succeeded',
     'line_webhook_phase_failed',
+    'line_webhook_events_parsed',
+    'line_webhook_event_loop_started',
+    'line_webhook_event_skipped',
+    'line_user_resolve_soft_failed',
   ])
 
   if (
@@ -82,7 +86,15 @@ function allow_discord_debug_category(category: string, event?: string) {
     return false
   }
 
-  if (category === 'recruitment' && event === 'recruitment_intent_checked') {
+  const recruitment_always_discord = new Set([
+    'recruitment_intent_checked',
+    'recruitment_bundle_built',
+    'recruitment_output_send_started',
+    'recruitment_output_send_succeeded',
+    'recruitment_output_send_failed',
+  ])
+
+  if (category === 'recruitment' && event && recruitment_always_discord.has(event)) {
     return true
   }
 

@@ -74,6 +74,10 @@ export function resolve_debug_rule(input: {
     'line_webhook_phase_started',
     'line_webhook_phase_succeeded',
     'line_webhook_phase_failed',
+    'line_webhook_events_parsed',
+    'line_webhook_event_loop_started',
+    'line_webhook_event_skipped',
+    'line_user_resolve_soft_failed',
   ])
 
   if (

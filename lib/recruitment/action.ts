@@ -14,6 +14,7 @@ import type { chat_channel, chat_room } from '@/lib/chat/room'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import { output_chat_bundles } from '@/lib/output'
+import { deliver_line_recruitment_standalone_reply } from '@/lib/output/line'
 
 import {
   detect_driver_recruitment_intent,
@@ -44,6 +45,54 @@ export type driver_recruitment_reply_result = {
   intent: recruitment_intent
   messages: archived_message[]
   is_duplicate: boolean
+}
+
+export type line_webhook_recruitment_reply_input = {
+  text: string
+  locale?: chat_locale
+  line_reply_token: string
+  line_user_id: string
+}
+
+/**
+ * Recruitment Flex reply for LINE webhook without room/session/archive.
+ */
+export async function try_deliver_line_webhook_recruitment_reply(
+  input: line_webhook_recruitment_reply_input,
+): Promise<boolean> {
+  const intent = detect_driver_recruitment_intent(input.text, {
+    source_channel: 'line',
+  })
+
+  if (!intent) {
+    return false
+  }
+
+  const recruitment_bundle = build_driver_recruitment_bundle({
+    locale: input.locale ?? 'ja',
+  })
+
+  await debug_event({
+    category: 'recruitment',
+    event: 'recruitment_bundle_built',
+    payload: {
+      bundle_type: recruitment_bundle.bundle_type,
+      card_count: recruitment_bundle.payload.cards.length,
+      image_path: recruitment_bundle.payload.image.src,
+      cta_path: recruitment_bundle.payload.ctas[0]?.href ?? null,
+      source_channel: 'line',
+      standalone: true,
+      room_uuid: null,
+    },
+  })
+
+  await deliver_line_recruitment_standalone_reply({
+    reply_token: input.line_reply_token,
+    line_user_id: input.line_user_id,
+    bundle: recruitment_bundle,
+  })
+
+  return true
 }
 
 export async function try_deliver_driver_recruitment_reply(
