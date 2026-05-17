@@ -17,6 +17,7 @@ import {
   visitor_cookie_name,
 } from '@/lib/auth/session'
 import { supabase } from '@/lib/db/supabase'
+import { driver_link_debug_event } from '@/lib/driver/debug'
 import {
   line_link_return_path_cookie_name,
   normalize_line_link_return_path,
@@ -53,7 +54,7 @@ function redirect_return_path(return_path: string | null | undefined) {
 
 async function resolve_role_redirect_path(user_uuid: string | null) {
   if (!user_uuid) {
-    return '/entry'
+    return { role: null, role_route: '/entry' }
   }
 
   const result = await supabase
@@ -63,7 +64,7 @@ async function resolve_role_redirect_path(user_uuid: string | null) {
     .maybeSingle()
 
   if (result.error) {
-    return '/entry'
+    return { role: null, role_route: '/entry' }
   }
 
   const role =
@@ -72,18 +73,18 @@ async function resolve_role_redirect_path(user_uuid: string | null) {
       : null
 
   if (role === 'admin') {
-    return '/admin'
+    return { role, role_route: '/admin' }
   }
 
   if (role === 'driver') {
-    return '/driver'
+    return { role, role_route: '/driver' }
   }
 
   if (role === 'user' || role === 'member') {
-    return '/user'
+    return { role, role_route: '/user' }
   }
 
-  return '/entry'
+  return { role, role_route: '/entry' }
 }
 
 function redirect_pwa_line_link_landing(
@@ -221,8 +222,21 @@ export async function GET(request: Request) {
         })
       }
 
-      const redirect_path =
-        line_link_return_path ?? (await resolve_role_redirect_path(out.user_uuid))
+      const role_redirect = await resolve_role_redirect_path(out.user_uuid)
+      const redirect_path = line_link_return_path ?? role_redirect.role_route
+      await driver_link_debug_event({
+        event: 'line_link_redirect_resolved',
+        payload: {
+          user_uuid: out.user_uuid,
+          role: role_redirect.role,
+          return_path: line_link_return_path,
+          role_route: role_redirect.role_route,
+          selected_redirect: redirect_path,
+          redirect_reason: line_link_return_path
+            ? 'return_path'
+            : 'role_route',
+        },
+      })
       const response = redirect_return_path(redirect_path)
 
       response.cookies.set(
@@ -243,6 +257,20 @@ export async function GET(request: Request) {
           link_error instanceof Error
             ? link_error.message
             : String(link_error),
+      })
+
+      await driver_link_debug_event({
+        event: 'line_link_failed',
+        payload: {
+          user_uuid: null,
+          role: null,
+          return_path: line_link_return_path,
+          error_code: 'unexpected_error',
+          error_message:
+            link_error instanceof Error
+              ? link_error.message
+              : String(link_error),
+        },
       })
 
       return redirect_pwa_line_link_landing(request, 'failed')
@@ -321,9 +349,19 @@ export async function GET(request: Request) {
       },
     })
 
-    const redirect_path =
-      line_link_return_path ??
-      (await resolve_role_redirect_path(access.user_uuid))
+    const role_redirect = await resolve_role_redirect_path(access.user_uuid)
+    const redirect_path = line_link_return_path ?? role_redirect.role_route
+    await driver_link_debug_event({
+      event: 'line_link_redirect_resolved',
+      payload: {
+        user_uuid: access.user_uuid,
+        role: role_redirect.role,
+        return_path: line_link_return_path,
+        role_route: role_redirect.role_route,
+        selected_redirect: redirect_path,
+        redirect_reason: line_link_return_path ? 'return_path' : 'role_route',
+      },
+    })
     const response = redirect_return_path(redirect_path)
 
     response.cookies.set(

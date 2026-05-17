@@ -13,6 +13,7 @@ import { debug_event } from '@/lib/debug'
 import { run_browser_session_chat_room_resolve } from '@/lib/chat/browser_session_room'
 import type { chat_channel } from '@/lib/chat/room'
 import type { locale_key } from '@/lib/locale/action'
+import { driver_link_debug_event } from '@/lib/driver/debug'
 import { read_session } from './session'
 
 export type admin_route_access =
@@ -359,18 +360,45 @@ export async function require_line_identity_or_redirect_to_link(
 export async function resolve_apply_route_access(): Promise<apply_route_access> {
   const subject = await resolve_driver_route_subject()
   const session = await get_session_user()
+  const has_line = can_access_apply({
+    user: subject.user,
+    identities: subject.identities,
+  })
 
-  if (
-    !can_access_apply({
-      user: subject.user,
-      identities: subject.identities,
+  if (!has_line) {
+    await driver_link_debug_event({
+      event: 'driver_apply_access_checked',
+      payload: {
+        user_uuid: subject.user.user_uuid,
+        role: subject.user.role,
+        tier: session.tier,
+        has_line_identity: false,
+        allowed: false,
+        redirect_to: '/auth/link/line?return_path=%2Fapply',
+        reason: subject.user.user_uuid
+          ? 'line_identity_missing'
+          : 'session_missing',
+      },
     })
-  ) {
+
     return {
       allowed: false,
       redirect_to: '/auth/link/line?return_path=%2Fapply',
     }
   }
+
+  await driver_link_debug_event({
+    event: 'driver_apply_access_checked',
+    payload: {
+      user_uuid: subject.user.user_uuid,
+      role: subject.user.role,
+      tier: session.tier,
+      has_line_identity: true,
+      allowed: true,
+      redirect_to: null,
+      reason: 'line_identity_present',
+    },
+  })
 
   return {
     allowed: true,

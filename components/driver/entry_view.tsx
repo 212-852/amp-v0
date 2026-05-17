@@ -9,6 +9,7 @@ import {
   driver_recruitment_content,
   type recruitment_card,
 } from '@/lib/recruitment/content'
+import { send_driver_link_debug } from './debug'
 
 const content = {
   cta_pending: '準備中...',
@@ -17,6 +18,9 @@ const content = {
 type DriverEntryViewProps = {
   reason: entry_redirect_reason
   line_linked: boolean
+  user_uuid: string | null
+  role: string | null
+  tier: string | null
 }
 
 function RecruitmentCard({
@@ -84,6 +88,9 @@ function PageDots({
 export default function DriverEntryView({
   reason,
   line_linked,
+  user_uuid,
+  role,
+  tier,
 }: DriverEntryViewProps) {
   const router = useRouter()
   const scroll_ref = useRef<HTMLDivElement>(null)
@@ -139,16 +146,35 @@ export default function DriverEntryView({
     }
 
     if (line_linked) {
+      send_driver_link_debug({
+        event: 'driver_entry_cta_clicked',
+        user_uuid,
+        role,
+        tier,
+        has_line_identity: line_linked,
+        return_path: driver_recruitment_content.apply_path,
+        next_url: driver_recruitment_content.apply_path,
+      })
       router.push(driver_recruitment_content.apply_path)
       return
     }
 
     set_is_pending(true)
-    window.location.assign(
-      `/auth/link/line?return_path=${encodeURIComponent(
-        driver_recruitment_content.apply_path,
-      )}`,
-    )
+    const next_url = `/auth/link/line?return_path=${encodeURIComponent(
+      driver_recruitment_content.apply_path,
+    )}`
+
+    send_driver_link_debug({
+      event: 'driver_entry_cta_clicked',
+      user_uuid,
+      role,
+      tier,
+      has_line_identity: line_linked,
+      return_path: driver_recruitment_content.apply_path,
+      next_url,
+    })
+
+    window.location.assign(next_url)
   }
 
   return (
