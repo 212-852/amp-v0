@@ -56,6 +56,8 @@ type admin_reception_room_list_live_props = {
   initial_rooms: reception_room[]
   limit?: number
   mode?: 'concierge' | 'bot'
+  /** Parent (`components/admin/reception.tsx`) already gates on `public.receptions`. */
+  parent_controls_reception_gate?: boolean
   on_reception_gate_change?: (input: {
     state: reception_list_state
     room_count: number
@@ -202,16 +204,21 @@ export default function AdminReceptionRoomListLive({
   initial_rooms,
   limit,
   mode = 'concierge',
+  parent_controls_reception_gate = false,
   on_reception_gate_change,
 }: admin_reception_room_list_live_props) {
   const pathname = usePathname()
   const [rooms, set_rooms] = useState<reception_room[]>([])
   const [db_reception_state, set_db_reception_state] =
-    useState<reception_list_state>('closed')
+    useState<reception_list_state>(
+      parent_controls_reception_gate ? 'open' : 'closed',
+    )
   const { session } = use_session_profile()
   const titles_ref = useRef<Map<string, string>>(new Map())
   const resolved_admin_user_uuid = admin_user_uuid ?? session?.user_uuid ?? null
-  const should_render_rooms = db_reception_state === 'open'
+  const should_render_rooms = parent_controls_reception_gate
+    ? true
+    : db_reception_state === 'open'
   const visible_rooms =
     typeof limit === 'number' ? rooms.slice(0, Math.max(0, limit)) : rooms
 
@@ -227,13 +234,18 @@ export default function AdminReceptionRoomListLive({
   }, [db_reception_state, on_reception_gate_change, visible_rooms.length])
 
   useEffect(() => {
+    if (parent_controls_reception_gate) {
+      set_rooms(initial_rooms)
+      return
+    }
+
     if (db_reception_state !== 'open') {
       set_rooms([])
       return
     }
 
     set_rooms(initial_rooms)
-  }, [db_reception_state, initial_rooms])
+  }, [db_reception_state, initial_rooms, parent_controls_reception_gate])
 
   useEffect(() => {
     const next = new Map<string, string>()
@@ -339,6 +351,10 @@ export default function AdminReceptionRoomListLive({
   )
 
   useEffect(() => {
+    if (parent_controls_reception_gate) {
+      return
+    }
+
     if (!resolved_admin_user_uuid) {
       set_db_reception_state('closed')
       set_rooms([])
@@ -521,6 +537,7 @@ export default function AdminReceptionRoomListLive({
   }, [
     db_reception_state,
     initial_rooms.length,
+    parent_controls_reception_gate,
     pathname,
     refetch_rooms_for_reception,
     resolved_admin_user_uuid,

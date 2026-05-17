@@ -381,6 +381,7 @@ export function resolve_debug_rule(input: {
     'reception_state_realtime_received',
     'reception_state_changed',
     'reception_render_gate_checked',
+    'actual_admin_top_renderer_checked',
     'reception_rooms_cleared',
     'reception_rooms_refetched',
   ])
