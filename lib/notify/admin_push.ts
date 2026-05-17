@@ -91,6 +91,7 @@ type admin_debug_payload = {
   presence_seen_at?: string | null
   presence_age_seconds?: number | null
   presence_area?: string | null
+  receiver_channel?: string | null
   display_name?: string | null
   latest_message_preview?: string | null
   error_code?: string | null
@@ -504,6 +505,7 @@ export async function route_admin_push_notification(
       presence_seen_at: presence_state.presence_seen_at,
       presence_age_seconds: presence_state.presence_age_seconds,
       presence_area: presence_state.presence_area,
+      receiver_channel: presence_state.receiver_channel,
       display_name: line_copy.display_name,
       latest_message_preview: line_copy.latest_message_preview,
       header_status: candidate.header_status,
@@ -584,8 +586,9 @@ export async function route_admin_push_notification(
         'admin_notification_skipped_receiver_active_in_app',
         {
           ...base_debug,
-          skipped_reason: 'receiver_active_in_app',
-          notification_skipped_reason: 'receiver_active_in_app',
+          skipped_reason: presence_state.external_notification_skipped_reason,
+          notification_skipped_reason:
+            presence_state.external_notification_skipped_reason,
           selected_method: null,
         },
       )
@@ -593,8 +596,9 @@ export async function route_admin_push_notification(
         'admin_line_notification_skipped_receiver_active_in_app',
         {
           ...base_debug,
-          skipped_reason: 'receiver_active_in_app',
-          notification_skipped_reason: 'receiver_active_in_app',
+          skipped_reason: presence_state.external_notification_skipped_reason,
+          notification_skipped_reason:
+            presence_state.external_notification_skipped_reason,
           selected_method: null,
         },
       )

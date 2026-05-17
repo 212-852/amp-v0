@@ -1,31 +1,12 @@
 'use client'
 
+import { detect_source_channel } from '@/lib/channel/detect'
 import type { chat_action_realtime_payload } from './chat_actions'
 
 export type client_presence_source_channel = 'web' | 'pwa' | 'liff'
 
 export function resolve_client_presence_source_channel(): client_presence_source_channel {
-  if (typeof window === 'undefined') {
-    return 'web'
-  }
-
-  const href = window.location.href.toLowerCase()
-  const referrer = document.referrer.toLowerCase()
-  const is_liff =
-    href.includes('liff') ||
-    referrer.includes('liff.line.me') ||
-    window.location.hostname.includes('liff.line.me')
-
-  if (is_liff) {
-    return 'liff'
-  }
-
-  const is_standalone =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as Navigator & { standalone?: boolean }).standalone ===
-      true
-
-  return is_standalone ? 'pwa' : 'web'
+  return detect_source_channel().detected_channel
 }
 
 export type support_room_api_action = {

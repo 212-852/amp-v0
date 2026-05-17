@@ -43,6 +43,7 @@ export type external_notification_presence_decision = {
   presence_seen_at: string | null
   presence_age_seconds: number | null
   presence_area: string | null
+  receiver_channel: string | null
 }
 
 export function normalize_presence_channel(
@@ -176,6 +177,7 @@ export function decide_external_notification_skip(input: {
       presence_seen_at: null,
       presence_age_seconds: null,
       presence_area: null,
+      receiver_channel: null,
     }
   }
 
@@ -190,13 +192,14 @@ export function decide_external_notification_skip(input: {
     presence_seen_at: presence.seen_at,
     presence_age_seconds,
     presence_area: presence.area,
+    receiver_channel: presence.channel,
   }
 
   if (presence.visible !== true) {
     return {
       ...base,
       skip_external: false,
-      external_notification_skipped_reason: null,
+      external_notification_skipped_reason: 'presence_hidden',
     }
   }
 
@@ -209,14 +212,21 @@ export function decide_external_notification_skip(input: {
     return {
       ...base,
       skip_external: false,
-      external_notification_skipped_reason: null,
+      external_notification_skipped_reason: 'presence_stale',
     }
   }
+
+  const channel = normalize_presence_channel(presence.channel)
 
   return {
     ...base,
     skip_external: true,
-    external_notification_skipped_reason: 'receiver_active_in_app',
+    external_notification_skipped_reason:
+      channel === 'liff'
+        ? 'receiver_active_in_liff'
+        : channel === 'pwa'
+          ? 'receiver_active_in_pwa'
+          : 'receiver_active_in_web',
   }
 }
 
@@ -224,7 +234,7 @@ export function resolve_external_notification_allow_reason(
   decision: external_notification_presence_decision,
 ): string {
   if (decision.skip_external) {
-    return 'receiver_active_in_app'
+    return decision.external_notification_skipped_reason ?? 'receiver_active_in_app'
   }
 
   if (!decision.presence_found) {

@@ -3,29 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 
+import { detect_source_channel } from '@/lib/channel/detect'
 import type { presence_area } from '@/lib/presence/rules'
 
 const presence_heartbeat_ms = 15_000
-
-function resolve_presence_channel(): 'web' | 'pwa' | 'liff' {
-  const href = window.location.href.toLowerCase()
-  const referrer = document.referrer.toLowerCase()
-  const is_liff =
-    href.includes('liff') ||
-    referrer.includes('liff.line.me') ||
-    window.location.hostname.includes('liff.line.me')
-
-  if (is_liff) {
-    return 'liff'
-  }
-
-  const is_standalone =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as Navigator & { standalone?: boolean }).standalone ===
-      true
-
-  return is_standalone ? 'pwa' : 'web'
-}
 
 function resolve_presence_area(pathname: string | null): presence_area {
   const path = pathname ?? ''
@@ -49,6 +30,7 @@ export default function PresenceClient() {
   const pathname = usePathname()
   const area = useMemo(() => resolve_presence_area(pathname), [pathname])
   const area_ref = useRef(area)
+  const last_detection_key_ref = useRef<string | null>(null)
 
   useEffect(() => {
     area_ref.current = area
@@ -59,6 +41,20 @@ export default function PresenceClient() {
       typeof input?.visible === 'boolean'
         ? input.visible
         : document.visibilityState === 'visible'
+    const detection = detect_source_channel()
+    const detection_key = [
+      detection.detected_channel,
+      detection.is_liff ? 'liff' : 'not_liff',
+      detection.is_pwa ? 'pwa' : 'not_pwa',
+      detection.display_mode ?? 'unknown',
+      detection.navigator_standalone ? 'standalone' : 'not_standalone',
+      detection.has_liff_object ? 'liff_object' : 'no_liff_object',
+    ].join('|')
+    const should_send_detection = last_detection_key_ref.current !== detection_key
+
+    if (should_send_detection) {
+      last_detection_key_ref.current = detection_key
+    }
 
     void fetch('/api/presence', {
       method: 'POST',
@@ -66,9 +62,10 @@ export default function PresenceClient() {
       keepalive: input?.keepalive,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        channel: resolve_presence_channel(),
+        channel: detection.detected_channel,
         area: area_ref.current,
         visible,
+        ...(should_send_detection ? { detection } : {}),
       }),
     }).catch(() => {})
   }, [])

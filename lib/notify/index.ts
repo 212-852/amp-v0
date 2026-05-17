@@ -19,6 +19,11 @@ import {
   load_notification_preferences_for_user,
   resolve_chat_external_notification_decision,
 } from '@/lib/notification/rules'
+import { load_presence_by_user_uuid } from '@/lib/presence/action'
+import {
+  decide_external_notification_skip,
+  type external_notification_presence_decision,
+} from '@/lib/presence/rules'
 import {
   load_concierge_recipients,
   load_admin_notify_recipients,
@@ -382,6 +387,7 @@ type support_started_customer_line_debug_payload = {
   customer_user_uuid: string | null
   customer_participant_uuid: string | null
   selected_channel?: string | null
+  receiver_channel?: string | null
   has_line_identity: boolean
   line_user_id_exists?: boolean
   line_enabled: boolean
@@ -389,6 +395,40 @@ type support_started_customer_line_debug_payload = {
   skipped_reason: string | null
   error_code?: string | null
   error_message?: string | null
+}
+
+function customer_line_skip_reason(input: {
+  customer_user_uuid: string | null
+  route_skipped_reason: string | null
+  presence_decision: external_notification_presence_decision
+  has_line_identity: boolean
+  line_user_id: string | null
+  line_enabled: boolean
+  chat_notifications_enabled: boolean
+}) {
+  if (input.presence_decision.skip_external) {
+    return input.presence_decision.receiver_channel === 'liff'
+      ? 'customer_active_in_liff'
+      : 'customer_active_in_app'
+  }
+
+  if (!input.customer_user_uuid) {
+    return 'line_identity_missing'
+  }
+
+  if (!input.line_enabled || !input.chat_notifications_enabled) {
+    return 'line_notification_off'
+  }
+
+  if (!input.has_line_identity) {
+    return 'line_identity_missing'
+  }
+
+  if (!input.line_user_id) {
+    return 'line_user_id_missing'
+  }
+
+  return input.route_skipped_reason
 }
 
 async function emit_support_started_customer_line_debug(
@@ -464,17 +504,21 @@ async function deliver_customer_line_notification(input: {
       customer_participant_uuid: input.customer_participant_uuid,
     })
 
-  const [line_user_id, customer_preferences] = await Promise.all([
+  const [line_user_id, customer_preferences, receiver_presence] = await Promise.all([
     customer_user_uuid
       ? load_line_provider_id_for_user(customer_user_uuid)
       : Promise.resolve(null),
     customer_user_uuid
       ? load_notification_preferences_for_user(customer_user_uuid)
       : Promise.resolve(null),
+    load_presence_by_user_uuid(customer_user_uuid),
   ])
   const has_line_identity = Boolean(line_user_id)
   const line_enabled = customer_preferences?.line_enabled === true
   const chat_notifications_enabled = customer_preferences?.kinds.chat === true
+  const presence_decision = decide_external_notification_skip({
+    presence: receiver_presence,
+  })
 
   const route = resolve_support_started_customer_line_route({
     customer_user_uuid,
@@ -495,8 +539,17 @@ async function deliver_customer_line_notification(input: {
     line_user_id_exists: has_line_identity,
     line_enabled,
     selected_channel: route.selected_method,
+    receiver_channel: presence_decision.receiver_channel,
     selected_method: route.selected_method,
-    skipped_reason: route.skipped_reason,
+    skipped_reason: customer_line_skip_reason({
+      customer_user_uuid,
+      route_skipped_reason: route.skipped_reason,
+      presence_decision,
+      has_line_identity,
+      line_user_id,
+      line_enabled,
+      chat_notifications_enabled,
+    }),
   }
 
   await emit_support_started_customer_line_debug(
@@ -508,7 +561,12 @@ async function deliver_customer_line_notification(input: {
     base_debug,
   )
 
-  if (!route.selected_method || !line_user_id || !customer_user_uuid) {
+  if (
+    presence_decision.skip_external ||
+    !route.selected_method ||
+    !line_user_id ||
+    !customer_user_uuid
+  ) {
     await emit_support_started_customer_line_debug(
       'customer_line_notification_skipped',
       base_debug,
@@ -563,7 +621,7 @@ async function deliver_customer_line_notification(input: {
         ...base_debug,
         selected_method: 'line',
         selected_channel: 'line',
-        skipped_reason: null,
+        skipped_reason: 'line_send_succeeded',
       },
     )
 
@@ -578,7 +636,7 @@ async function deliver_customer_line_notification(input: {
         ...base_debug,
         selected_method: 'line',
         selected_channel: 'line',
-        skipped_reason: 'line_push_failed',
+        skipped_reason: 'line_send_failed',
         error_code: 'line_push_failed',
         error_message: error instanceof Error ? error.message : String(error),
       },

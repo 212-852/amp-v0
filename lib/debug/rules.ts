@@ -247,7 +247,7 @@ export function resolve_debug_rule(input: {
     return {
       category: 'admin_chat',
       level: 'info',
-      channels: ['discord'],
+      channels: debug_control.debug_full ? ['discord'] : [],
     }
   }
 
@@ -394,10 +394,19 @@ export function resolve_debug_rule(input: {
     input.category === 'admin_chat' &&
     support_started_ok_debug.has(input.event)
   ) {
+    const keep_customer_line_debug =
+      input.event === 'customer_notification_rule_checked' ||
+      input.event === 'customer_line_notification_rule_checked' ||
+      input.event === 'customer_line_notification_send_started' ||
+      input.event === 'customer_line_notification_send_succeeded' ||
+      input.event === 'customer_line_notification_skipped'
+
     return {
       category: 'admin_chat',
       level: 'info',
-      channels: debug_control.support_started_debug_enabled
+      channels: keep_customer_line_debug ||
+        debug_control.debug_full ||
+        debug_control.support_started_debug_enabled
         ? ['discord']
         : [],
     }
@@ -624,6 +633,7 @@ export function resolve_debug_rule(input: {
   }
 
   const notification_settings_debug_events = new Set([
+    'presence_channel_detected',
     'notification_modal_opened',
     'notification_tab_changed',
     'push_toggle_clicked',
@@ -696,7 +706,12 @@ export function resolve_debug_rule(input: {
     return {
       category: 'pwa',
       level: is_failed ? 'error' : 'info',
-      channels: ['discord'],
+      channels:
+        is_failed ||
+        input.event === 'presence_channel_detected' ||
+        debug_control.debug_full
+          ? ['discord']
+          : [],
     }
   }
 
@@ -980,11 +995,17 @@ export function resolve_debug_rule(input: {
     const is_error =
       input.event === 'chat_realtime_subscribe_failed' ||
       input.event === 'chat_typing_broadcast_failed'
+    const keep_notify_debug =
+      input.event === 'admin_notification_rule_checked' ||
+      input.event === 'admin_notification_skipped_receiver_active_in_app'
 
     return {
       category: 'chat_realtime',
       level: is_error ? 'error' : 'warn',
-      channels: ['discord'],
+      channels:
+        is_error || keep_notify_debug || debug_control.debug_full
+          ? ['discord']
+          : [],
     }
   }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { get_session_user } from '@/lib/auth/route'
+import { debug_event } from '@/lib/debug'
 import { write_presence } from '@/lib/presence/action'
 import { resolve_presence_context } from '@/lib/presence/context'
 import { decide_presence_write } from '@/lib/presence/rules'
@@ -22,6 +23,39 @@ export async function POST(request: Request) {
   }
 
   const decision = decide_presence_write(context.context)
+
+  if (typeof body?.detection === 'object' && body.detection !== null) {
+    await debug_event({
+      category: 'pwa',
+      event: 'presence_channel_detected',
+      payload: {
+        detected_channel:
+          typeof (body.detection as { detected_channel?: unknown })
+            .detected_channel === 'string'
+            ? (body.detection as { detected_channel: string }).detected_channel
+            : context.context.channel,
+        is_liff: (body.detection as { is_liff?: unknown }).is_liff === true,
+        is_pwa: (body.detection as { is_pwa?: unknown }).is_pwa === true,
+        display_mode:
+          typeof (body.detection as { display_mode?: unknown }).display_mode ===
+          'string'
+            ? (body.detection as { display_mode: string }).display_mode
+            : null,
+        navigator_standalone:
+          (body.detection as { navigator_standalone?: unknown })
+            .navigator_standalone === true,
+        has_liff_object:
+          (body.detection as { has_liff_object?: unknown }).has_liff_object ===
+          true,
+        user_agent:
+          typeof (body.detection as { user_agent?: unknown }).user_agent ===
+          'string'
+            ? (body.detection as { user_agent: string }).user_agent
+            : null,
+      },
+    })
+  }
+
   const result = await write_presence(decision)
 
   if (!result.ok && decision.ok) {

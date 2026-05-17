@@ -1,14 +1,19 @@
 import 'server-only'
 
 export const debug_control = {
+  debug_full: false,
+  debug_presence: false,
+  debug_notify: true,
+  debug_line_notify: true,
+  debug_admin_chat: false,
   handoff_memo_debug_enabled: false,
   admin_management_debug_enabled: false,
   /** Emits concierge_room_* list traces to Discord (debug webhook). */
   admin_chat_room_list_debug_enabled: false,
   /** Reception room page + AdminChat + AdminChatTimeline lifecycle / realtime (Debug Cat). */
-  admin_chat_lifecycle_discord_enabled: true,
+  admin_chat_lifecycle_discord_enabled: false,
   /** Emits gated support_started lifecycle traces to Discord (debug webhook). */
-  support_started_debug_enabled: true,
+  support_started_debug_enabled: false,
   /** Emits admin_support_* presence traces to Discord (debug webhook). */
   admin_support_presence_debug_enabled: false,
   /**
