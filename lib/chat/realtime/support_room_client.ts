@@ -2,9 +2,9 @@
 
 import type { chat_action_realtime_payload } from './chat_actions'
 
-export type admin_presence_source_channel = 'web' | 'pwa' | 'liff'
+export type client_presence_source_channel = 'web' | 'pwa' | 'liff'
 
-export function resolve_admin_presence_source_channel(): admin_presence_source_channel {
+export function resolve_client_presence_source_channel(): client_presence_source_channel {
   if (typeof window === 'undefined') {
     return 'web'
   }
@@ -184,7 +184,7 @@ export async function call_leave_support_room(input: {
       room_uuid: input.room_uuid,
       participant_uuid: input.participant_uuid,
       action: input.action ?? 'admin_support_leave',
-      last_channel: resolve_admin_presence_source_channel(),
+      last_channel: resolve_client_presence_source_channel(),
       leave_reason: input.leave_reason,
       previous_active_room_uuid: input.room_uuid,
       next_active_room_uuid: null,

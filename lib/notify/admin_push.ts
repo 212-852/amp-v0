@@ -32,7 +32,7 @@ type admin_active_room_state = {
   active_room_uuid: string | null
   visibility_state: string | null
   last_seen_at: string | null
-  realtime_active: boolean
+  is_active: boolean
   has_presence_row: boolean
   participant_recent: boolean
   is_active_same_room: boolean
@@ -99,7 +99,7 @@ type admin_debug_payload = {
   active_same_room_reason?: string | null
   admin_participant_uuid?: string | null
   app_visibility_state?: string | null
-  realtime_active?: boolean | null
+  is_active?: boolean | null
   display_name?: string | null
   latest_message_preview?: string | null
   error_code?: string | null
@@ -170,7 +170,7 @@ function resolve_active_same_room_reason(input: {
   active_room_uuid: string | null
   visibility_state: string | null
   last_seen_at: string | null
-  realtime_active: boolean
+  is_active: boolean
   has_presence_row: boolean
   participant_recent: boolean
   now?: Date
@@ -206,7 +206,7 @@ function resolve_active_same_room_reason(input: {
   if (
     input.visibility_state === 'visible' &&
     recent &&
-    input.realtime_active
+    input.is_active
   ) {
     return {
       is_active_same_room: true,
@@ -228,7 +228,7 @@ function resolve_active_same_room_reason(input: {
     }
   }
 
-  if (!input.realtime_active) {
+  if (!input.is_active) {
     return {
       is_active_same_room: false,
       active_same_room_reason: 'realtime_inactive',
@@ -247,7 +247,7 @@ function empty_admin_active_room_state(): admin_active_room_state {
     active_room_uuid: null,
     visibility_state: null,
     last_seen_at: null,
-    realtime_active: false,
+    is_active: false,
     has_presence_row: false,
     participant_recent: false,
     is_active_same_room: false,
@@ -348,12 +348,11 @@ async function load_admin_active_room_state_by_user_uuid(
 
   const [result, participant_recent_by_user_uuid] = await Promise.all([
     supabase
-      .from('admin_presence')
+      .from('presence')
       .select(
-        'participant_uuid, room_uuid, admin_user_uuid, visibility_state, last_seen_at, realtime_active, updated_at',
+        'participant_uuid, active_room_uuid, user_uuid, visibility_state, app_visibility_state, last_seen_at, is_active, updated_at',
       )
-      .eq('room_uuid', clean_room_uuid)
-      .in('admin_user_uuid', user_uuids)
+      .in('user_uuid', user_uuids)
       .order('updated_at', { ascending: false }),
     load_participant_recent_by_user_uuid({
       room_uuid: clean_room_uuid,
@@ -368,8 +367,8 @@ async function load_admin_active_room_state_by_user_uuid(
       payload: {
         phase: admin_notification_phase,
         room_uuid: clean_room_uuid,
-        skipped_reason: 'admin_presence_load_failed',
-        error_code: result.error.code ?? 'admin_presence_load_failed',
+        skipped_reason: 'presence_load_failed',
+        error_code: result.error.code ?? 'presence_load_failed',
         error_message: result.error.message,
       },
     })
@@ -382,19 +381,19 @@ async function load_admin_active_room_state_by_user_uuid(
 
   for (const row of result.data ?? []) {
     const user_uuid = clean_uuid(
-      typeof row.admin_user_uuid === 'string' ? row.admin_user_uuid : null,
+      typeof row.user_uuid === 'string' ? row.user_uuid : null,
     )
     const participant_uuid = clean_uuid(
       typeof row.participant_uuid === 'string' ? row.participant_uuid : null,
     )
     const active_room_uuid = clean_uuid(
-      typeof row.room_uuid === 'string' ? row.room_uuid : null,
+      typeof row.active_room_uuid === 'string' ? row.active_room_uuid : null,
     )
     const visibility_state =
       typeof row.visibility_state === 'string' ? row.visibility_state : null
     const last_seen_at =
       typeof row.last_seen_at === 'string' ? row.last_seen_at : null
-    const realtime_active = row.realtime_active === true
+    const is_active = row.is_active === true
 
     if (!user_uuid || state_by_user_uuid.has(user_uuid)) {
       continue
@@ -405,7 +404,7 @@ async function load_admin_active_room_state_by_user_uuid(
       active_room_uuid,
       visibility_state,
       last_seen_at,
-      realtime_active,
+      is_active,
       has_presence_row: true,
       participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
       now,
@@ -416,7 +415,7 @@ async function load_admin_active_room_state_by_user_uuid(
       active_room_uuid,
       visibility_state,
       last_seen_at,
-      realtime_active,
+      is_active,
       has_presence_row: true,
       participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
       is_active_same_room: active_same_room.is_active_same_room,
@@ -434,7 +433,7 @@ async function load_admin_active_room_state_by_user_uuid(
       active_room_uuid: null,
       visibility_state: null,
       last_seen_at: null,
-      realtime_active: false,
+      is_active: false,
       has_presence_row: false,
       participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
       now,
@@ -445,7 +444,7 @@ async function load_admin_active_room_state_by_user_uuid(
       active_room_uuid: null,
       visibility_state: null,
       last_seen_at: null,
-      realtime_active: false,
+      is_active: false,
       has_presence_row: false,
       participant_recent: participant_recent_by_user_uuid.get(user_uuid) === true,
       is_active_same_room: active_same_room.is_active_same_room,
@@ -752,7 +751,7 @@ export async function route_admin_push_notification(
       visibility_state: active_state.visibility_state,
       last_seen_at: active_state.last_seen_at,
       active_same_room_reason: active_state.active_same_room_reason,
-      realtime_active: active_state.realtime_active,
+      is_active: active_state.is_active,
       display_name: line_copy.display_name,
       latest_message_preview: line_copy.latest_message_preview,
       app_visibility_state: active_state.visibility_state,

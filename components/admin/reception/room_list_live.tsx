@@ -29,7 +29,7 @@ import {
   type chat_presence_payload,
   type chat_typing_payload,
 } from '@/lib/chat/realtime/client'
-import { resolve_admin_presence_source_channel } from '@/lib/chat/realtime/support_room_client'
+import { resolve_client_presence_source_channel } from '@/lib/chat/realtime/support_room_client'
 import {
   chat_action_timeline_text,
   cleanup_chat_actions_realtime,
@@ -291,7 +291,7 @@ export default function AdminReceptionRoomListLive({
               body: JSON.stringify({
                 room_uuid,
                 action: 'admin_support_timeout_check',
-                last_channel: resolve_admin_presence_source_channel(),
+                last_channel: resolve_client_presence_source_channel(),
               }),
             }).catch(() => {})
           }
