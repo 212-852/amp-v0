@@ -486,6 +486,42 @@ async function archive_input_line_text_for_room(input: {
   })
 }
 
+function schedule_admin_notification_after_incoming_archive(input: {
+  room: chat_room
+  message_uuid: string | null | undefined
+  message: string
+  source_channel: chat_channel
+  support_mode: room_mode
+  should_auto_reply: boolean
+  auto_reply_skipped_reason: string | null
+}) {
+  if (input.support_mode !== 'concierge') {
+    return
+  }
+
+  const message_uuid = clean_uuid(input.message_uuid ?? null)
+
+  if (!message_uuid) {
+    return
+  }
+
+  after(() =>
+    notify({
+      event: 'admin_notification',
+      admin_event: 'new_user_message',
+      room_uuid: input.room.room_uuid,
+      message_uuid,
+      title: 'New user message',
+      message: input.message,
+      actor_user_uuid: clean_uuid(input.room.user_uuid),
+      source_channel: input.source_channel,
+      support_mode: input.support_mode,
+      should_auto_reply: input.should_auto_reply,
+      auto_reply_skipped_reason: input.auto_reply_skipped_reason,
+    }),
+  )
+}
+
 function build_line_mode_switch_bundle(input: {
   text: string
   mode: room_mode
@@ -763,12 +799,25 @@ export async function resolve_initial_chat(
 
         if (!eligibility.allowed) {
           if (live_gate.staff_controls_chat) {
-            await archive_input_line_text_for_room({
+            const archived_incoming = await archive_input_line_text_for_room({
               room: room_result.room,
               locale: input.locale,
               line_user_id: input.line_user_id,
               incoming_line_text,
             })
+
+            if (!archived_incoming?.is_duplicate) {
+              schedule_admin_notification_after_incoming_archive({
+                room: room_result.room,
+                message_uuid: archived_incoming?.message_uuid,
+                message: incoming_line_text.text,
+                source_channel: input.channel,
+                support_mode: mode_for_bot,
+                should_auto_reply: false,
+                auto_reply_skipped_reason: 'concierge_staff_active',
+              })
+            }
+
             const messages = await load_archived_messages(
               room_result.room.room_uuid,
             )
@@ -987,6 +1036,18 @@ export async function resolve_initial_chat(
           })
         }
 
+        schedule_admin_notification_after_incoming_archive({
+          room: room_result.room,
+          message_uuid: archived_incoming?.message_uuid,
+          message: input.incoming_line_text.text,
+          source_channel: input.channel,
+          support_mode: mode_for_bot,
+          should_auto_reply: !live_gate.staff_controls_chat,
+          auto_reply_skipped_reason: live_gate.staff_controls_chat
+            ? 'concierge_staff_active'
+            : null,
+        })
+
         if (!live_gate.staff_controls_chat) {
           const ack_bundles = [
             build_line_followup_ack_bundle({ locale: input.locale }),
@@ -1036,12 +1097,26 @@ export async function resolve_initial_chat(
         input.line_user_id &&
         input.incoming_line_text
       ) {
-        await archive_input_line_text_for_room({
+        const archived_incoming = await archive_input_line_text_for_room({
           room: room_result.room,
           locale: input.locale,
           line_user_id: input.line_user_id,
           incoming_line_text: input.incoming_line_text,
         })
+
+        if (!archived_incoming?.is_duplicate) {
+          schedule_admin_notification_after_incoming_archive({
+            room: room_result.room,
+            message_uuid: archived_incoming?.message_uuid,
+            message: input.incoming_line_text.text,
+            source_channel: input.channel,
+            support_mode: mode_for_bot,
+            should_auto_reply: !live_gate.staff_controls_chat,
+            auto_reply_skipped_reason: live_gate.staff_controls_chat
+              ? 'concierge_staff_active'
+              : null,
+          })
+        }
       }
 
       const messages = await load_archived_messages(
@@ -1075,6 +1150,19 @@ export async function resolve_initial_chat(
           line_user_id: input.line_user_id,
           incoming_line_text: input.incoming_line_text,
         })
+
+        if (!archived_incoming_staff?.is_duplicate) {
+          schedule_admin_notification_after_incoming_archive({
+            room: room_result.room,
+            message_uuid: archived_incoming_staff?.message_uuid,
+            message: input.incoming_line_text?.text ?? '',
+            source_channel: input.channel,
+            support_mode: mode_for_bot,
+            should_auto_reply: false,
+            auto_reply_skipped_reason: 'concierge_staff_active',
+          })
+        }
+
         const messages_after_staff = await load_archived_messages(
           room_result.room.room_uuid,
         )
@@ -1146,6 +1234,20 @@ export async function resolve_initial_chat(
           is_seeded: false,
           messages,
           locale: input.locale,
+        })
+      }
+
+      if (archived_incoming?.archived_message) {
+        schedule_admin_notification_after_incoming_archive({
+          room: room_result.room,
+          message_uuid: archived_incoming.message_uuid,
+          message: input.incoming_line_text?.text ?? '',
+          source_channel: input.channel,
+          support_mode: mode_for_bot,
+          should_auto_reply: !live_gate.staff_controls_chat,
+          auto_reply_skipped_reason: live_gate.staff_controls_chat
+            ? 'concierge_staff_active'
+            : null,
         })
       }
 
@@ -4380,25 +4482,17 @@ export async function handle_chat_message_request(
     },
   })
 
-  if (web_mode_for_bot === 'concierge') {
-    after(() =>
-      notify({
-        event: 'admin_notification',
-        admin_event: 'new_user_message',
-        room_uuid: chat_room.room_uuid,
-        message_uuid: archived_messages[0]?.archive_uuid ?? null,
-        title: 'New user message',
-        message: text_value,
-        actor_user_uuid: clean_uuid(session.user_uuid),
-        source_channel: chat_room.channel,
-        support_mode: web_mode_for_bot,
-        should_auto_reply: !web_gate.staff_controls_chat,
-        auto_reply_skipped_reason: web_gate.staff_controls_chat
-          ? 'concierge_staff_active'
-          : null,
-      }),
-    )
-  }
+  schedule_admin_notification_after_incoming_archive({
+    room: chat_room,
+    message_uuid: archived_messages[0]?.archive_uuid ?? null,
+    message: text_value,
+    source_channel: chat_room.channel,
+    support_mode: web_mode_for_bot,
+    should_auto_reply: !web_gate.staff_controls_chat,
+    auto_reply_skipped_reason: web_gate.staff_controls_chat
+      ? 'concierge_staff_active'
+      : null,
+  })
 
   try {
     await mark_participant_last_channel({
