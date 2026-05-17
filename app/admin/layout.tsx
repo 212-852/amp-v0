@@ -1,8 +1,7 @@
 import AdminHeader from '@/components/admin/header'
-import AdminAppPresence from '@/components/admin/presence'
 import AdminShell from '@/components/layout/admin/shell'
+import PresenceClient from '@/components/presence/presence_client'
 import { read_admin_display_name } from '@/lib/admin/management/action'
-import { load_admin_app_presence_participant_uuid } from '@/lib/admin/presence'
 import { require_admin_route_access } from '@/lib/auth/route'
 
 export default async function AdminLayout({
@@ -13,10 +12,6 @@ export default async function AdminLayout({
   const access = await require_admin_route_access('/admin')
   const display_name =
     (await read_admin_display_name(access.user_uuid)) ?? access.display_name
-  const presence_participant_uuid =
-    await load_admin_app_presence_participant_uuid({
-      admin_user_uuid: access.user_uuid,
-    })
 
   return (
     <AdminShell
@@ -25,7 +20,7 @@ export default async function AdminLayout({
       role={access.role}
       tier={access.tier}
     >
-      <AdminAppPresence participant_uuid={presence_participant_uuid} />
+      <PresenceClient />
       <div className="fixed left-0 right-0 top-0 z-[120] w-screen bg-white">
         <div className="mx-auto w-full max-w-[480px]">
           <AdminHeader

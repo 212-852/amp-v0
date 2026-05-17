@@ -1,24 +1,18 @@
 import { NextResponse } from 'next/server'
 
-import { load_admin_app_presence_participant_uuid } from '@/lib/admin/presence'
-import { get_session_user } from '@/lib/auth/route'
 import {
   mark_admin_support_heartbeat,
   mark_admin_support_idle_notice,
   mark_admin_support_join,
   mark_admin_support_recovered_notice,
   expire_admin_support_presence,
-  mark_app_presence,
   mark_room_entered,
   mark_room_left,
   mark_typing_started,
   mark_typing_stopped,
 } from '@/lib/chat/presence/action'
 import { leave_support_room } from '@/lib/support_presence/action'
-import {
-  resolve_app_presence_mutation_context,
-  resolve_presence_mutation_context,
-} from '@/lib/chat/presence/context'
+import { resolve_presence_mutation_context } from '@/lib/chat/presence/context'
 
 type presence_request_body = {
   room_uuid?: unknown
@@ -76,67 +70,6 @@ export async function POST(request: Request) {
 
       return NextResponse.json(
         { ok: false, error: 'presence_timeout_check_failed' },
-        { status: 500 },
-      )
-    }
-  }
-
-  if (
-    raw_action === 'admin_app_visible' ||
-    raw_action === 'admin_app_hidden'
-  ) {
-    let context = resolve_app_presence_mutation_context({
-      participant_uuid: body?.participant_uuid,
-      active_room_uuid: body?.active_room_uuid,
-      last_channel: body?.last_channel ?? 'web',
-      active_area: body?.active_area,
-    })
-
-    if (!context.ok) {
-      const session = await get_session_user()
-      const participant_uuid = session.user_uuid
-        ? await load_admin_app_presence_participant_uuid({
-            admin_user_uuid: session.user_uuid,
-          })
-        : null
-
-      context = resolve_app_presence_mutation_context({
-        participant_uuid,
-        active_room_uuid: body?.active_room_uuid,
-        last_channel: body?.last_channel ?? 'web',
-        active_area: body?.active_area,
-      })
-
-      if (!context.ok) {
-        return NextResponse.json({
-          ok: true,
-          skipped: true,
-          skipped_reason: 'admin_presence_participant_missing',
-        })
-      }
-    }
-
-    try {
-      await mark_app_presence({
-        participant_uuid: context.participant_uuid,
-        active_room_uuid: context.active_room_uuid,
-        active_area: context.active_area ?? 'admin_app',
-        last_channel: context.last_channel ?? 'web',
-        visibility_state:
-          raw_action === 'admin_app_visible' ? 'visible' : 'hidden',
-      })
-
-      return NextResponse.json({ ok: true })
-    } catch (error) {
-      console.error('[chat_presence] app_presence_update_failed', {
-        participant_uuid: context.participant_uuid,
-        active_room_uuid: context.active_room_uuid,
-        action: raw_action,
-        error: error instanceof Error ? error.message : String(error),
-      })
-
-      return NextResponse.json(
-        { ok: false, error: 'presence_update_failed' },
         { status: 500 },
       )
     }

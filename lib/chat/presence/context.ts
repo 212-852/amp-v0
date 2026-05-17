@@ -20,19 +20,6 @@ export type presence_mutation_context =
       error: 'invalid_presence_context'
     }
 
-export type app_presence_mutation_context =
-  | {
-      ok: true
-      participant_uuid: string
-      active_room_uuid: string | null
-      last_channel: participant_surface_channel | null
-      active_area: string | null
-    }
-  | {
-      ok: false
-      error: 'invalid_presence_context'
-    }
-
 export function normalize_presence_active_area(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null
@@ -67,30 +54,6 @@ export function resolve_presence_mutation_context(input: {
     ok: true,
     room_uuid,
     participant_uuid,
-    last_channel: normalize_participant_surface_channel(input.last_channel),
-    active_area: normalize_presence_active_area(input.active_area),
-  }
-}
-
-export function resolve_app_presence_mutation_context(input: {
-  participant_uuid?: unknown
-  active_room_uuid?: unknown
-  last_channel?: unknown
-  active_area?: unknown
-}): app_presence_mutation_context {
-  const participant_uuid = clean_uuid(input.participant_uuid)
-
-  if (!participant_uuid) {
-    return {
-      ok: false,
-      error: 'invalid_presence_context',
-    }
-  }
-
-  return {
-    ok: true,
-    participant_uuid,
-    active_room_uuid: clean_uuid(input.active_room_uuid),
     last_channel: normalize_participant_surface_channel(input.last_channel),
     active_area: normalize_presence_active_area(input.active_area),
   }

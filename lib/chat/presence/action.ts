@@ -336,25 +336,6 @@ async function upsert_presence_state(input: {
   }
 }
 
-export async function mark_app_presence(input: {
-  participant_uuid: string
-  active_room_uuid?: string | null
-  active_area?: string | null
-  visibility_state: 'visible' | 'hidden'
-  last_channel?: participant_surface_channel | null
-}) {
-  await upsert_presence_state({
-    room_uuid: input.active_room_uuid ?? null,
-    participant_uuid: input.participant_uuid,
-    visibility_state: input.visibility_state,
-    last_channel: input.last_channel ?? null,
-    active_area:
-      input.visibility_state === 'visible'
-        ? input.active_area ?? 'admin_app'
-        : null,
-  })
-}
-
 export async function mark_room_entered(input: {
   room_uuid: string
   participant_uuid: string
