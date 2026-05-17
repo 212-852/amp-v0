@@ -72,7 +72,7 @@ type personal_delivery_outcome = {
 
 type admin_notification_route_result = {
   outcome: 'skipped' | 'delivered' | 'failed'
-  transport: 'toast' | 'push' | 'discord_action_webhook' | 'none'
+  transport: 'toast' | 'push' | 'line' | 'discord_action_webhook' | 'none'
   deliveries: notify_delivery_result[]
   error_code?: string | null
   error_message?: string | null

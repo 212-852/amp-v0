@@ -5,12 +5,15 @@ import { supabase } from '@/lib/db/supabase'
 import { clean_uuid } from '@/lib/db/uuid/payload'
 import { debug_event } from '@/lib/debug'
 import {
-  boolean_value,
   default_notification_preferences,
   normalize_notification_preferences,
   notification_preferences_to_json,
   type notification_preferences,
 } from './rules'
+import {
+  enforce_notification_method_selection,
+  type notification_method_trigger,
+} from './settings_core'
 
 function error_field(error: unknown, key: string): string | null {
   if (!error || typeof error !== 'object') {
@@ -61,16 +64,24 @@ export async function load_notification_settings() {
 
   const row = settings.data as { notification_preferences?: unknown } | null
 
+  const normalized = normalize_notification_preferences(
+    row?.notification_preferences ?? null,
+  )
+  const adjusted = enforce_notification_method_selection({
+    previous: default_notification_preferences,
+    next: normalized,
+    trigger_method: null,
+  })
+
   return {
     ok: true as const,
-    preferences: normalize_notification_preferences(
-      row?.notification_preferences ?? null,
-    ),
+    preferences: adjusted.preferences,
   }
 }
 
 export async function save_notification_settings(input: {
   preferences: Partial<notification_preferences> | null | undefined
+  trigger_method?: notification_method_trigger
   request_body?: unknown
 }) {
   const session = await get_session_user()
@@ -158,10 +169,6 @@ export async function save_notification_settings(input: {
   const source = current_row?.notification_preferences ?? null
   const previous = normalize_notification_preferences(source)
   const incoming = input.preferences ?? {}
-  const incoming_kinds =
-    incoming.kinds && typeof incoming.kinds === 'object'
-      ? (incoming.kinds as Record<string, unknown>)
-      : {}
   const incoming_record = incoming as Record<string, unknown>
 
   const merged_record: Record<string, unknown> = {
@@ -179,36 +186,47 @@ export async function save_notification_settings(input: {
       incoming.line_enabled !== undefined
         ? incoming.line_enabled
         : previous.line_enabled,
-    kinds: {
-      chat:
-        incoming_record.new_chat !== undefined ||
-        incoming_kinds.chat !== undefined
-          ? boolean_value(
-              incoming_record.new_chat ?? incoming_kinds.chat,
-              previous.kinds.chat,
-            )
-          : previous.kinds.chat,
-      reservation:
-        incoming_record.reservation !== undefined ||
-        incoming_kinds.reservation !== undefined
-          ? boolean_value(
-              incoming_record.reservation ?? incoming_kinds.reservation,
-              previous.kinds.reservation,
-            )
-          : previous.kinds.reservation,
-      announcement:
-        incoming_record.announcement !== undefined ||
-        incoming_kinds.announcement !== undefined
-          ? boolean_value(
-              incoming_record.announcement ?? incoming_kinds.announcement,
-              previous.kinds.announcement,
-            )
-          : previous.kinds.announcement,
-    },
   }
 
-  const preferences = normalize_notification_preferences(merged_record)
+  const requested_preferences = normalize_notification_preferences(merged_record)
+  const method_adjustment = enforce_notification_method_selection({
+    previous,
+    next: requested_preferences,
+    trigger_method: input.trigger_method ?? null,
+  })
+  const preferences = method_adjustment.preferences
   const preferences_json = notification_preferences_to_json(preferences)
+
+  if (method_adjustment.invalid_both_off_prevented) {
+    await debug_notification_setting(
+      'notification_method_invalid_both_off_prevented',
+      {
+        user_uuid,
+        request_body: input.request_body ?? null,
+        previous_pwa_enabled: method_adjustment.previous_pwa_enabled,
+        previous_line_enabled: method_adjustment.previous_line_enabled,
+        us_pwa_enabled: method_adjustment.previous_pwa_enabled,
+        next_pwa_enabled: method_adjustment.next_pwa_enabled,
+        next_line_enabled: method_adjustment.next_line_enabled,
+        trigger_method: method_adjustment.trigger_method,
+        phase: 'notification_settings_method_guard',
+      },
+    )
+  }
+
+  if (method_adjustment.auto_adjusted) {
+    await debug_notification_setting('notification_method_auto_adjust_started', {
+      user_uuid,
+      request_body: input.request_body ?? null,
+      previous_pwa_enabled: method_adjustment.previous_pwa_enabled,
+      previous_line_enabled: method_adjustment.previous_line_enabled,
+      us_pwa_enabled: method_adjustment.previous_pwa_enabled,
+      next_pwa_enabled: method_adjustment.next_pwa_enabled,
+      next_line_enabled: method_adjustment.next_line_enabled,
+      trigger_method: method_adjustment.trigger_method,
+      phase: 'notification_settings_method_guard',
+    })
+  }
 
   await debug_notification_setting('notification_setting_request', {
     user_uuid,
@@ -293,8 +311,26 @@ export async function save_notification_settings(input: {
     phase: 'upsert_notification_settings',
   })
 
+  if (method_adjustment.auto_adjusted) {
+    await debug_notification_setting(
+      'notification_method_auto_adjust_completed',
+      {
+        user_uuid,
+        request_body: input.request_body ?? null,
+        previous_pwa_enabled: method_adjustment.previous_pwa_enabled,
+        previous_line_enabled: method_adjustment.previous_line_enabled,
+        us_pwa_enabled: method_adjustment.previous_pwa_enabled,
+        next_pwa_enabled: method_adjustment.next_pwa_enabled,
+        next_line_enabled: method_adjustment.next_line_enabled,
+        trigger_method: method_adjustment.trigger_method,
+        phase: 'notification_settings_method_guard',
+      },
+    )
+  }
+
   return {
     ok: true as const,
     preferences,
+    auto_adjusted: method_adjustment.auto_adjusted,
   }
 }

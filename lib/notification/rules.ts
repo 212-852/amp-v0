@@ -92,6 +92,15 @@ export function normalize_notification_preferences(
   )
   const declared = parse_primary_channel(source.primary_channel)
 
+  if (pwa && line) {
+    return {
+      primary_channel: 'push',
+      pwa_push_enabled: true,
+      line_enabled: true,
+      kinds,
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(source, 'primary_channel')) {
     if (declared === 'push' && pwa) {
       return {
@@ -103,6 +112,24 @@ export function normalize_notification_preferences(
     }
 
     if (declared === 'line' && line) {
+      return {
+        primary_channel: 'line',
+        pwa_push_enabled: false,
+        line_enabled: true,
+        kinds,
+      }
+    }
+
+    if (pwa) {
+      return {
+        primary_channel: 'push',
+        pwa_push_enabled: true,
+        line_enabled: false,
+        kinds,
+      }
+    }
+
+    if (line) {
       return {
         primary_channel: 'line',
         pwa_push_enabled: false,

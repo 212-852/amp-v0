@@ -26,6 +26,9 @@ type pwa_debug_body = {
   has_line_identity?: unknown
   has_beforeinstallprompt?: unknown
   is_standalone?: unknown
+  display_mode?: unknown
+  navigator_standalone?: unknown
+  toggle_disabled_reason?: unknown
   manifest_available?: unknown
   service_worker_registered?: unknown
   user_agent?: unknown
@@ -132,6 +135,12 @@ export async function POST(request: Request) {
         typeof body?.is_standalone === 'boolean'
           ? body.is_standalone
           : null,
+      display_mode: string_or_null(body?.display_mode),
+      navigator_standalone:
+        typeof body?.navigator_standalone === 'boolean'
+          ? body.navigator_standalone
+          : null,
+      toggle_disabled_reason: string_or_null(body?.toggle_disabled_reason),
       manifest_available:
         typeof body?.manifest_available === 'boolean'
           ? body.manifest_available

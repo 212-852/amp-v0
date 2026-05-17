@@ -6,17 +6,22 @@ import { X } from 'lucide-react'
 import type { locale_key } from '@/lib/locale/action'
 import OverlayRoot from '@/components/overlay/root'
 import Pwa_install_modal_body from '@/components/pwa/install_modal_body'
-import { post_pwa_debug, register_push_subscription } from '@/lib/pwa/client'
+import {
+  post_pwa_debug,
+  register_push_subscription,
+  resolve_pwa_install_state,
+} from '@/lib/pwa/client'
+import {
+  enforce_notification_method_selection,
+  type notification_method_trigger,
+} from '@/lib/notification/settings_core'
 
-type notification_kind_key = 'chat' | 'reservation' | 'announcement'
-type notification_tab = 'notices' | 'settings'
 type pwa_debug_input = Parameters<typeof post_pwa_debug>[0]
 
 type notification_preferences = {
   primary_channel: 'push' | 'line' | 'none'
   pwa_push_enabled: boolean
   line_enabled: boolean
-  kinds: Record<notification_kind_key, boolean>
 }
 
 type notification_settings_props = {
@@ -35,11 +40,6 @@ const default_preferences: notification_preferences = {
   primary_channel: 'line',
   pwa_push_enabled: false,
   line_enabled: true,
-  kinds: {
-    chat: true,
-    reservation: true,
-    announcement: true,
-  },
 }
 
 function apply_push_channel_on(
@@ -47,9 +47,9 @@ function apply_push_channel_on(
 ): notification_preferences {
   return {
     ...prev,
-    primary_channel: 'push',
     pwa_push_enabled: true,
-    line_enabled: false,
+    primary_channel: prev.line_enabled ? 'push' : 'push',
+    line_enabled: prev.line_enabled,
   }
 }
 
@@ -58,10 +58,24 @@ function apply_push_channel_off(
 ): notification_preferences {
   return {
     ...prev,
-    primary_channel: 'none',
     pwa_push_enabled: false,
-    line_enabled: false,
+    primary_channel: prev.line_enabled ? 'line' : 'none',
+    line_enabled: prev.line_enabled,
   }
+}
+
+function resolve_next_preferences(input: {
+  previous: notification_preferences
+  next: notification_preferences
+  trigger_method: notification_method_trigger
+  pwa_available?: boolean | null
+}) {
+  return enforce_notification_method_selection({
+    previous: input.previous,
+    next: input.next,
+    trigger_method: input.trigger_method,
+    pwa_available: input.pwa_available,
+  })
 }
 
 function apply_line_channel_on(
@@ -69,9 +83,9 @@ function apply_line_channel_on(
 ): notification_preferences {
   return {
     ...prev,
-    primary_channel: 'line',
     line_enabled: true,
-    pwa_push_enabled: false,
+    primary_channel: prev.pwa_push_enabled ? 'push' : 'line',
+    pwa_push_enabled: prev.pwa_push_enabled,
   }
 }
 
@@ -80,9 +94,9 @@ function apply_line_channel_off(
 ): notification_preferences {
   return {
     ...prev,
-    primary_channel: 'none',
     line_enabled: false,
-    pwa_push_enabled: false,
+    primary_channel: prev.pwa_push_enabled ? 'push' : 'none',
+    pwa_push_enabled: prev.pwa_push_enabled,
   }
 }
 
@@ -92,20 +106,10 @@ const content = {
     en: 'Notifications',
     es: 'Avisos',
   },
-  notices_tab: {
-    ja: '\u304A\u77E5\u3089\u305B\u4E00\u89A7',
-    en: 'Notices',
-    es: 'Avisos',
-  },
   settings_tab: {
     ja: '\u901A\u77E5\u8A2D\u5B9A',
     en: 'Settings',
     es: 'Ajustes',
-  },
-  empty_notices: {
-    ja: '\u304A\u77E5\u3089\u305B\u306F\u3042\u308A\u307E\u305B\u3093',
-    en: 'No notices',
-    es: 'No hay avisos',
   },
   pwa_push: {
     ja: 'PWA\u30D7\u30C3\u30B7\u30E5\u901A\u77E5',
@@ -121,26 +125,6 @@ const content = {
     ja: '\u901A\u77E5\u65B9\u6CD5',
     en: 'Notification method',
     es: 'Metodo de aviso',
-  },
-  content_heading: {
-    ja: '\u901A\u77E5\u3059\u308B\u5185\u5BB9',
-    en: 'Notification content',
-    es: 'Contenido de aviso',
-  },
-  chat: {
-    ja: '\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8',
-    en: 'New chat',
-    es: 'Nuevo chat',
-  },
-  reservation: {
-    ja: '\u4E88\u7D04\u901A\u77E5',
-    en: 'Reservation notifications',
-    es: 'Avisos de reservas',
-  },
-  announcement: {
-    ja: '\u904B\u55B6\u304B\u3089\u306E\u304A\u77E5\u3089\u305B',
-    en: 'Announcements',
-    es: 'Avisos del equipo',
   },
   standalone_required: {
     ja: 'PWA\u30D7\u30C3\u30B7\u30E5\u901A\u77E5\u306F\u30DB\u30FC\u30E0\u753B\u9762\u306E\u30A2\u30D7\u30EA\u304B\u3089\u6709\u52B9\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002',
@@ -167,23 +151,23 @@ const content = {
     en: 'Could not save the setting.',
     es: 'No se pudo guardar el ajuste.',
   },
-}
-
-function is_standalone_display() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  )
+  auto_adjusted: {
+    ja: '\u901A\u77E5\u65B9\u6CD5\u3092\u81EA\u52D5\u8ABF\u6574\u3057\u307E\u3057\u305F',
+    en: 'Notification methods were adjusted automatically',
+    es: 'Los metodos de notificacion se ajustaron automaticamente',
+  },
+  pwa_install_required: {
+    ja: 'PWA\u30A2\u30D7\u30EA\u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3059\u308B\u3068\u5229\u7528\u3067\u304D\u307E\u3059',
+    en: 'Available after installing the PWA app',
+    es: 'Disponible despues de instalar la aplicacion PWA',
+  },
 }
 
 function Toggle(props: {
   checked: boolean
   disabled?: boolean
   label: string
+  helper_text?: string | null
   is_last?: boolean
   on_change: (checked: boolean) => void
 }) {
@@ -193,12 +177,19 @@ function Toggle(props: {
       disabled={props.disabled}
       onClick={() => props.on_change(!props.checked)}
       className={[
-        'flex w-full items-center justify-between gap-4 px-4 py-3 text-left disabled:opacity-60',
+        'flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-opacity disabled:cursor-not-allowed disabled:opacity-50',
         props.is_last ? '' : 'border-b border-[#f0e3d8]',
       ].join(' ')}
     >
-      <span className="text-[14px] font-medium leading-[1.45] text-[#2a1d18]">
-        {props.label}
+      <span>
+        <span className="block text-[14px] font-medium leading-[1.45] text-[#2a1d18]">
+          {props.label}
+        </span>
+        {props.helper_text ? (
+          <span className="mt-1 block text-[12px] font-medium leading-[1.45] text-[#9a877a]">
+            {props.helper_text}
+          </span>
+        ) : null}
       </span>
       <span
         className={[
@@ -219,14 +210,15 @@ function Toggle(props: {
 
 export default function NotificationSettings(props: notification_settings_props) {
   const settings_only = props.settings_only === true
-  const [active_tab, set_active_tab] = useState<notification_tab>(
-    settings_only ? 'settings' : 'notices',
-  )
   const [preferences, set_preferences] =
     useState<notification_preferences>(default_preferences)
   const [is_saving, set_is_saving] = useState(false)
   const [message, set_message] = useState<string | null>(null)
   const [install_guide_open, set_install_guide_open] = useState(false)
+  const [pwa_install_state, set_pwa_install_state] = useState(() =>
+    resolve_pwa_install_state(),
+  )
+  const pwa_toggle_disabled = !pwa_install_state.installed
 
   const debug_payload = useCallback(
     (
@@ -238,7 +230,9 @@ export default function NotificationSettings(props: notification_settings_props)
       role: props.role,
       tier: props.tier,
       source_channel: props.source_channel ?? 'pwa',
-      is_standalone: is_standalone_display(),
+      is_standalone: resolve_pwa_install_state().installed,
+      display_mode: resolve_pwa_install_state().display_mode,
+      navigator_standalone: resolve_pwa_install_state().navigator_standalone,
       phase: 'notification_settings',
       ...extra,
     }),
@@ -252,8 +246,70 @@ export default function NotificationSettings(props: notification_settings_props)
     ],
   )
 
+  useEffect(() => {
+    const state = resolve_pwa_install_state()
+    const toggle_disabled_reason = state.installed ? null : 'pwa_not_installed'
+
+    set_pwa_install_state(state)
+
+    post_pwa_debug({
+      event: 'pwa_install_state_checked',
+      ...debug_payload({
+        is_standalone: state.installed,
+        display_mode: state.display_mode,
+        navigator_standalone: state.navigator_standalone,
+        toggle_disabled_reason,
+        phase: 'notification_settings',
+      }),
+    })
+
+    post_pwa_debug({
+      event: state.installed
+        ? 'pwa_notification_toggle_nstalled'
+        : 'pwa_notification_toggle_disabled',
+      ...debug_payload({
+        is_standalone: state.installed,
+        display_mode: state.display_mode,
+        navigator_standalone: state.navigator_standalone,
+        toggle_disabled_reason,
+        phase: 'notification_settings',
+      }),
+    })
+
+    function handle_app_installed() {
+      const next_state = resolve_pwa_install_state()
+
+      set_pwa_install_state(next_state)
+      post_pwa_debug({
+        event: 'pwa_install_state_checked',
+        ...debug_payload({
+          is_standalone: next_state.installed,
+          display_mode: next_state.display_mode,
+          navigator_standalone: next_state.navigator_standalone,
+          toggle_disabled_reason: next_state.installed
+            ? null
+            : 'pwa_not_installed',
+          phase: 'notification_settings_appinstalled',
+        }),
+      })
+    }
+
+    window.addEventListener('appinstalled', handle_app_installed)
+
+    return () => {
+      window.removeEventListener('appinstalled', handle_app_installed)
+    }
+  }, [debug_payload])
+
   const save_preferences = useCallback(
-    async (next_preferences: notification_preferences) => {
+    async (
+      next_preferences: notification_preferences,
+      trigger_method: notification_method_trigger,
+      auto_adjusted: boolean,
+    ) => {
+      const previous_preferences = preferences
+
+      set_preferences(next_preferences)
       set_is_saving(true)
 
       if (next_preferences.primary_channel !== preferences.primary_channel) {
@@ -301,11 +357,15 @@ export default function NotificationSettings(props: notification_settings_props)
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ preferences: next_preferences }),
+        body: JSON.stringify({
+          preferences: next_preferences,
+          trigger_method,
+        }),
       })
 
       if (!response.ok) {
         set_is_saving(false)
+        set_preferences(previous_preferences)
         post_pwa_debug({
           event: 'notification_setting_save_failed',
           ...debug_payload({
@@ -331,11 +391,19 @@ export default function NotificationSettings(props: notification_settings_props)
 
       const payload = (await response.json().catch(() => null)) as {
         preferences?: notification_preferences
+        auto_adjusted?: boolean
       } | null
       const saved_preferences = payload?.preferences ?? next_preferences
 
-      set_preferences(saved_preferences)
+      set_preferences({
+        primary_channel: saved_preferences.primary_channel,
+        pwa_push_enabled: saved_preferences.pwa_push_enabled,
+        line_enabled: saved_preferences.line_enabled,
+      })
       set_is_saving(false)
+      if (auto_adjusted || payload?.auto_adjusted === true) {
+        set_message(content.auto_adjusted[props.locale])
+      }
       post_pwa_debug({
         event: 'notification_setting_save_succeeded',
         ...debug_payload({
@@ -368,7 +436,7 @@ export default function NotificationSettings(props: notification_settings_props)
         })
       }
     },
-    [debug_payload, preferences, settings_only],
+    [debug_payload, preferences, props.locale, settings_only],
   )
 
   useEffect(() => {
@@ -394,7 +462,11 @@ export default function NotificationSettings(props: notification_settings_props)
       .then((response) => (response.ok ? response.json() : null))
       .then((payload: { preferences?: notification_preferences } | null) => {
         if (!cancelled && payload?.preferences) {
-          set_preferences(payload.preferences)
+          set_preferences({
+            primary_channel: payload.preferences.primary_channel,
+            pwa_push_enabled: payload.preferences.pwa_push_enabled,
+            line_enabled: payload.preferences.line_enabled,
+          })
         }
       })
       .catch(() => undefined)
@@ -403,16 +475,6 @@ export default function NotificationSettings(props: notification_settings_props)
       cancelled = true
     }
   }, [])
-
-  function change_tab(next_tab: notification_tab) {
-    set_active_tab(next_tab)
-    post_pwa_debug({
-      event: 'notification_tab_changed',
-      ...debug_payload({
-        phase: next_tab,
-      }),
-    })
-  }
 
   async function set_push_enabled(enabled: boolean) {
     set_message(null)
@@ -427,6 +489,13 @@ export default function NotificationSettings(props: notification_settings_props)
     })
 
     if (!enabled) {
+      const adjustment = resolve_next_preferences({
+        previous: preferences,
+        next: apply_push_channel_off(preferences),
+        trigger_method: 'pwa',
+        pwa_available: pwa_install_state.installed,
+      })
+
       try {
         const registration =
           'serviceWorker' in navigator ? await navigator.serviceWorker.ready : null
@@ -443,15 +512,38 @@ export default function NotificationSettings(props: notification_settings_props)
           await subscription.unsubscribe()
         }
 
-        await save_preferences(apply_push_channel_off(preferences))
+        await save_preferences(
+          adjustment.preferences,
+          'pwa',
+          adjustment.auto_adjusted,
+        )
       } catch {
-        await save_preferences(apply_push_channel_off(preferences))
+        await save_preferences(
+          adjustment.preferences,
+          'pwa',
+          adjustment.auto_adjusted,
+        )
       }
 
       return
     }
 
-    const standalone = is_standalone_display()
+    if (pwa_toggle_disabled) {
+      post_pwa_debug({
+        event: 'pwa_notification_toggle_disabled',
+        ...debug_payload({
+          enabled,
+          is_standalone: pwa_install_state.installed,
+          display_mode: pwa_install_state.display_mode,
+          navigator_standalone: pwa_install_state.navigator_standalone,
+          toggle_disabled_reason: 'pwa_not_installed',
+          phase: 'notification_settings',
+        }),
+      })
+      return
+    }
+
+    const standalone = resolve_pwa_install_state().installed
 
     post_pwa_debug({
       event: 'push_standalone_checked',
@@ -510,7 +602,18 @@ export default function NotificationSettings(props: notification_settings_props)
     }
 
     try {
-      await save_preferences(apply_push_channel_on(preferences))
+      const adjustment = resolve_next_preferences({
+        previous: preferences,
+        next: apply_push_channel_on(preferences),
+        trigger_method: 'pwa',
+        pwa_available: pwa_install_state.installed,
+      })
+
+      await save_preferences(
+        adjustment.preferences,
+        'pwa',
+        adjustment.auto_adjusted,
+      )
     } catch {
       set_message(content.save_failed[props.locale])
     }
@@ -518,41 +621,25 @@ export default function NotificationSettings(props: notification_settings_props)
 
   async function set_line_enabled(enabled: boolean) {
     set_message(null)
-    const next = enabled
-      ? apply_line_channel_on(preferences)
-      : apply_line_channel_off(preferences)
+    const adjustment = resolve_next_preferences({
+      previous: preferences,
+      next: enabled
+        ? apply_line_channel_on(preferences)
+        : apply_line_channel_off(preferences),
+      trigger_method: 'line',
+      pwa_available: pwa_install_state.installed,
+    })
 
     try {
-      await save_preferences(next)
+      await save_preferences(
+        adjustment.preferences,
+        'line',
+        adjustment.auto_adjusted,
+      )
     } catch {
       set_message(content.save_failed[props.locale])
     }
   }
-
-  async function set_kind_enabled(
-    key: notification_kind_key,
-    enabled: boolean,
-  ) {
-    try {
-      await save_preferences({
-        ...preferences,
-        kinds: {
-          ...preferences.kinds,
-          [key]: enabled,
-        },
-      })
-    } catch {
-      set_message(content.save_failed[props.locale])
-    }
-  }
-
-  const tab_class = (tab: notification_tab) =>
-    [
-      'h-10 flex-1 rounded-[8px] text-[13px] font-semibold transition-colors',
-      active_tab === tab
-        ? 'bg-[#2a1d18] text-white'
-        : 'bg-white text-[#6d5c52]',
-    ].join(' ')
 
   return (
     <>
@@ -574,86 +661,38 @@ export default function NotificationSettings(props: notification_settings_props)
           </button>
         </div>
 
-      {settings_only ? null : (
-        <div className="mt-5 flex rounded-[10px] bg-[#f2e7df] p-1">
-          <button
-            type="button"
-            className={tab_class('notices')}
-            onClick={() => change_tab('notices')}
-          >
-            {content.notices_tab[props.locale]}
-          </button>
-          <button
-            type="button"
-            className={tab_class('settings')}
-            onClick={() => change_tab('settings')}
-          >
-            {content.settings_tab[props.locale]}
-          </button>
-        </div>
-      )}
+        <section className="mt-5 rounded-[8px] border border-[#eadbd0] bg-white">
+          <h3 className="px-4 pb-1 pt-3 text-[13px] font-semibold leading-[1.4] text-[#6d5c52]">
+            {content.method_heading[props.locale]}
+          </h3>
 
-      {settings_only || active_tab === 'settings' ? (
-        <>
-          <div className="mt-5 space-y-5">
-            <section className="rounded-[8px] border border-[#eadbd0] bg-white">
-              <h3 className="px-4 pb-1 pt-3 text-[13px] font-semibold leading-[1.4] text-[#6d5c52]">
-                {content.method_heading[props.locale]}
-              </h3>
-
-              <div>
-                <Toggle
-                  label={content.pwa_push[props.locale]}
-                  checked={preferences.pwa_push_enabled}
-                  disabled={is_saving}
-                  on_change={set_push_enabled}
-                />
-                <Toggle
-                  label={content.line[props.locale]}
-                  checked={preferences.line_enabled}
-                  disabled={is_saving}
-                  is_last
-                  on_change={set_line_enabled}
-                />
-              </div>
-            </section>
-
-            <section className="rounded-[8px] border border-[#eadbd0] bg-white">
-              <h3 className="px-4 pb-1 pt-3 text-[13px] font-semibold leading-[1.4] text-[#6d5c52]">
-                {content.content_heading[props.locale]}
-              </h3>
-
-              <div>
-                <Toggle
-                  label={content.chat[props.locale]}
-                  checked={preferences.kinds.chat}
-                  disabled={is_saving}
-                  on_change={(enabled) => set_kind_enabled('chat', enabled)}
-                />
-                <Toggle
-                  label={content.reservation[props.locale]}
-                  checked={preferences.kinds.reservation}
-                  disabled={is_saving}
-                  on_change={(enabled) => set_kind_enabled('reservation', enabled)}
-                />
-                <Toggle
-                  label={content.announcement[props.locale]}
-                  checked={preferences.kinds.announcement}
-                  disabled={is_saving}
-                  is_last
-                  on_change={(enabled) => set_kind_enabled('announcement', enabled)}
-                />
-              </div>
-            </section>
+          <div>
+            <Toggle
+              label={content.pwa_push[props.locale]}
+              checked={preferences.pwa_push_enabled}
+              disabled={is_saving || pwa_toggle_disabled}
+              helper_text={
+                pwa_toggle_disabled
+                  ? content.pwa_install_required[props.locale]
+                  : null
+              }
+              on_change={set_push_enabled}
+            />
+            <Toggle
+              label={content.line[props.locale]}
+              checked={preferences.line_enabled}
+              disabled={is_saving}
+              is_last
+              on_change={set_line_enabled}
+            />
           </div>
+        </section>
 
-          {message || is_saving ? (
-            <p className="mt-4 text-[13px] leading-[1.6] text-[#8a7568]">
-              {is_saving ? content.saving[props.locale] : message}
-            </p>
-          ) : null}
-        </>
-      ) : null}
+        {message || is_saving ? (
+          <p className="mt-4 text-[13px] leading-[1.6] text-[#8a7568]">
+            {is_saving ? content.saving[props.locale] : message}
+          </p>
+        ) : null}
       </div>
 
       <OverlayRoot

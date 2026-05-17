@@ -28,6 +28,9 @@ type pwa_debug_payload = {
   has_line_identity?: boolean | null
   has_beforeinstallprompt?: boolean | null
   is_standalone?: boolean | null
+  display_mode?: string | null
+  navigator_standalone?: boolean | null
+  toggle_disabled_reason?: string | null
   manifest_available?: boolean | null
   manifest_exists?: boolean | null
   manifest_valid?: boolean | null
@@ -157,11 +160,25 @@ export function set_pwa_source_channel_cookie() {
 }
 
 export function is_standalone_pwa() {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
+  return resolve_pwa_install_state().installed
+}
+
+export function resolve_pwa_install_state() {
+  const display_mode_standalone =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(display-mode: standalone)').matches
+  const navigator_standalone =
+    typeof window !== 'undefined' &&
     (window.navigator as Navigator & { standalone?: boolean }).standalone ===
       true
-  )
+  const installed = display_mode_standalone || navigator_standalone
+
+  return {
+    installed,
+    display_mode: display_mode_standalone ? 'standalone' : 'browser',
+    display_mode_standalone,
+    navigator_standalone,
+  }
 }
 
 export function manifest_is_available() {
