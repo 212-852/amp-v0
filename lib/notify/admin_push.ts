@@ -76,6 +76,7 @@ type admin_debug_payload = {
   selected_method?: string | null
   skipped_reason?: string | null
   notification_skipped_reason?: string | null
+  is_active_same_room?: boolean | null
   role?: string | null
   admin_event?: string | null
   support_mode?: string | null
@@ -96,6 +97,7 @@ type admin_notification_debug_event =
   | 'admin_line_notification_rule_checked'
   | 'admin_notification_candidate_checked'
   | 'admin_notification_active_room_checked'
+  | 'admin_notification_active_state_checked'
   | 'admin_line_active_same_room_checked'
   | 'admin_notification_skipped_active_same_room'
   | 'admin_line_notification_skipped_active_same_room'
@@ -111,6 +113,9 @@ type admin_notification_debug_event =
   | 'admin_line_notification_send_started'
   | 'admin_line_notification_send_succeeded'
   | 'admin_line_notification_send_failed'
+  | 'admin_line_send_started'
+  | 'admin_line_send_succeeded'
+  | 'admin_line_send_failed'
   | 'admin_discord_fallback_started'
 
 async function emit_admin_notification_debug(
@@ -478,6 +483,7 @@ export async function route_admin_push_notification(
       should_auto_reply: input.should_auto_reply ?? null,
       auto_reply_skipped_reason: input.auto_reply_skipped_reason ?? null,
       admin_active_in_same_room: active_state.is_active_same_room,
+      is_active_same_room: active_state.is_active_same_room,
       active_room_uuid: active_state.active_room_uuid,
       visibility_state: active_state.visibility_state,
       last_seen_at: active_state.last_seen_at,
@@ -493,6 +499,10 @@ export async function route_admin_push_notification(
     }
 
     await emit_admin_notification_debug(
+      'admin_notification_rule_checked',
+      base_debug,
+    )
+    await emit_admin_notification_debug(
       'admin_notification_candidate_checked',
       base_debug,
     )
@@ -503,6 +513,10 @@ export async function route_admin_push_notification(
 
     await emit_admin_notification_debug(
       'admin_notification_active_room_checked',
+      base_debug,
+    )
+    await emit_admin_notification_debug(
+      'admin_notification_active_state_checked',
       base_debug,
     )
     await emit_admin_notification_debug(
@@ -525,6 +539,14 @@ export async function route_admin_push_notification(
           ...base_debug,
           skipped_reason: 'header_off',
           notification_skipped_reason: 'header_off',
+        },
+      )
+      await emit_admin_notification_debug(
+        'admin_line_notification_skipped_chat_off',
+        {
+          ...base_debug,
+          skipped_reason: 'chat_reception_off',
+          notification_skipped_reason: 'chat_reception_off',
         },
       )
 
@@ -678,6 +700,11 @@ export async function route_admin_push_notification(
       }
 
       if (method === 'line' && candidate.line_user_id) {
+        await emit_admin_notification_debug('admin_line_send_started', {
+          ...base_debug,
+          selected_method: 'line',
+          notification_skipped_reason: null,
+        })
         await emit_admin_notification_debug(
           'admin_line_notification_send_started',
           {
@@ -700,6 +727,15 @@ export async function route_admin_push_notification(
             selected_route: 'line',
           })
         } catch (error) {
+          await emit_admin_notification_debug('admin_line_send_failed', {
+            ...base_debug,
+            selected_method: 'line',
+            skipped_reason: 'line_push_failed',
+            notification_skipped_reason: 'line_push_failed',
+            error_code: 'line_push_failed',
+            error_message:
+              error instanceof Error ? error.message : String(error),
+          })
           await emit_admin_notification_debug(
             'admin_line_notification_send_failed',
             {
@@ -716,6 +752,11 @@ export async function route_admin_push_notification(
           continue
         }
 
+        await emit_admin_notification_debug('admin_line_send_succeeded', {
+          ...base_debug,
+          selected_method: 'line',
+          notification_skipped_reason: null,
+        })
         await emit_admin_notification_debug('admin_line_notification_send_succeeded', {
           ...base_debug,
           selected_method: 'line',
