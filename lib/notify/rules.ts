@@ -118,6 +118,17 @@ export type notify_event =
       should_auto_reply?: boolean | null
       auto_reply_skipped_reason?: string | null
     }
+  | {
+      event: 'customer_notification'
+      trigger: 'support_started' | 'admin_reply'
+      room_uuid: string
+      message_uuid?: string | null
+      customer_user_uuid?: string | null
+      customer_participant_uuid?: string | null
+      title?: string | null
+      message: string
+      source_channel: string
+    }
 
 export type notify_channel = 'discord' | 'discord_action' | 'line' | 'push'
 
@@ -206,6 +217,10 @@ export function should_send_notify(event: notify_event) {
   }
 
   if (event.event === 'admin_notification') {
+    return true
+  }
+
+  if (event.event === 'customer_notification') {
     return true
   }
 
@@ -300,6 +315,13 @@ export function resolve_notify_rule(event: notify_event): notify_rule {
           : 'normal',
       targets: ['admin', 'owner', 'core'],
       channels: ['push', 'discord_action'],
+    }
+  }
+
+  if (event.event === 'customer_notification') {
+    return {
+      priority: 'normal',
+      channels: ['line'],
     }
   }
 

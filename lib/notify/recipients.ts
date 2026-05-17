@@ -26,6 +26,11 @@ export type admin_notify_recipients = {
   has_active_admin_page: boolean
 }
 
+export type customer_notify_target = {
+  customer_user_uuid: string | null
+  customer_participant_uuid: string | null
+}
+
 type user_row = {
   user_uuid: string | null
   display_name: string | null
@@ -86,6 +91,45 @@ export async function load_participant_last_channel(
   const raw = row.last_channel
 
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+}
+
+export async function load_customer_notify_target_for_room(
+  room_uuid: string | null | undefined,
+): Promise<customer_notify_target> {
+  const clean_room_uuid = clean_uuid(room_uuid)
+
+  if (!clean_room_uuid) {
+    return {
+      customer_user_uuid: null,
+      customer_participant_uuid: null,
+    }
+  }
+
+  const result = await supabase
+    .from('participants')
+    .select('participant_uuid, user_uuid')
+    .eq('room_uuid', clean_room_uuid)
+    .eq('role', 'user')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (result.error || !result.data) {
+    return {
+      customer_user_uuid: null,
+      customer_participant_uuid: null,
+    }
+  }
+
+  const row = result.data as {
+    participant_uuid?: string | null
+    user_uuid?: string | null
+  }
+
+  return {
+    customer_user_uuid: clean_uuid(row.user_uuid ?? null),
+    customer_participant_uuid: clean_uuid(row.participant_uuid ?? null),
+  }
 }
 
 /**

@@ -22,6 +22,7 @@ import {
 import {
   load_concierge_recipients,
   load_admin_notify_recipients,
+  load_customer_notify_target_for_room,
   load_line_provider_id_for_user,
   load_participant_last_channel,
   read_requester_display_name,
@@ -309,6 +310,28 @@ export async function notify(
     return { deliveries: result.deliveries }
   }
 
+  if (event.event === 'customer_notification') {
+    const rule = resolve_notify_rule(event)
+
+    if (!should_send_notify(event) || !rule.channels.includes('line')) {
+      return { deliveries: [] }
+    }
+
+    const line = await deliver_customer_line_notification({
+      room_uuid: event.room_uuid,
+      message_uuid: event.message_uuid ?? null,
+      customer_user_uuid: event.customer_user_uuid ?? null,
+      customer_participant_uuid: event.customer_participant_uuid ?? null,
+      title: event.title?.trim() || '新しいメッセージがあります',
+      body: event.message,
+      should_include_body: true,
+    })
+
+    return {
+      deliveries: line.delivery ? [line.delivery] : [],
+    }
+  }
+
   const rule = resolve_notify_rule(event)
 
   const deliveries = rule.channels.map((channel) => {
@@ -354,10 +377,13 @@ async function emit_support_started_admin_chat_debug(
 
 type support_started_customer_line_debug_payload = {
   room_uuid: string
-  action_uuid: string
+  action_uuid?: string | null
+  message_uuid?: string | null
   customer_user_uuid: string | null
   customer_participant_uuid: string | null
+  selected_channel?: string | null
   has_line_identity: boolean
+  line_user_id_exists?: boolean
   line_enabled: boolean
   selected_method: string | null
   skipped_reason: string | null
@@ -367,6 +393,7 @@ type support_started_customer_line_debug_payload = {
 
 async function emit_support_started_customer_line_debug(
   event:
+    | 'customer_notification_rule_checked'
     | 'customer_line_notification_rule_checked'
     | 'customer_line_notification_send_started'
     | 'customer_line_notification_send_succeeded'
@@ -385,29 +412,59 @@ async function emit_support_started_customer_line_debug(
   })
 }
 
-async function deliver_support_started_customer_line(
-  event: Extract<notify_event, { event: 'support_started' }>,
-): Promise<{
+async function resolve_customer_notification_identity(input: {
+  room_uuid: string
+  customer_user_uuid?: string | null
+  customer_participant_uuid?: string | null
+}) {
+  const explicit_user =
+    typeof input.customer_user_uuid === 'string' &&
+    input.customer_user_uuid.trim().length > 0
+      ? input.customer_user_uuid.trim()
+      : null
+  const explicit_participant =
+    typeof input.customer_participant_uuid === 'string' &&
+    input.customer_participant_uuid.trim().length > 0
+      ? input.customer_participant_uuid.trim()
+      : null
+
+  if (explicit_user && explicit_participant) {
+    return {
+      customer_user_uuid: explicit_user,
+      customer_participant_uuid: explicit_participant,
+    }
+  }
+
+  const resolved = await load_customer_notify_target_for_room(input.room_uuid)
+
+  return {
+    customer_user_uuid: explicit_user ?? resolved.customer_user_uuid,
+    customer_participant_uuid:
+      explicit_participant ?? resolved.customer_participant_uuid,
+  }
+}
+
+async function deliver_customer_line_notification(input: {
+  room_uuid: string
+  action_uuid?: string | null
+  message_uuid?: string | null
+  customer_user_uuid?: string | null
+  customer_participant_uuid?: string | null
+  title: string
+  body: string
+  should_include_body: boolean
+}): Promise<{
   delivered: boolean
   delivery: notify_delivery_result | null
 }> {
-  const customer_user_uuid =
-    typeof event.customer_user_uuid === 'string' &&
-    event.customer_user_uuid.trim().length > 0
-      ? event.customer_user_uuid.trim()
-      : null
-  const customer_participant_uuid =
-    typeof event.customer_participant_uuid === 'string' &&
-    event.customer_participant_uuid.trim().length > 0
-      ? event.customer_participant_uuid.trim()
-      : null
+  const { customer_user_uuid, customer_participant_uuid } =
+    await resolve_customer_notification_identity({
+      room_uuid: input.room_uuid,
+      customer_user_uuid: input.customer_user_uuid,
+      customer_participant_uuid: input.customer_participant_uuid,
+    })
 
-  const [route_decision, line_user_id, customer_preferences] = await Promise.all([
-    resolve_chat_external_notification_decision({
-      user_uuid: customer_user_uuid,
-      participant_uuid: customer_participant_uuid,
-      source_channel: event.source_channel,
-    }),
+  const [line_user_id, customer_preferences] = await Promise.all([
     customer_user_uuid
       ? load_line_provider_id_for_user(customer_user_uuid)
       : Promise.resolve(null),
@@ -416,7 +473,7 @@ async function deliver_support_started_customer_line(
       : Promise.resolve(null),
   ])
   const has_line_identity = Boolean(line_user_id)
-  const line_enabled = route_decision.line_enabled
+  const line_enabled = customer_preferences?.line_enabled === true
   const chat_notifications_enabled = customer_preferences?.kinds.chat === true
 
   const route = resolve_support_started_customer_line_route({
@@ -424,21 +481,28 @@ async function deliver_support_started_customer_line(
     has_line_identity,
     line_enabled,
     chat_notifications_enabled,
-    external_selected_route: route_decision.selected_route,
-    external_skipped_reason: route_decision.skipped_reason,
+    external_selected_route: line_enabled ? 'line' : null,
+    external_skipped_reason: line_enabled ? null : 'line_disabled',
   })
 
   const base_debug: support_started_customer_line_debug_payload = {
-    room_uuid: event.room_uuid,
-    action_uuid: event.action_uuid,
+    room_uuid: input.room_uuid,
+    action_uuid: input.action_uuid ?? null,
+    message_uuid: input.message_uuid ?? null,
     customer_user_uuid,
     customer_participant_uuid,
     has_line_identity,
+    line_user_id_exists: has_line_identity,
     line_enabled,
+    selected_channel: route.selected_method,
     selected_method: route.selected_method,
     skipped_reason: route.skipped_reason,
   }
 
+  await emit_support_started_customer_line_debug(
+    'customer_notification_rule_checked',
+    base_debug,
+  )
   await emit_support_started_customer_line_debug(
     'customer_line_notification_rule_checked',
     base_debug,
@@ -457,11 +521,10 @@ async function deliver_support_started_customer_line(
     customer_participant_uuid,
   )
   const last_channel = normalize_line_notify_last_channel(last_channel_raw)
-  const display = format_support_started_customer_line_copy(event)
   const app_origin = env.app_url.trim() || 'https://app.da-nya.com'
   const open_url = resolve_line_new_chat_open_url({
     last_channel,
-    room_uuid: event.room_uuid,
+    room_uuid: input.room_uuid,
     app_origin,
     liff_id: next_public_liff_id(),
   })
@@ -471,6 +534,7 @@ async function deliver_support_started_customer_line(
     {
       ...base_debug,
       selected_method: 'line',
+      selected_channel: 'line',
       skipped_reason: null,
     },
   )
@@ -479,13 +543,13 @@ async function deliver_support_started_customer_line(
     const line_result = await send_line_push_notify({
       line_user_id,
       user_uuid: customer_user_uuid,
-      room_uuid: event.room_uuid,
-      message_uuid: null,
+      room_uuid: input.room_uuid,
+      message_uuid: input.message_uuid ?? null,
       last_channel,
       open_url,
-      title: display.title,
-      body: display.body,
-      should_include_body: display.should_include_body,
+      title: input.title,
+      body: input.body,
+      should_include_body: input.should_include_body,
       selected_route: 'line',
     })
 
@@ -498,6 +562,7 @@ async function deliver_support_started_customer_line(
       {
         ...base_debug,
         selected_method: 'line',
+        selected_channel: 'line',
         skipped_reason: null,
       },
     )
@@ -512,6 +577,7 @@ async function deliver_support_started_customer_line(
       {
         ...base_debug,
         selected_method: 'line',
+        selected_channel: 'line',
         skipped_reason: 'line_push_failed',
         error_code: 'line_push_failed',
         error_message: error instanceof Error ? error.message : String(error),
@@ -520,6 +586,25 @@ async function deliver_support_started_customer_line(
 
     return { delivered: false, delivery: null }
   }
+}
+
+async function deliver_support_started_customer_line(
+  event: Extract<notify_event, { event: 'support_started' }>,
+): Promise<{
+  delivered: boolean
+  delivery: notify_delivery_result | null
+}> {
+  const display = format_support_started_customer_line_copy(event)
+
+  return deliver_customer_line_notification({
+    room_uuid: event.room_uuid,
+    action_uuid: event.action_uuid,
+    customer_user_uuid: event.customer_user_uuid,
+    customer_participant_uuid: event.customer_participant_uuid,
+    title: display.title,
+    body: display.body,
+    should_include_body: display.should_include_body,
+  })
 }
 
 async function notification_route_trace(

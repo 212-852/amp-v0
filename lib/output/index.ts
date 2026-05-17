@@ -50,6 +50,20 @@ function first_message_uuid(messages: archived_message[]) {
   return messages[0]?.archive_uuid ?? null
 }
 
+function first_message_preview(messages: archived_message[]) {
+  const bundle = messages[0]?.bundle
+
+  if (
+    bundle?.bundle_type === 'text' &&
+    typeof bundle.payload?.text === 'string' &&
+    bundle.payload.text.trim()
+  ) {
+    return bundle.payload.text.trim()
+  }
+
+  return '新しいメッセージがあります'
+}
+
 async function emit_reply_delivery_debug(input: {
   event:
     | 'output_reply_channel_resolved'
@@ -208,6 +222,20 @@ export async function output_chat_bundles(
         primary_channel,
         reason,
         sender_role: input.sender_role ?? null,
+      })
+
+      const { notify } = await import('@/lib/notify')
+
+      await notify({
+        event: 'customer_notification',
+        trigger: 'admin_reply',
+        room_uuid: input.room.room_uuid,
+        message_uuid,
+        customer_user_uuid: input.room.user_uuid,
+        customer_participant_uuid: input.room.participant_uuid,
+        title: '新しいメッセージがあります',
+        message: first_message_preview(input.messages),
+        source_channel: input.channel,
       })
     }
   } catch (error) {
